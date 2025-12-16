@@ -1,192 +1,141 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>AI4Doctors</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}"/>
 </head>
-<body class="theme-dark">
-  <header class="topbar">
-    <div class="brand">
-      <img src="{{ url_for('static', filename='img/ai4doctors-logo.svg') }}" class="logo" alt="AI4Doctors">
-      <div class="brand-text">
-        <div class="brand-title">AI4Doctors</div>
-        <div class="brand-subtitle">Curated PubMed context and structured drafting for clinicians</div>
-      </div>
-    </div>
-    <div class="top-actions">
-      <a class="pill" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noopener">PubMed</a>
-      <button class="pill" id="themeToggle" type="button">Theme</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <section class="grid">
-      <div class="card">
-        <div class="card-head">
-          <h2>Upload once</h2>
-          <p>One PDF upload generates clinical summary, ranked differential, plan, PubMed references, and letter-ready structure.</p>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-label="AI4Doctors logo">
+          {% include "logo.svg" %}
         </div>
+        <div class="brandtext">
+          <div class="brandname">AI4Doctors</div>
+          <div class="brandsub">Clinical synthesis and letter generation</div>
+        </div>
+      </div>
 
-        <form id="analyzeForm" class="form">
-          <label class="label">Encounter PDF</label>
-          <input class="file" type="file" name="pdf" accept="application/pdf" required>
+      <div class="top-actions">
+        <a class="pubmed-link" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noopener">PubMed</a>
+        <button id="themeToggle" class="btn ghost" type="button" title="Toggle theme">Theme</button>
+      </div>
+    </header>
 
+    <main class="main">
+      <section class="panel input-panel">
+        <div class="panel-title">Inputs</div>
+
+        <form id="uploadForm" class="upload">
           <div class="row">
-            <div class="col">
-              <label class="label">Clinical focus (optional)</label>
-              <input class="input" type="text" name="clinical_focus" placeholder="Example: glaucoma suspect, AMD, keratitis">
+            <div class="field grow">
+              <label>Encounter PDF</label>
+              <input id="pdfInput" type="file" name="pdf" accept="application/pdf" required/>
             </div>
-            <div class="col">
-              <label class="label">Differential hint (optional)</label>
-              <input class="input" type="text" name="differential_hint" placeholder="Example: MGD, herpes simplex, optic neuropathy">
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn primary" type="submit">Analyze</button>
             </div>
           </div>
-
-          <div class="row actions">
-            <button class="btn primary" type="submit" id="analyzeBtn">Generate analysis</button>
-            <button class="btn" type="button" id="resetBtn">Reset</button>
-            <div class="status" id="analyzeStatus"></div>
-          </div>
-
-          <div class="note" id="scanNote" hidden>
-            This PDF looks like it may be scanned. If the extracted text is thin, PubMed matching and drafting quality will drop. OCR support can be enabled in a future build.
-          </div>
+          <div class="hint">Upload an encounter PDF. Demographics are extracted automatically when present in the note.</div>
         </form>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>Letter generator</h2>
-          <p>Uses the structured encounter. No second upload. Produces clean, copyable rich text.</p>
-        </div>
-
-        <div class="form">
-          <div class="row">
-            <div class="col">
-              <label class="label">Letter type</label>
-              <select class="input" id="letterType">
-                <option value="referral_oph">Create a referral to an ophthalmologist</option>
-                <option value="referral_od">Create a referral to an optometrist</option>
-                <option value="report_gp">Create a report to GP</option>
-                <option value="report_patient">Create a report to the patient</option>
-                <option value="report_insurance">Create a report to the insurance company</option>
-              </select>
-            </div>
-            <div class="col">
-              <label class="label">Reason for referral (required)</label>
-              <input class="input" id="referralReason" placeholder="Example: confirm glaucoma diagnosis and advise on escalation thresholds" required>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="col">
-              <label class="label">Referring doctor</label>
-              <input class="input" id="referringDoctor" placeholder="Dr Henry Reis">
-            </div>
-            <div class="col">
-              <label class="label">Refer to</label>
-              <input class="input" id="referTo" placeholder="Dr [Name]">
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="col">
-              <label class="label">Special requests (optional)</label>
-              <input class="input" id="specialRequests" placeholder="Example: please consider accepting ongoing shared-care follow-up">
-            </div>
-            <div class="col">
-              <label class="label">Additional context (optional)</label>
-              <input class="input" id="additionalContext" placeholder="Example: patient prefers morning appointments, anxious about dilation">
-            </div>
-          </div>
-
-          <details class="details" open>
-            <summary>Patient demographics (required for clinician letters)</summary>
-            <div class="row">
-              <div class="col">
-                <label class="label">Patient name</label>
-                <input class="input" id="demoName">
-              </div>
-              <div class="col">
-                <label class="label">DOB</label>
-                <input class="input" id="demoDob" placeholder="YYYY/MM/DD">
-              </div>
-            </div>
-            <div class="row">
-              <div class="col">
-                <label class="label">PHN</label>
-                <input class="input" id="demoPhn">
-              </div>
-              <div class="col">
-                <label class="label">Phone</label>
-                <input class="input" id="demoPhone">
-              </div>
-            </div>
-            <div class="row">
-              <div class="col">
-                <label class="label">Address</label>
-                <input class="input" id="demoAddress">
-              </div>
-              <div class="col">
-                <label class="label">Appointment date</label>
-                <input class="input" id="demoAppt" placeholder="YYYY/MM/DD">
-              </div>
-            </div>
-          </details>
-
-          <div class="row actions">
-            <button class="btn primary" type="button" id="letterBtn" disabled>Generate letter</button>
-            <button class="btn" type="button" id="copyRichBtn" disabled>Copy rich text</button>
-            <button class="btn" type="button" id="copyPlainBtn" disabled>Copy plain text</button>
-            <div class="status" id="letterStatus"></div>
-          </div>
-        </div>
 
         <div class="divider"></div>
 
-        <div class="output">
-          <h3>Letter output</h3>
-          <div class="editor" id="letterEditor" contenteditable="true" spellcheck="false"></div>
-          <div class="tiny muted" id="letterWarnings"></div>
+        <div class="row">
+          <div class="field grow">
+            <label>Letter type</label>
+            <select id="letterType">
+              <option value="">Select</option>
+              <option value="referral_ophthalmologist">Referral to ophthalmologist</option>
+              <option value="referral_optometrist">Referral to optometrist</option>
+              <option value="report_gp">Report to GP</option>
+              <option value="report_patient">Report to patient</option>
+              <option value="report_insurance">Report to insurance company</option>
+            </select>
+          </div>
+          <div class="field grow">
+            <label>Referring doctor</label>
+            <input id="referringDoctor" type="text" placeholder="Dr. Henry Reis"/>
+          </div>
+          <div class="field grow">
+            <label>Refer to</label>
+            <input id="referTo" type="text" placeholder="Recipient name"/>
+          </div>
         </div>
-      </div>
-    </section>
 
-    <section class="grid">
-      <div class="card">
-        <div class="card-head">
-          <h2>Structured summary</h2>
-          <p>Extracted demographics and metadata from the PDF, plus clinical notes you add.</p>
+        <div class="row">
+          <div class="field grow">
+            <label>Reason for referral <span class="req">*</span></label>
+            <input id="reason" type="text" placeholder="Required"/>
+          </div>
         </div>
-        <div class="kv" id="summaryKV">
-          <div class="kv-row"><div class="kv-key">Status</div><div class="kv-val muted">Awaiting upload</div></div>
-        </div>
-      </div>
 
-      <div class="card">
-        <div class="card-head">
-          <h2>AI differential and plan</h2>
-          <p>Ranked differential, confirmation steps, and correlated plan. PubMed references shown below.</p>
+        <div class="row">
+          <div class="field grow">
+            <label>Special requests</label>
+            <textarea id="special" rows="2" placeholder="Optional"></textarea>
+          </div>
+          <div class="field grow">
+            <label>Additional context</label>
+            <textarea id="context" rows="2" placeholder="Optional"></textarea>
+          </div>
         </div>
-        <div class="analysis" id="analysisBlock">
-          <div class="muted">No analysis yet.</div>
-        </div>
-        <div class="divider"></div>
-        <h3>References</h3>
-        <div class="refs" id="refsBlock">
-          <div class="muted">No references yet.</div>
-        </div>
-      </div>
-    </section>
-  </main>
 
-  <footer class="footer">
-    <div class="footer-left">AI4Doctors • Version {{ app_version }} • {{ git_sha }} {% if build_time %}• {{ build_time }}{% endif %}</div>
-    <div class="footer-right">Created by Dr Henry Reis for clinicians who value clarity, speed, and evidence</div>
-  </footer>
+        <details class="demodetails">
+          <summary>Patient demographics (auto extracted, optional override)</summary>
+          <div class="grid6">
+            <div class="field"><label>Name</label><input id="d_name" type="text"/></div>
+            <div class="field"><label>DOB</label><input id="d_dob" type="text"/></div>
+            <div class="field"><label>PHN</label><input id="d_phn" type="text"/></div>
+            <div class="field"><label>Phone</label><input id="d_phone" type="text"/></div>
+            <div class="field"><label>Address</label><input id="d_address" type="text"/></div>
+            <div class="field"><label>Date of visit</label><input id="d_appt" type="text"/></div>
+          </div>
+        </details>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+        <div class="row">
+          <button id="generateLetter" class="btn primary" type="button" disabled>Generate letter</button>
+          <button id="copyLetterRich" class="btn" type="button" disabled>Copy rich text</button>
+          <button id="copyLetterPlain" class="btn ghost" type="button" disabled>Copy plain text</button>
+          <div id="status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="results">
+        <div class="cols">
+          <div class="col">
+            <div class="colhead">Diagnosis</div>
+            <div id="dxBox" class="card scroll">
+              <div class="muted">Upload a PDF to generate results.</div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="colhead">Treatment</div>
+            <div id="txBox" class="card scroll">
+              <div class="muted">Plan will appear here with citations.</div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="colhead">Letter</div>
+            <div id="letterBox" class="card scroll">
+              <div class="muted">Generate a letter to view and copy rich text.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-left">Version {{ app_version }}</div>
+      <div class="footer-mid">{{ footer_blurb }}</div>
+      <div class="footer-right">AI4Doctors</div>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
