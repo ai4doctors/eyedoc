@@ -1,15 +1,121 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>AI4Doctors</title>
-    <link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI4Doctors</title>
+  <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-    <h1>AI4Doctors</h1>
-    <form action="/process" method="post" enctype="multipart/form-data">
-        <input type="file" name="pdf" accept="application/pdf" required>
-        <button type="submit">Process PDF</button>
-    </form>
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">AI4</div>
+      <div class="brandtext">
+        <div class="title">AI4Doctors</div>
+        <div class="subtitle">Clinical synthesis and letter generation</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="pill" id="pubmedBtn" type="button">PubMed</button>
+      <button class="pill" id="themeBtn" type="button">Theme</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="cardtitle">Inputs</div>
+
+    <div class="row">
+      <div class="col">
+        <div class="label">Encounter PDF</div>
+        <div class="fileRow">
+          <input id="pdf" type="file" accept="application/pdf" />
+          <button class="primary" id="analyzeBtn" type="button">Analyze</button>
+        </div>
+        <div class="hint">Upload an encounter PDF. Demographics are extracted automatically when present in the note.</div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <div class="label">Letter type</div>
+        <select id="letter_type">
+          <option value="">Select</option>
+          <option>Referral letter</option>
+          <option>Consult note</option>
+          <option>Follow up letter</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="label">Referring doctor</div>
+        <input id="referring_doctor" value="Dr. Henry Reis" />
+      </div>
+      <div class="field">
+        <div class="label">Refer to</div>
+        <input id="recipient_name" placeholder="Recipient name" />
+      </div>
+      <div class="field">
+        <div class="label">Reason for referral <span class="req">*</span></div>
+        <input id="reason_for_referral" placeholder="Required" />
+      </div>
+      <div class="field">
+        <div class="label">Special requests</div>
+        <input id="special_requests" placeholder="Optional" />
+      </div>
+      <div class="field">
+        <div class="label">Additional context</div>
+        <input id="additional_context" placeholder="Optional" />
+      </div>
+    </div>
+
+    <button class="accordion" id="demoToggle" type="button">
+      Patient demographics <span class="muted">(auto extracted, optional override)</span>
+    </button>
+    <div class="panel" id="demoPanel">
+      <div class="grid3">
+        <div class="field">
+          <div class="label">Name</div>
+          <input id="patient_name" placeholder="Auto" />
+        </div>
+        <div class="field">
+          <div class="label">DOB</div>
+          <input id="patient_dob" placeholder="Auto" />
+        </div>
+        <div class="field">
+          <div class="label">PHN</div>
+          <input id="patient_phn" placeholder="Auto" />
+        </div>
+      </div>
+    </div>
+
+    <div class="buttonRow">
+      <button class="primary" id="generateBtn" type="button">Generate letter</button>
+      <button class="pill" id="copyRichBtn" type="button">Copy rich text</button>
+      <button class="pill" id="copyPlainBtn" type="button">Copy plain text</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sectitle">Diagnosis</div>
+    <div class="box" id="diagnosisBox">Upload a PDF to generate results.</div>
+  </div>
+
+  <div class="section">
+    <div class="sectitle">Treatment</div>
+    <div class="box" id="treatmentBox">Upload a PDF to generate results.</div>
+  </div>
+
+  <div class="section">
+    <div class="sectitle">Letter</div>
+    <textarea class="textarea" id="letterBox" placeholder="Generate letter to see output"></textarea>
+  </div>
+
+  <div class="section">
+    <div class="sectitle">PubMed bibliography</div>
+    <div class="box" id="pubmedBox">Click Analyze to populate citations.</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script src="/static/app.js"></script>
 </body>
 </html>
