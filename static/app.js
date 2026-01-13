@@ -5,7 +5,7 @@ function toast(msg){
   const el = document.getElementById("toast")
   el.textContent = msg
   el.style.display = "block"
-  setTimeout(() => { el.style.display = "none" }, 2200)
+  setTimeout(() => { el.style.display = "none" }, 2400)
 }
 
 function getForm(){
@@ -30,8 +30,7 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 })
 
 document.getElementById("pubmedBtn").addEventListener("click", () => {
-  const box = document.getElementById("pubmedBox")
-  box.scrollIntoView({behavior:"smooth"})
+  document.getElementById("pubmedBox").scrollIntoView({behavior:"smooth"})
 })
 
 document.getElementById("analyzeBtn").addEventListener("click", async () => {
@@ -48,12 +47,13 @@ document.getElementById("analyzeBtn").addEventListener("click", async () => {
   toast("Analyzing")
   const res = await fetch("/analyze", { method:"POST", body: fd })
   const json = await res.json()
+
   if(!json.ok){
     toast(json.error || "Analyze failed")
     return
   }
 
-  latestAnalysis = json.data
+  latestAnalysis = json.data || {}
 
   const patient = latestAnalysis.patient || {}
   document.getElementById("patient_name").value = patient.name || ""
@@ -80,19 +80,28 @@ document.getElementById("generateBtn").addEventListener("click", async () => {
     return
   }
 
-  const payload = { form: getForm(), analysis: latestAnalysis || {} }
-
-  toast("Generating letter")
-  const res = await fetch("/generate_letter", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify(payload)
-  })
-  const json = await res.json()
-  if(!json.ok){
-    toast("Letter generation failed")
+  const fileInput = document.getElementById("pdf")
+  const file = fileInput.files && fileInput.files[0]
+  if(!file){
+    toast("Choose a PDF first")
     return
   }
+
+  const payload = { form: getForm(), analysis: latestAnalysis || {} }
+
+  const fd = new FormData()
+  fd.append("pdf", file)
+  fd.append("payload", JSON.stringify(payload))
+
+  toast("Generating letter")
+  const res = await fetch("/generate_letter", { method:"POST", body: fd })
+  const json = await res.json()
+
+  if(!json.ok){
+    toast(json.error || "Letter generation failed")
+    return
+  }
+
   document.getElementById("letterBox").value = json.letter_plain || ""
   toast("Letter ready")
 })
