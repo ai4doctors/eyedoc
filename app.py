@@ -2,14 +2,14 @@
 import os
 import json
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Flask, render_template, request, jsonify, send_file
-
 import PyPDF2
-
-import httpx
+import requests
+from flask import Flask, jsonify, render_template, request, send_file
 
 try:
     from openai import OpenAI
@@ -23,17 +23,19 @@ except Exception:
     canvas = None
     rl_letter = None
 
-APP_VERSION = os.getenv("APP_VERSION", "2026.2")
+APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
-app = Flask(
-    __name__,
-    template_folder="templates",
-    static_folder="static",
-    static_url_path="/static",
-)
+app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
+
+# In memory job store
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def clamp_text(s: str, limit: int) -> str:
+    return (s or "")[:limit]
 
 def extract_pdf_text(file_storage) -> str:
     reader = PyPDF2.PdfReader(file_storage)
@@ -50,17 +52,16 @@ def client_ready() -> Tuple[bool, str]:
         return False, "OPENAI_API_KEY is missing"
     return True, ""
 
+def model_name() -> str:
+    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4.1")
+
 def get_client():
     ok, _ = client_ready()
     if not ok:
         return None
-    return OpenAI(api_key=os.getenv("OPENAI_API_KEY").strip())
-
-def model_name() -> str:
-    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4.1")
-
-def clamp_text(s: str, limit: int) -> str:
-    return (s or "")[:limit]
+    key = os.getenv("OPENAI_API_KEY").strip()
+    # Set a sane timeout to avoid hanging requests
+    return OpenAI(api_key=key, timeout=60)
 
 def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
     if not s:
@@ -81,7 +82,7 @@ def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
             pass
     return None, "Model did not return valid json"
 
-def llm_json(prompt: str) -> Tuple[Optional[Dict[str, Any]], str]:
+def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, Any]], str]:
     client = get_client()
     if client is None:
         ok, msg = client_ready()
@@ -93,7 +94,7 @@ def llm_json(prompt: str) -> Tuple[Optional[Dict[str, Any]], str]:
                 {"role": "system", "content": "Return strict JSON only. No markdown. No extra text."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.2,
+            temperature=temperature,
         )
         text = (res.choices[0].message.content or "").strip()
         obj, err = safe_json_loads(text)
@@ -106,13 +107,12 @@ def llm_json(prompt: str) -> Tuple[Optional[Dict[str, Any]], str]:
 ANALYZE_SCHEMA: Dict[str, Any] = {
     "provider_name": "",
     "patient_block": "",
+    "summary_html": "",
     "diagnoses": [],
     "plan": [],
-    "pubmed": [],
+    "references": [],
     "warnings": [],
-    "raw_excerpt": ""
 }
-
 
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
@@ -122,6 +122,7 @@ You are a clinician assistant. You are given an encounter note extracted from a 
 Output VALID JSON only, matching this schema exactly:
 provider_name: string
 patient_block: string
+summary_html: string
 diagnoses: array of items, each item:
   number: integer
   code: string
@@ -133,111 +134,101 @@ plan: array of items, each item:
   bullets: array of short strings
   aligned_dx_numbers: array of integers
 warnings: array of short strings
-raw_excerpt: string
 
 Rules:
 1 Use only facts supported by the note. If unknown, leave empty.
-2 Do not invent demographics. patient_block must only include what is present, formatted as a clean header block.
-3 diagnoses must be problem list style, include laterality and severity when present.
-4 plan bullets must be actionable, conservative, and specific.
-5 raw_excerpt must be the first 1200 characters of the note.
+2 patient_block must only include what is present, formatted as a clean header block with <br> line breaks.
+3 summary_html should be a clean summary section with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
+4 diagnoses must be problem list style, include laterality and severity when present.
+5 plan bullets must be actionable, conservative, and aligned to diagnoses.
 
 Encounter note:
 {excerpt}
 """.strip()
 
-
-
-
-
-def pubmed_search(queries: List[str], max_items: int = 8, timeout_s: float = 8.0) -> List[Dict[str, Any]]:
-    """
-    Lightweight PubMed retrieval via NCBI E-utilities.
-    Returns a numbered bibliography list. No PHI is sent.
-    """
-    q = " OR ".join([q for q in queries if q.strip()][:4]).strip()
-    if not q:
+def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
+    # NCBI E utilities. Keep it lightweight, avoid rate limits
+    uniq_terms = []
+    for t in terms:
+        t = (t or "").strip()
+        if t and t.lower() not in [x.lower() for x in uniq_terms]:
+            uniq_terms.append(t)
+    if not uniq_terms:
         return []
-    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
-    try:
-        with httpx.Client(timeout=timeout_s) as client:
-            esearch = client.get(
-                base + "esearch.fcgi",
-                params={"db": "pubmed", "term": q, "retmode": "json", "retmax": str(max_items)},
+
+    pmids: List[str] = []
+    for term in uniq_terms[:6]:
+        q = f"{term} ophthalmology"
+        try:
+            r = requests.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                params={"db": "pubmed", "term": q, "retmax": 3, "retmode": "json"},
+                timeout=10,
             )
-            esearch.raise_for_status()
-            ids = (esearch.json().get("esearchresult", {}).get("idlist") or [])[:max_items]
-            if not ids:
-                return []
-            esummary = client.get(
-                base + "esummary.fcgi",
-                params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
-            )
-            esummary.raise_for_status()
-            result = esummary.json().get("result", {})
-            out: List[Dict[str, Any]] = []
-            n = 1
+            r.raise_for_status()
+            data = r.json()
+            ids = (data.get("esearchresult") or {}).get("idlist") or []
             for pid in ids:
-                item = result.get(pid, {})
-                if not isinstance(item, dict):
-                    continue
-                title = (item.get("title") or "").strip().rstrip(".")
-                source = (item.get("source") or "").strip()
-                pubdate = (item.get("pubdate") or "").strip()
-                authors = item.get("authors") or []
-                author_text = ""
-                if isinstance(authors, list) and authors:
-                    names = [a.get("name","").strip() for a in authors if isinstance(a, dict)]
-                    names = [x for x in names if x]
-                    author_text = ", ".join(names[:3])
-                    if len(names) > 3:
-                        author_text += " et al"
-                parts = [p for p in [author_text, title, source, pubdate] if p]
-                citation = ". ".join(parts) + "."
-                out.append({"number": n, "citation": citation, "pmid": str(pid)})
-                n += 1
-            return out
+                if pid not in pmids:
+                    pmids.append(pid)
+            if len(pmids) >= max_items:
+                break
+        except Exception:
+            continue
+
+    if not pmids:
+        return []
+
+    pmids = pmids[:max_items]
+    try:
+        r = requests.get(
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+            params={"db": "pubmed", "id": ",".join(pmids), "retmode": "json"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        result = data.get("result") or {}
+        out: List[Dict[str, str]] = []
+        for i, pid in enumerate(pmids, start=1):
+            item = result.get(pid) or {}
+            title = (item.get("title") or "").strip().rstrip(".")
+            source = (item.get("source") or "").strip()
+            pubdate = (item.get("pubdate") or "").strip()
+            authors = item.get("authors") or []
+            first_author = (authors[0].get("name") if authors else "") or ""
+            citation = " ".join([x for x in [first_author, title, source, pubdate] if x]).strip()
+            out.append({"number": str(i), "pmid": pid, "citation": citation})
+        return out
     except Exception:
         return []
 
-def refs_enrich_prompt(analysis_core: Dict[str, Any], pubmed: List[Dict[str, Any]]) -> str:
+def assign_citations_prompt(analysis: Dict[str, Any]) -> str:
+    # Ask model to add refs based on the fetched reference list
     return f"""
-You are a clinician assistant.
+You are a clinician assistant. You are given an analysis object and a numbered reference list.
+Assign appropriate reference numbers to each diagnosis and plan item.
 
-You will assign evidence reference numbers to diagnoses and plan items using ONLY the provided PubMed bibliography.
-Do not change wording of bullets unless required for clarity. Do not invent diagnoses or plan items.
-
-Return VALID JSON only matching this schema:
-diagnoses: array of items:
+Output VALID JSON only with this schema:
+diagnoses: array of items, each item:
   number: integer
-  code: string
-  label: string
-  bullets: array of short strings
   refs: array of integers
-plan: array of items:
+plan: array of items, each item:
   number: integer
-  title: string
-  bullets: array of short strings
-  aligned_dx_numbers: array of integers
   refs: array of integers
 
 Rules:
-1 refs values must be bibliography numbers. Use 1 to {len(pubmed)}.
-2 If no citation fits, leave refs empty.
-3 Try to assign at least one reference per diagnosis and per plan item when possible.
-4 Keep refs short, no more than 3 per item.
+1 Use only reference numbers that exist in references.
+2 If uncertain, leave refs empty.
+3 Prefer 1 to 3 refs per item.
 
-Analysis core:
-{json.dumps(analysis_core, ensure_ascii=False)}
-
-PubMed bibliography:
-{json.dumps(pubmed, ensure_ascii=False)}
+Analysis:
+{json.dumps(analysis, ensure_ascii=False)}
 """.strip()
-def letter_prompt(note_text: str, form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-    excerpt = clamp_text(note_text, 16000)
 
+def letter_prompt(form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     return f"""
-You are a clinician assistant. Create an Output Communication letter.
+You are a clinician assistant. Create an Output Communication report.
 
 Output VALID JSON only with this schema:
 letter_plain: string
@@ -247,119 +238,124 @@ Tone rules:
 If recipient_type equals "Patient", write in patient friendly accessible language while staying professional.
 Otherwise write in technical physician style that is precise and concise.
 
-Special requests handling:
-special_requests is an intent signal. Never quote it. Never repeat it. Never refer to it as "special requests".
-Do not copy any phrase from it verbatim, even short phrases. Use it only to adjust emphasis, framing, and closing language.
-If the intent suggests building trust, use respectful, confidence building language and clear next steps.
-If the intent suggests collaboration or future referrals, weave it subtly into the professional closing without sounding salesy.
+Special requests:
+special_requests is an intent signal. Never quote it verbatim. Never paste it. Use it indirectly and naturally.
 
-Structure rules for letter_plain:
-1 Start with patient_block exactly as provided, then a blank line.
-2 Use headings and short paragraphs with good spacing.
-3 Include a one line Purpose statement using letter_type and reason_for_referral.
-4 Include sections: Clinical summary, Assessment, Plan, Evidence, Closing, Disclaimer.
-5 In Assessment and Plan, reference evidence with bracket numbers like [1] that point to the Evidence section.
-6 Evidence section must list pubmed items in order as: [n] citation. Include PMID if present.
-7 Never invent facts. If something is not in the note, omit it.
+Structure:
+Start with patient_block as a header block, then sections with short paragraphs:
+Clinical summary
+Assessment
+Plan
+Evidence
+Closing
+Disclaimer
 
-Structure rules for letter_html:
-Provide the same content as clean HTML with headings and paragraphs.
-Use <h3> for headings, <p> for paragraphs, and <br> only inside the patient block.
+Citations:
+Use bracket numbers like [1] in Assessment and Plan. Evidence section lists references in order.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
 
 Analysis:
 {json.dumps(analysis, ensure_ascii=False)}
-
-Encounter note:
-{excerpt}
 """.strip()
 
+def new_job_id() -> str:
+    return f"job_{int(time.time() * 1000)}_{os.urandom(4).hex()}"
+
+def set_job(job_id: str, **updates: Any) -> None:
+    with JOBS_LOCK:
+        job = JOBS.get(job_id) or {}
+        job.update(updates)
+        JOBS[job_id] = job
+
+def get_job(job_id: str) -> Dict[str, Any]:
+    with JOBS_LOCK:
+        return dict(JOBS.get(job_id) or {})
+
+def run_analysis_job(job_id: str, note_text: str) -> None:
+    set_job(job_id, status="processing", updated_at=now_utc_iso())
+    obj, err = llm_json(analyze_prompt(note_text))
+    if err or not obj:
+        set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
+        return
+
+    analysis = dict(ANALYZE_SCHEMA)
+    analysis.update(obj)
+
+    # Fetch PubMed references based on diagnoses
+    terms = []
+    for dx in analysis.get("diagnoses") or []:
+        if isinstance(dx, dict):
+            label = (dx.get("label") or "").strip()
+            if label:
+                terms.append(label)
+    references = pubmed_fetch_for_terms(terms)
+    analysis["references"] = references
+
+    # Assign citation numbers
+    if references:
+        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
+        if not cites_err and cites_obj:
+            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+            for dx in analysis.get("diagnoses") or []:
+                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
+                    dx["refs"] = dx_map.get(dx["number"], [])
+            for pl in analysis.get("plan") or []:
+                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
+                    pl["refs"] = pl_map.get(pl["number"], [])
+
+    set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 @app.get("/")
 def index():
     return render_template("index.html", version=APP_VERSION)
 
-@app.post("/analyze")
-def analyze():
+@app.post("/analyze_start")
+def analyze_start():
     file = request.files.get("pdf")
     if not file:
         return jsonify({"ok": False, "error": "No PDF uploaded"}), 400
-
-    text = extract_pdf_text(file)
-
-    core_obj, err = llm_json(analyze_prompt(text))
-    if err:
-        return jsonify({"ok": False, "error": err}), 200
-
-    core = {
-        "provider_name": (core_obj or {}).get("provider_name", "") or "",
-        "patient_block": (core_obj or {}).get("patient_block", "") or "",
-        "diagnoses": (core_obj or {}).get("diagnoses", []) or [],
-        "plan": (core_obj or {}).get("plan", []) or [],
-        "warnings": (core_obj or {}).get("warnings", []) or [],
-        "raw_excerpt": clamp_text(text, 1200),
-    }
-
-    dx_list = core.get("diagnoses") or []
-    queries: List[str] = []
-    if isinstance(dx_list, list):
-        for d in dx_list[:4]:
-            if isinstance(d, dict):
-                q = (d.get("label") or "").strip()
-                if q:
-                    queries.append(q)
-
-    pubmed = pubmed_search(queries, max_items=8)
-
-    enrich_obj, enrich_err = llm_json(refs_enrich_prompt(core, pubmed))
-    diagnoses = core.get("diagnoses") or []
-    plan = core.get("plan") or []
-    if not enrich_err and enrich_obj:
-        diagnoses = enrich_obj.get("diagnoses") or diagnoses
-        plan = enrich_obj.get("plan") or plan
-
-    data = dict(ANALYZE_SCHEMA)
-    data.update({
-        "provider_name": core.get("provider_name", ""),
-        "patient_block": core.get("patient_block", ""),
-        "diagnoses": diagnoses,
-        "plan": plan,
-        "pubmed": pubmed,
-        "warnings": core.get("warnings", []),
-        "raw_excerpt": core.get("raw_excerpt", ""),
-    })
-
-    return jsonify({"ok": True, "data": data}), 200
-
-@app.post("/generate")
-def generate():
-    file = request.files.get("pdf")
-    payload_text = request.form.get("payload", "{}")
-    try:
-        payload = json.loads(payload_text)
-    except Exception:
-        payload = {}
-
-    if not file:
-        return jsonify({"ok": False, "error": "No PDF uploaded"}), 400
-
-    form = payload.get("form", {}) or {}
-    analysis = payload.get("analysis", {}) or {}
 
     note_text = extract_pdf_text(file)
-    obj, err = llm_json(letter_prompt(note_text, form, analysis))
-    if err:
-        return jsonify({"ok": False, "error": err}), 200
+    if not note_text:
+        return jsonify({"ok": False, "error": "No text extracted from PDF"}), 200
 
-    letter_plain = (obj or {}).get("letter_plain", "") or ""
-    letter_html = (obj or {}).get("letter_html", "") or ""
+    job_id = new_job_id()
+    set_job(job_id, status="waiting", updated_at=now_utc_iso())
 
-    if not letter_plain.strip():
-        return jsonify({"ok": False, "error": "Empty output generated"}), 200
+    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
+    t.start()
 
-    return jsonify({"ok": True, "letter_plain": letter_plain.strip(), "letter_html": letter_html.strip()}), 200
+    return jsonify({"ok": True, "job_id": job_id}), 200
+
+@app.get("/analyze_status")
+def analyze_status():
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "Missing job_id"}), 400
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
+    return jsonify({"ok": True, **job}), 200
+
+@app.post("/generate_report")
+def generate_report():
+    payload = request.get_json(silent=True) or {}
+    form = payload.get("form") or {}
+    analysis = payload.get("analysis") or {}
+
+    obj, err = llm_json(letter_prompt(form, analysis))
+    if err or not obj:
+        return jsonify({"ok": False, "error": err or "Generation failed"}), 200
+
+    letter_plain = (obj.get("letter_plain") or "").strip()
+    letter_html = (obj.get("letter_html") or "").strip()
+    if not letter_plain:
+        return jsonify({"ok": False, "error": "Empty output"}), 200
+
+    return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
 @app.post("/export_pdf")
 def export_pdf():
@@ -373,18 +369,18 @@ def export_pdf():
 
     out_path = "/tmp/ai4health_output.pdf"
     c = canvas.Canvas(out_path, pagesize=rl_letter)
-    width, height = rl_letter
+    _, height = rl_letter
 
     left = 54
     top = height - 54
-    line_height = 12
+    line_height = 13
     y = top
 
-    c.setFont("Times-Roman", 11)
+    c.setFont("Times-Roman", 12)
 
     def draw_wrapped(line: str):
         nonlocal y
-        max_chars = 95
+        max_chars = 92
         line = line.rstrip()
         if not line:
             y -= line_height
@@ -395,7 +391,7 @@ def export_pdf():
             y -= line_height
             if y < 72:
                 c.showPage()
-                c.setFont("Times-Roman", 11)
+                c.setFont("Times-Roman", 12)
                 y = top
         c.drawString(left, y, line)
         y -= line_height
@@ -403,7 +399,7 @@ def export_pdf():
     for raw_line in text.splitlines():
         if y < 72:
             c.showPage()
-            c.setFont("Times-Roman", 11)
+            c.setFont("Times-Roman", 12)
             y = top
         draw_wrapped(raw_line)
 
@@ -421,6 +417,3 @@ def healthz():
         "openai_message": msg,
         "model": model_name(),
     }), 200
-
-if __name__ == "__main__":
-    app.run(debug=True)

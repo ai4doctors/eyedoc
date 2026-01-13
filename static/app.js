@@ -1,7 +1,9 @@
 
 let uploadedFile = null
+let jobId = ""
 let latestAnalysis = null
 let latestLetterHtml = ""
+let theme = "dark"
 
 function el(id){ return document.getElementById(id) }
 
@@ -12,29 +14,105 @@ function toast(msg){
   setTimeout(() => { t.style.display = "none" }, 2400)
 }
 
-function setStatus(msg){
-  el("status").textContent = msg
+function setAnalyzeStatus(state){
+  el("analyzeStatus").textContent = `Wait for analysis to complete (${state})`
 }
 
 function openPicker(){
   el("file").click()
 }
 
-function buildForm(){
-  const recipientType = el("recipientType").value
-  const toWhom = el("toWhom").value.trim()
-  const reasonDx = el("reasonDx").value
-  const reasonOther = el("reasonOther").value.trim()
-  const reason = (reasonDx === "Other") ? reasonOther : reasonDx
+function clearAll(){
+  uploadedFile = null
+  jobId = ""
+  latestAnalysis = null
+  latestLetterHtml = ""
+  el("file").value = ""
+  el("summaryBox").innerHTML = "Upload exam notes to begin."
+  el("dxBox").textContent = "No data yet."
+  el("planBox").textContent = "No data yet."
+  el("refBox").textContent = "No data yet."
+  el("letter").value = ""
+  el("fromDoctor").value = ""
+  el("toWhom").value = ""
+  el("specialRequests").value = ""
+  el("reasonDx").innerHTML = '<option value="">REASON:</option>'
+  el("reasonOther").classList.add("hidden")
+  el("reasonOther").value = ""
+  setAnalyzeStatus("waiting")
+  toast("Reset complete")
+}
 
-  return {
-    letter_type: el("letterType").value,
-    recipient_type: recipientType,
-    to_whom: toWhom,
-    from_doctor: el("fromDoctor").value.trim(),
-    reason_for_referral: reason,
-    special_requests: el("specialRequests").value.trim()
+function applyTheme(){
+  if(theme === "light"){
+    document.body.classList.add("light")
+  }else{
+    document.body.classList.remove("light")
   }
+}
+
+function toggleTheme(){
+  theme = (theme === "dark") ? "light" : "dark"
+  applyTheme()
+  toast(`Theme ${theme}`)
+}
+
+function buildReasonOptions(){
+  const sel = el("reasonDx")
+  sel.innerHTML = '<option value="">REASON:</option>'
+  const dx = (latestAnalysis && latestAnalysis.diagnoses) ? latestAnalysis.diagnoses : []
+  dx.forEach(item => {
+    const o = document.createElement("option")
+    const code = item.code ? `${item.code} ` : ""
+    const val = `${code}${item.label || ""}`.trim()
+    o.value = val
+    o.textContent = val ? `${item.number}. ${val}` : `${item.number}.`
+    sel.appendChild(o)
+  })
+  const other = document.createElement("option")
+  other.value = "Other"
+  other.textContent = "Other"
+  sel.appendChild(other)
+}
+
+function setToPrefix(){
+  const t = el("recipientType").value
+  const v = el("toWhom").value.trim()
+
+  const shouldPrefix = (t === "Specialist" || t === "Family physician")
+  if(shouldPrefix){
+    if(!v){
+      el("toWhom").value = "Dr. "
+    }else if(!v.toLowerCase().startsWith("dr.")){
+      el("toWhom").value = "Dr. " + v
+    }
+    el("toWhom").placeholder = "TO:"
+  }else{
+    if(v.toLowerCase().startsWith("dr.")){
+      el("toWhom").value = v.replace(/^dr\.\s*/i, "")
+    }
+    el("toWhom").placeholder = "TO:"
+  }
+}
+
+function renderSummary(){
+  const box = el("summaryBox")
+  if(!latestAnalysis){
+    box.innerHTML = "No data yet."
+    return
+  }
+  const header = (latestAnalysis.patient_block || "").trim()
+  const summary = (latestAnalysis.summary_html || "").trim()
+  let html = ""
+  if(header){
+    html += `<div class="patientBlock">${header}</div>`
+  }
+  if(summary){
+    html += summary
+  }else{
+    html += "<p>No summary extracted.</p>"
+  }
+  box.innerHTML = html
 }
 
 function renderDx(){
@@ -114,101 +192,141 @@ function renderPlan(){
   box.appendChild(frag)
 }
 
-function populateReason(){
-  const sel = el("reasonDx")
-  const dx = (latestAnalysis && latestAnalysis.diagnoses) ? latestAnalysis.diagnoses : []
-  sel.innerHTML = ""
-  const opt0 = document.createElement("option")
-  opt0.value = ""
-  opt0.textContent = "Reason for referral"
-  sel.appendChild(opt0)
-
-  dx.forEach(item => {
-    const o = document.createElement("option")
-    const code = item.code ? `${item.code} ` : ""
-    const val = `${code}${item.label || ""}`.trim()
-    o.value = val
-    o.textContent = `${item.number}. ${val}`.trim()
-    sel.appendChild(o)
-  })
-
-  const other = document.createElement("option")
-  other.value = "Other"
-  other.textContent = "Other"
-  sel.appendChild(other)
-}
-
-function applyRecipientBehavior(){
-  const t = el("recipientType").value
-  if(t === "Physician"){
-    el("toWhom").placeholder = "Physician name"
-  }else if(t === "Patient"){
-    el("toWhom").placeholder = "Patient name"
-  }else if(t === "Insurance"){
-    el("toWhom").placeholder = "Insurance contact"
-  }else{
-    el("toWhom").placeholder = "Recipient name"
+function renderRefs(){
+  const box = el("refBox")
+  const refs = (latestAnalysis && latestAnalysis.references) ? latestAnalysis.references : []
+  if(!refs.length){
+    box.textContent = "No references found."
+    return
   }
+  const frag = document.createDocumentFragment()
+  refs.forEach(r => {
+    const wrap = document.createElement("div")
+
+    const title = document.createElement("div")
+    title.className = "itemTitle"
+    title.textContent = `[${r.number}]`
+    wrap.appendChild(title)
+
+    const p = document.createElement("div")
+    p.style.marginBottom = "10px"
+    const cite = r.citation || ""
+    const pmid = r.pmid ? ` PMID ${r.pmid}` : ""
+    p.textContent = `${cite}${pmid}`.trim()
+    wrap.appendChild(p)
+
+    frag.appendChild(wrap)
+  })
+  box.innerHTML = ""
+  box.appendChild(frag)
 }
 
-async function analyze(){
+async function startAnalyze(){
   if(!uploadedFile){
     toast("Select a PDF first")
     return
   }
-  setStatus("Upload successful. Analyzing.")
+  setAnalyzeStatus("processing")
   const fd = new FormData()
   fd.append("pdf", uploadedFile)
 
-  const res = await fetch("/analyze", { method:"POST", body: fd })
+  const res = await fetch("/analyze_start", { method:"POST", body: fd })
   const json = await res.json()
   if(!json.ok){
-    setStatus("Analyze failed")
+    setAnalyzeStatus("waiting")
     toast(json.error || "Analyze failed")
     return
   }
-  latestAnalysis = json.data || {}
-
-  const provider = (latestAnalysis.provider_name || "").trim()
-  if(provider){
-    el("fromDoctor").value = provider
-  }else{
-    el("fromDoctor").value = ""
-  }
-
-  populateReason()
-  renderDx()
-  renderPlan()
-
-  setStatus("Analysis complete. Ready to generate output.")
-  toast("Please choose your preferred output.")
+  jobId = json.job_id
+  pollAnalyze()
 }
 
-async function generate(){
-  if(!uploadedFile){
-    toast("Upload exam notes first")
+async function pollAnalyze(){
+  if(!jobId){
     return
   }
-  if(!latestAnalysis){
-    toast("Please wait for analysis to complete")
-    return
+  try{
+    const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`)
+    const json = await res.json()
+    if(!json.ok){
+      setAnalyzeStatus("waiting")
+      toast(json.error || "Analyze status error")
+      return
+    }
+    const status = json.status || "waiting"
+    if(status === "waiting"){
+      setAnalyzeStatus("waiting")
+      setTimeout(pollAnalyze, 600)
+      return
+    }
+    if(status === "processing"){
+      setAnalyzeStatus("processing")
+      setTimeout(pollAnalyze, 1200)
+      return
+    }
+    if(status === "error"){
+      setAnalyzeStatus("waiting")
+      toast(json.error || "Analyze failed")
+      return
+    }
+    if(status === "complete"){
+      setAnalyzeStatus("analysis complete")
+      latestAnalysis = json.data || {}
+      el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
+      buildReasonOptions()
+      renderSummary()
+      renderDx()
+      renderPlan()
+      renderRefs()
+      toast("Analysis complete")
+      return
+    }
+  }catch(e){
+    setAnalyzeStatus("processing")
+    setTimeout(pollAnalyze, 1500)
   }
-  setStatus("Generating output.")
-  const fd = new FormData()
-  fd.append("pdf", uploadedFile)
-  fd.append("payload", JSON.stringify({ form: buildForm(), analysis: latestAnalysis }))
+}
 
-  const res = await fetch("/generate", { method:"POST", body: fd })
+function buildForm(){
+  const recipientType = el("recipientType").value
+  const toWhom = el("toWhom").value.trim()
+  const fromDoctor = el("fromDoctor").value.trim()
+  const reasonDx = el("reasonDx").value
+  const reasonOther = el("reasonOther").value.trim()
+  const reason = (reasonDx === "Other") ? reasonOther : reasonDx
+  const special = el("specialRequests").value.trim()
+
+  const mappedRecipient = (recipientType === "Family physician" || recipientType === "Specialist") ? "Physician" : recipientType
+
+  return {
+    recipient_type: mappedRecipient,
+    to_whom: toWhom,
+    from_doctor: fromDoctor,
+    reason_for_referral: reason,
+    special_requests: special,
+    letter_type: "Report"
+  }
+}
+
+async function generateReport(){
+  if(!latestAnalysis){
+    toast("Analyze first")
+    return
+  }
+  const payload = { form: buildForm(), analysis: latestAnalysis }
+  const res = await fetch("/generate_report", {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  })
   const json = await res.json()
   if(!json.ok){
-    setStatus("Generation failed")
     toast(json.error || "Generation failed")
     return
   }
   el("letter").value = json.letter_plain || ""
   latestLetterHtml = json.letter_html || ""
-  setStatus("Output ready.")
-  toast("Output ready")
+  toast("Report ready")
 }
 
 async function copyPlain(){
@@ -254,14 +372,12 @@ async function exportPdf(){
     toast("Nothing to export")
     return
   }
-  setStatus("Preparing PDF.")
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({ text })
   })
   if(!res.ok){
-    setStatus("PDF export failed")
     toast("PDF export failed")
     return
   }
@@ -274,7 +390,6 @@ async function exportPdf(){
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
-  setStatus("Output ready.")
   toast("Downloaded")
 }
 
@@ -285,11 +400,13 @@ el("file").addEventListener("change", async (e) => {
     return
   }
   uploadedFile = f
+  setAnalyzeStatus("waiting")
   toast("Upload successful")
-  await analyze()
+  await startAnalyze()
 })
 
-el("recipientType").addEventListener("change", applyRecipientBehavior)
+el("recipientType").addEventListener("change", setToPrefix)
+el("toWhom").addEventListener("focus", setToPrefix)
 
 el("reasonDx").addEventListener("change", () => {
   const v = el("reasonDx").value
@@ -301,9 +418,13 @@ el("reasonDx").addEventListener("change", () => {
   }
 })
 
-el("generateBtn").addEventListener("click", generate)
+el("generateBtn").addEventListener("click", generateReport)
 el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
 
-applyRecipientBehavior()
+el("resetBtn").addEventListener("click", clearAll)
+el("themeBtn").addEventListener("click", toggleTheme)
+
+applyTheme()
+setAnalyzeStatus("waiting")

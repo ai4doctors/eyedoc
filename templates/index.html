@@ -8,72 +8,81 @@
   <link rel="icon" href="/static/img/logo.png" type="image/png" />
 </head>
 <body>
-  <header class="bar">
+  <header class="topBar">
     <div class="brand">
-      <img class="brandLogo" src="/static/img/logo.png" alt="AI4health logo" />
+      <img class="logo" src="/static/img/logo.png" alt="AI4health logo" />
       <div class="brandText">
         <div class="brandName">AI4health</div>
         <div class="brandTag">Enhancing clinical outcomes with evidence based information</div>
       </div>
     </div>
 
-    <div class="controls">
+    <div class="topActions">
+      <button id="themeBtn" class="iconBtn" type="button" title="Theme">Theme</button>
+      <a class="iconBtn linkBtn" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noreferrer" title="PubMed">PubMed</a>
+      <button id="resetBtn" class="iconBtn" type="button" title="Reset">Reset</button>
+    </div>
+  </header>
+
+  <section class="stepBar">
+    <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
+    <div class="stepControls">
       <input id="file" type="file" accept="application/pdf" class="fileInput" />
-      <button id="uploadBtn" class="btnPrimary" type="button">Upload Exam Notes</button>
+      <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
+      <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
+    </div>
+  </section>
 
-      <select id="letterType" class="ctrl">
-        <option value="Referral letter">Referral letter</option>
-        <option value="Consult note">Consult note</option>
-        <option value="Follow up letter">Follow up letter</option>
-      </select>
+  <section class="summary">
+    <div class="sectionTitle"><b>Summary</b></div>
+    <div id="summaryBox" class="panel">Upload exam notes to begin.</div>
+  </section>
 
+  <main class="triCols">
+    <section class="col">
+      <div class="sectionTitle"><b>Diagnosis</b></div>
+      <div id="dxBox" class="panel">No data yet.</div>
+    </section>
+    <section class="col">
+      <div class="sectionTitle"><b>Plan</b></div>
+      <div id="planBox" class="panel">No data yet.</div>
+    </section>
+    <section class="col">
+      <div class="sectionTitle"><b>References</b></div>
+      <div id="refBox" class="panel">No data yet.</div>
+    </section>
+  </main>
+
+  <section class="stepBar step2">
+    <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
+    <div class="commControls">
       <select id="recipientType" class="ctrl">
-        <option value="Physician">Physician</option>
+        <option value="Specialist">Specialist</option>
+        <option value="Family physician">Family physician</option>
         <option value="Patient">Patient</option>
         <option value="Insurance">Insurance</option>
         <option value="Other">Other</option>
       </select>
 
-      <input id="toWhom" class="ctrl" placeholder="To whom" />
+      <input id="toWhom" class="ctrl wide" placeholder="TO:" />
+      <input id="fromDoctor" class="ctrl wide" placeholder="FROM:" />
 
-      <input id="fromDoctor" class="ctrl readonly" placeholder="From" readonly />
-
-      <select id="reasonDx" class="ctrl">
-        <option value="">Reason for referral</option>
+      <select id="reasonDx" class="ctrl wide">
+        <option value="">REASON:</option>
       </select>
+      <input id="reasonOther" class="ctrl wide hidden" placeholder="REASON other" />
 
-      <input id="reasonOther" class="ctrl hidden" placeholder="Reason for referral other" />
+      <input id="specialRequests" class="ctrl xwide" placeholder="Special requests" />
 
-      <input id="specialRequests" class="ctrl wide" placeholder="Special requests" />
-
-      <button id="generateBtn" class="btnPrimary" type="button">Generate Output</button>
+      <button id="generateBtn" class="btnPrimary" type="button">Generate Report</button>
     </div>
-  </header>
-
-  <div class="statusRow">
-    <div id="status" class="status">Ready</div>
-  </div>
-
-  <main class="layout">
-    <section class="col">
-      <h2>Diagnosis</h2>
-      <div id="dxBox" class="panel">Upload exam notes to begin.</div>
-    </section>
-
-    <section class="col">
-      <h2>Plan</h2>
-      <div id="planBox" class="panel">Upload exam notes to begin.</div>
-    </section>
-  </main>
+  </section>
 
   <section class="output">
-    <div class="outputHeader">
-      <h2>Output Communication</h2>
-    </div>
     <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
     <div class="outputActions">
-      <button id="copyRich" class="btn" type="button">Copy rich text</button>
-      <button id="copyPlain" class="btn" type="button">Copy plain text</button>
+      <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
+      <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
       <button id="exportPdf" class="btn" type="button">Export PDF</button>
     </div>
   </section>
@@ -85,7 +94,6 @@
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-<script src="/static/app.js"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
