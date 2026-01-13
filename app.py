@@ -9,6 +9,8 @@ from flask import Flask, render_template, request, jsonify, send_file
 
 import PyPDF2
 
+import httpx
+
 try:
     from openai import OpenAI
 except Exception:
@@ -111,6 +113,7 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
     "raw_excerpt": ""
 }
 
+
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
     return f"""
@@ -124,17 +127,11 @@ diagnoses: array of items, each item:
   code: string
   label: string
   bullets: array of short strings
-  refs: array of integers
 plan: array of items, each item:
   number: integer
   title: string
   bullets: array of short strings
   aligned_dx_numbers: array of integers
-  refs: array of integers
-pubmed: array of 3 to 12 items, each item:
-  number: integer
-  citation: string
-  pmid: string
 warnings: array of short strings
 raw_excerpt: string
 
@@ -142,15 +139,100 @@ Rules:
 1 Use only facts supported by the note. If unknown, leave empty.
 2 Do not invent demographics. patient_block must only include what is present, formatted as a clean header block.
 3 diagnoses must be problem list style, include laterality and severity when present.
-4 plan bullets must be actionable, conservative, evidence based, and aligned to diagnoses.
-5 refs are citation numbers that point to pubmed items.
-6 pubmed citation should look like a proper bibliography line. If not sure about PMID, leave it empty.
-7 raw_excerpt must be the first 1200 characters of the note.
+4 plan bullets must be actionable, conservative, and specific.
+5 raw_excerpt must be the first 1200 characters of the note.
 
 Encounter note:
 {excerpt}
 """.strip()
 
+
+
+
+
+def pubmed_search(queries: List[str], max_items: int = 8, timeout_s: float = 8.0) -> List[Dict[str, Any]]:
+    """
+    Lightweight PubMed retrieval via NCBI E-utilities.
+    Returns a numbered bibliography list. No PHI is sent.
+    """
+    q = " OR ".join([q for q in queries if q.strip()][:4]).strip()
+    if not q:
+        return []
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+    try:
+        with httpx.Client(timeout=timeout_s) as client:
+            esearch = client.get(
+                base + "esearch.fcgi",
+                params={"db": "pubmed", "term": q, "retmode": "json", "retmax": str(max_items)},
+            )
+            esearch.raise_for_status()
+            ids = (esearch.json().get("esearchresult", {}).get("idlist") or [])[:max_items]
+            if not ids:
+                return []
+            esummary = client.get(
+                base + "esummary.fcgi",
+                params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"},
+            )
+            esummary.raise_for_status()
+            result = esummary.json().get("result", {})
+            out: List[Dict[str, Any]] = []
+            n = 1
+            for pid in ids:
+                item = result.get(pid, {})
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip().rstrip(".")
+                source = (item.get("source") or "").strip()
+                pubdate = (item.get("pubdate") or "").strip()
+                authors = item.get("authors") or []
+                author_text = ""
+                if isinstance(authors, list) and authors:
+                    names = [a.get("name","").strip() for a in authors if isinstance(a, dict)]
+                    names = [x for x in names if x]
+                    author_text = ", ".join(names[:3])
+                    if len(names) > 3:
+                        author_text += " et al"
+                parts = [p for p in [author_text, title, source, pubdate] if p]
+                citation = ". ".join(parts) + "."
+                out.append({"number": n, "citation": citation, "pmid": str(pid)})
+                n += 1
+            return out
+    except Exception:
+        return []
+
+def refs_enrich_prompt(analysis_core: Dict[str, Any], pubmed: List[Dict[str, Any]]) -> str:
+    return f"""
+You are a clinician assistant.
+
+You will assign evidence reference numbers to diagnoses and plan items using ONLY the provided PubMed bibliography.
+Do not change wording of bullets unless required for clarity. Do not invent diagnoses or plan items.
+
+Return VALID JSON only matching this schema:
+diagnoses: array of items:
+  number: integer
+  code: string
+  label: string
+  bullets: array of short strings
+  refs: array of integers
+plan: array of items:
+  number: integer
+  title: string
+  bullets: array of short strings
+  aligned_dx_numbers: array of integers
+  refs: array of integers
+
+Rules:
+1 refs values must be bibliography numbers. Use 1 to {len(pubmed)}.
+2 If no citation fits, leave refs empty.
+3 Try to assign at least one reference per diagnosis and per plan item when possible.
+4 Keep refs short, no more than 3 per item.
+
+Analysis core:
+{json.dumps(analysis_core, ensure_ascii=False)}
+
+PubMed bibliography:
+{json.dumps(pubmed, ensure_ascii=False)}
+""".strip()
 def letter_prompt(note_text: str, form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     excerpt = clamp_text(note_text, 16000)
 
@@ -165,8 +247,11 @@ Tone rules:
 If recipient_type equals "Patient", write in patient friendly accessible language while staying professional.
 Otherwise write in technical physician style that is precise and concise.
 
-Special requests:
-special_requests is an intent signal. Never quote it verbatim. Never paste it. Use it indirectly and naturally.
+Special requests handling:
+special_requests is an intent signal. Never quote it. Never repeat it. Never refer to it as "special requests".
+Do not copy any phrase from it verbatim, even short phrases. Use it only to adjust emphasis, framing, and closing language.
+If the intent suggests building trust, use respectful, confidence building language and clear next steps.
+If the intent suggests collaboration or future referrals, weave it subtly into the professional closing without sounding salesy.
 
 Structure rules for letter_plain:
 1 Start with patient_block exactly as provided, then a blank line.
@@ -175,6 +260,7 @@ Structure rules for letter_plain:
 4 Include sections: Clinical summary, Assessment, Plan, Evidence, Closing, Disclaimer.
 5 In Assessment and Plan, reference evidence with bracket numbers like [1] that point to the Evidence section.
 6 Evidence section must list pubmed items in order as: [n] citation. Include PMID if present.
+7 Never invent facts. If something is not in the note, omit it.
 
 Structure rules for letter_html:
 Provide the same content as clean HTML with headings and paragraphs.
@@ -190,6 +276,7 @@ Encounter note:
 {excerpt}
 """.strip()
 
+
 @app.get("/")
 def index():
     return render_template("index.html", version=APP_VERSION)
@@ -201,19 +288,48 @@ def analyze():
         return jsonify({"ok": False, "error": "No PDF uploaded"}), 400
 
     text = extract_pdf_text(file)
-    obj, err = llm_json(analyze_prompt(text))
+
+    core_obj, err = llm_json(analyze_prompt(text))
     if err:
         return jsonify({"ok": False, "error": err}), 200
 
-    data = dict(ANALYZE_SCHEMA)
-    data.update(obj or {})
-    data["raw_excerpt"] = clamp_text(text, 1200)
+    core = {
+        "provider_name": (core_obj or {}).get("provider_name", "") or "",
+        "patient_block": (core_obj or {}).get("patient_block", "") or "",
+        "diagnoses": (core_obj or {}).get("diagnoses", []) or [],
+        "plan": (core_obj or {}).get("plan", []) or [],
+        "warnings": (core_obj or {}).get("warnings", []) or [],
+        "raw_excerpt": clamp_text(text, 1200),
+    }
 
-    pub = data.get("pubmed") or []
-    if isinstance(pub, list):
-        for i, item in enumerate(pub, start=1):
-            if isinstance(item, dict) and "number" not in item:
-                item["number"] = i
+    dx_list = core.get("diagnoses") or []
+    queries: List[str] = []
+    if isinstance(dx_list, list):
+        for d in dx_list[:4]:
+            if isinstance(d, dict):
+                q = (d.get("label") or "").strip()
+                if q:
+                    queries.append(q)
+
+    pubmed = pubmed_search(queries, max_items=8)
+
+    enrich_obj, enrich_err = llm_json(refs_enrich_prompt(core, pubmed))
+    diagnoses = core.get("diagnoses") or []
+    plan = core.get("plan") or []
+    if not enrich_err and enrich_obj:
+        diagnoses = enrich_obj.get("diagnoses") or diagnoses
+        plan = enrich_obj.get("plan") or plan
+
+    data = dict(ANALYZE_SCHEMA)
+    data.update({
+        "provider_name": core.get("provider_name", ""),
+        "patient_block": core.get("patient_block", ""),
+        "diagnoses": diagnoses,
+        "plan": plan,
+        "pubmed": pubmed,
+        "warnings": core.get("warnings", []),
+        "raw_excerpt": core.get("raw_excerpt", ""),
+    })
 
     return jsonify({"ok": True, "data": data}), 200
 
