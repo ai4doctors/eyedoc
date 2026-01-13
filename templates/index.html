@@ -5,18 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI4Doctors</title>
   <link rel="stylesheet" href="/static/app.css" />
+  <link rel="icon" href="/static/img/logo.svg" type="image/svg+xml" />
 </head>
 <body>
   <div class="topbar">
     <div class="brand">
-      <div class="logo">AI4</div>
+      <div class="logoWrap" aria-hidden="true">
+        <img class="logoImg" src="/static/img/logo.svg" alt="" />
+      </div>
       <div class="brandtext">
         <div class="title">AI4Doctors</div>
         <div class="subtitle">Clinical synthesis and letter generation</div>
       </div>
     </div>
     <div class="actions">
-      <button class="pill" id="pubmedBtn" type="button">PubMed</button>
+      <a class="pill link" href="/healthz" target="_blank" rel="noreferrer">Health</a>
       <button class="pill" id="themeBtn" type="button">Theme</button>
     </div>
   </div>
@@ -29,9 +32,12 @@
         <div class="label">Encounter PDF</div>
         <div class="fileRow">
           <input id="pdf" type="file" accept="application/pdf" />
-          <button class="primary" id="analyzeBtn" type="button">Analyze</button>
+          <button class="primary" id="analyzeBtn" type="button">
+            <span id="analyzeText">Analyze</span>
+            <span class="spinner" id="analyzeSpin" aria-hidden="true"></span>
+          </button>
         </div>
-        <div class="hint">Upload an encounter PDF. Demographics are extracted automatically when present in the note.</div>
+        <div class="hint">Upload an encounter PDF. Demographics are extracted when present in the note.</div>
       </div>
     </div>
 
@@ -88,9 +94,17 @@
     </div>
 
     <div class="buttonRow">
-      <button class="primary" id="generateBtn" type="button">Generate letter</button>
-      <button class="pill" id="copyRichBtn" type="button">Copy rich text</button>
-      <button class="pill" id="copyPlainBtn" type="button">Copy plain text</button>
+      <button class="primary" id="generateBtn" type="button">
+        <span id="genText">Generate letter</span>
+        <span class="spinner" id="genSpin" aria-hidden="true"></span>
+      </button>
+      <button class="pill" id="copyPlainBtn" type="button">Copy</button>
+      <button class="pill" id="downloadBtn" type="button">Download</button>
+    </div>
+
+    <div class="statusRow">
+      <div class="status" id="statusLeft">Ready</div>
+      <div class="status mutedSmall">v{{ version }}</div>
     </div>
   </div>
 
@@ -111,10 +125,10 @@
 
   <div class="section">
     <div class="sectitle">PubMed bibliography</div>
-    <div class="box" id="pubmedBox">Click Analyze to populate citations.</div>
+    <div class="box" id="pubmedBox">Analyze to populate citations.</div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="/static/app.js"></script>
 </body>

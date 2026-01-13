@@ -1,124 +1,126 @@
-
 let latestAnalysis = null
+function el(id){ return document.getElementById(id) }
 
 function toast(msg){
-  const el = document.getElementById("toast")
-  el.textContent = msg
-  el.style.display = "block"
-  setTimeout(() => { el.style.display = "none" }, 2400)
+  const t = el("toast")
+  t.textContent = msg
+  t.style.display = "block"
+  setTimeout(() => { t.style.display = "none" }, 2600)
+}
+
+function setBusy(which, busy){
+  if(which === "analyze"){
+    el("analyzeSpin").style.display = busy ? "inline-block" : "none"
+    el("analyzeBtn").disabled = busy
+    el("statusLeft").textContent = busy ? "Analyzing" : "Ready"
+  }
+  if(which === "generate"){
+    el("genSpin").style.display = busy ? "inline-block" : "none"
+    el("generateBtn").disabled = busy
+    el("statusLeft").textContent = busy ? "Generating" : "Ready"
+  }
 }
 
 function getForm(){
   return {
-    letter_type: document.getElementById("letter_type").value,
-    referring_doctor: document.getElementById("referring_doctor").value,
-    recipient_name: document.getElementById("recipient_name").value,
-    reason_for_referral: document.getElementById("reason_for_referral").value,
-    special_requests: document.getElementById("special_requests").value,
-    additional_context: document.getElementById("additional_context").value
+    letter_type: el("letter_type").value,
+    referring_doctor: el("referring_doctor").value,
+    recipient_name: el("recipient_name").value,
+    reason_for_referral: el("reason_for_referral").value,
+    special_requests: el("special_requests").value,
+    additional_context: el("additional_context").value
   }
 }
 
-document.getElementById("demoToggle").addEventListener("click", () => {
-  const p = document.getElementById("demoPanel")
-  const open = p.style.display === "block"
-  p.style.display = open ? "none" : "block"
+el("demoToggle").addEventListener("click", () => {
+  const p = el("demoPanel")
+  p.style.display = (p.style.display === "block") ? "none" : "block"
 })
 
-document.getElementById("themeBtn").addEventListener("click", () => {
-  toast("Theme toggle is a stub in this build")
-})
+el("themeBtn").addEventListener("click", () => toast("Theme toggle is a stub in this build"))
 
-document.getElementById("pubmedBtn").addEventListener("click", () => {
-  document.getElementById("pubmedBox").scrollIntoView({behavior:"smooth"})
-})
-
-document.getElementById("analyzeBtn").addEventListener("click", async () => {
-  const fileInput = document.getElementById("pdf")
-  const file = fileInput.files && fileInput.files[0]
-  if(!file){
-    toast("Choose a PDF first")
-    return
-  }
+async function analyze(){
+  const file = el("pdf").files && el("pdf").files[0]
+  if(!file){ toast("Choose a PDF first"); return }
 
   const fd = new FormData()
   fd.append("pdf", file)
 
-  toast("Analyzing")
-  const res = await fetch("/analyze", { method:"POST", body: fd })
-  const json = await res.json()
+  setBusy("analyze", true)
+  try{
+    const res = await fetch("/analyze", { method:"POST", body: fd })
+    const json = await res.json()
+    if(!json.ok){ toast(json.error || "Analyze failed"); return }
 
-  if(!json.ok){
-    toast(json.error || "Analyze failed")
-    return
+    latestAnalysis = json.data || {}
+    const patient = latestAnalysis.patient || {}
+    el("patient_name").value = patient.name || ""
+    el("patient_dob").value = patient.dob || ""
+    el("patient_phn").value = patient.phn || ""
+
+    el("diagnosisBox").textContent = latestAnalysis.diagnosis || ""
+    el("treatmentBox").textContent = latestAnalysis.treatment || ""
+
+    const pm = latestAnalysis.pubmed || []
+    const lines = pm.map(x => [x.title, x.journal, x.year, x.pmid].filter(Boolean).join(" | "))
+    el("pubmedBox").textContent = lines.length ? lines.join("\n") : "No citations returned"
+
+    toast("Analysis complete")
+  }catch(e){
+    toast("Analyze failed")
+  }finally{
+    setBusy("analyze", false)
   }
+}
 
-  latestAnalysis = json.data || {}
+async function generateLetter(){
+  const reason = (el("reason_for_referral").value || "").trim()
+  if(!reason){ toast("Reason for referral is required"); return }
 
-  const patient = latestAnalysis.patient || {}
-  document.getElementById("patient_name").value = patient.name || ""
-  document.getElementById("patient_dob").value = patient.dob || ""
-  document.getElementById("patient_phn").value = patient.phn || ""
-
-  document.getElementById("diagnosisBox").textContent = latestAnalysis.diagnosis || ""
-  document.getElementById("treatmentBox").textContent = latestAnalysis.treatment || ""
-
-  const pm = latestAnalysis.pubmed || []
-  const lines = pm.map(x => {
-    const parts = [x.title, x.journal, x.year, x.pmid].filter(Boolean)
-    return parts.join(" | ")
-  })
-  document.getElementById("pubmedBox").textContent = lines.length ? lines.join("\n") : "No citations yet"
-
-  toast("Analysis complete")
-})
-
-document.getElementById("generateBtn").addEventListener("click", async () => {
-  const reason = document.getElementById("reason_for_referral").value.trim()
-  if(!reason){
-    toast("Reason for referral is required")
-    return
-  }
-
-  const fileInput = document.getElementById("pdf")
-  const file = fileInput.files && fileInput.files[0]
-  if(!file){
-    toast("Choose a PDF first")
-    return
-  }
+  const file = el("pdf").files && el("pdf").files[0]
+  if(!file){ toast("Choose a PDF first"); return }
 
   const payload = { form: getForm(), analysis: latestAnalysis || {} }
-
   const fd = new FormData()
   fd.append("pdf", file)
   fd.append("payload", JSON.stringify(payload))
 
-  toast("Generating letter")
-  const res = await fetch("/generate_letter", { method:"POST", body: fd })
-  const json = await res.json()
-
-  if(!json.ok){
-    toast(json.error || "Letter generation failed")
-    return
-  }
-
-  document.getElementById("letterBox").value = json.letter_plain || ""
-  toast("Letter ready")
-})
-
-async function copyText(text){
+  setBusy("generate", true)
   try{
-    await navigator.clipboard.writeText(text)
-    toast("Copied")
+    const res = await fetch("/generate_letter", { method:"POST", body: fd })
+    const json = await res.json()
+    if(!json.ok){ toast(json.error || "Letter generation failed"); return }
+    el("letterBox").value = json.letter_plain || ""
+    toast("Letter ready")
   }catch(e){
-    toast("Copy failed")
+    toast("Letter generation failed")
+  }finally{
+    setBusy("generate", false)
   }
 }
 
-document.getElementById("copyPlainBtn").addEventListener("click", () => {
-  copyText(document.getElementById("letterBox").value || "")
-})
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); toast("Copied") }
+  catch(e){ toast("Copy failed") }
+}
 
-document.getElementById("copyRichBtn").addEventListener("click", () => {
-  copyText(document.getElementById("letterBox").value || "")
+function downloadText(filename, text){
+  const blob = new Blob([text], {type:"text/plain"})
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+el("analyzeBtn").addEventListener("click", analyze)
+el("generateBtn").addEventListener("click", generateLetter)
+el("copyPlainBtn").addEventListener("click", () => copyText(el("letterBox").value || ""))
+el("downloadBtn").addEventListener("click", () => {
+  const text = el("letterBox").value || ""
+  if(!text.trim()){ toast("Nothing to download"); return }
+  downloadText("letter.txt", text)
 })
