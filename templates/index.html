@@ -3,132 +3,88 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI4Doctors</title>
+  <title>AI4health</title>
   <link rel="stylesheet" href="/static/app.css" />
-  <link rel="icon" href="/static/img/logo.svg" type="image/svg+xml" />
+  <link rel="icon" href="/static/img/logo.png" type="image/png" />
 </head>
 <body>
-  <div class="topbar">
+  <header class="bar">
     <div class="brand">
-      <div class="logoWrap" aria-hidden="true">
-        <img class="logoImg" src="/static/img/logo.svg" alt="" />
-      </div>
-      <div class="brandtext">
-        <div class="title">AI4Doctors</div>
-        <div class="subtitle">Clinical synthesis and letter generation</div>
+      <img class="brandLogo" src="/static/img/logo.png" alt="AI4health logo" />
+      <div class="brandText">
+        <div class="brandName">AI4health</div>
+        <div class="brandTag">Enhancing clinical outcomes with evidence based information</div>
       </div>
     </div>
-    <div class="actions">
-      <a class="pill link" href="/healthz" target="_blank" rel="noreferrer">Health</a>
-      <button class="pill" id="themeBtn" type="button">Theme</button>
+
+    <div class="controls">
+      <input id="file" type="file" accept="application/pdf" class="fileInput" />
+      <button id="uploadBtn" class="btnPrimary" type="button">Upload Exam Notes</button>
+
+      <select id="letterType" class="ctrl">
+        <option value="Referral letter">Referral letter</option>
+        <option value="Consult note">Consult note</option>
+        <option value="Follow up letter">Follow up letter</option>
+      </select>
+
+      <select id="recipientType" class="ctrl">
+        <option value="Physician">Physician</option>
+        <option value="Patient">Patient</option>
+        <option value="Insurance">Insurance</option>
+        <option value="Other">Other</option>
+      </select>
+
+      <input id="toWhom" class="ctrl" placeholder="To whom" />
+
+      <input id="fromDoctor" class="ctrl readonly" placeholder="From" readonly />
+
+      <select id="reasonDx" class="ctrl">
+        <option value="">Reason for referral</option>
+      </select>
+
+      <input id="reasonOther" class="ctrl hidden" placeholder="Reason for referral other" />
+
+      <input id="specialRequests" class="ctrl wide" placeholder="Special requests" />
+
+      <button id="generateBtn" class="btnPrimary" type="button">Generate Output</button>
     </div>
+  </header>
+
+  <div class="statusRow">
+    <div id="status" class="status">Ready</div>
   </div>
 
-  <div class="card">
-    <div class="cardtitle">Inputs</div>
+  <main class="layout">
+    <section class="col">
+      <h2>Diagnosis</h2>
+      <div id="dxBox" class="panel">Upload exam notes to begin.</div>
+    </section>
 
-    <div class="row">
-      <div class="col">
-        <div class="label">Encounter PDF</div>
-        <div class="fileRow">
-          <input id="pdf" type="file" accept="application/pdf" />
-          <button class="primary" id="analyzeBtn" type="button">
-            <span id="analyzeText">Analyze</span>
-            <span class="spinner" id="analyzeSpin" aria-hidden="true"></span>
-          </button>
-        </div>
-        <div class="hint">Upload an encounter PDF. Demographics are extracted when present in the note.</div>
-      </div>
+    <section class="col">
+      <h2>Plan</h2>
+      <div id="planBox" class="panel">Upload exam notes to begin.</div>
+    </section>
+  </main>
+
+  <section class="output">
+    <div class="outputHeader">
+      <h2>Output Communication</h2>
     </div>
-
-    <div class="grid2">
-      <div class="field">
-        <div class="label">Letter type</div>
-        <select id="letter_type">
-          <option value="">Select</option>
-          <option>Referral letter</option>
-          <option>Consult note</option>
-          <option>Follow up letter</option>
-        </select>
-      </div>
-      <div class="field">
-        <div class="label">Referring doctor</div>
-        <input id="referring_doctor" value="Dr. Henry Reis" />
-      </div>
-      <div class="field">
-        <div class="label">Refer to</div>
-        <input id="recipient_name" placeholder="Recipient name" />
-      </div>
-      <div class="field">
-        <div class="label">Reason for referral <span class="req">*</span></div>
-        <input id="reason_for_referral" placeholder="Required" />
-      </div>
-      <div class="field">
-        <div class="label">Special requests</div>
-        <input id="special_requests" placeholder="Optional" />
-      </div>
-      <div class="field">
-        <div class="label">Additional context</div>
-        <input id="additional_context" placeholder="Optional" />
-      </div>
+    <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
+    <div class="outputActions">
+      <button id="copyRich" class="btn" type="button">Copy rich text</button>
+      <button id="copyPlain" class="btn" type="button">Copy plain text</button>
+      <button id="exportPdf" class="btn" type="button">Export PDF</button>
     </div>
+  </section>
 
-    <button class="accordion" id="demoToggle" type="button">
-      Patient demographics <span class="muted">(auto extracted, optional override)</span>
-    </button>
-    <div class="panel" id="demoPanel">
-      <div class="grid3">
-        <div class="field">
-          <div class="label">Name</div>
-          <input id="patient_name" placeholder="Auto" />
-        </div>
-        <div class="field">
-          <div class="label">DOB</div>
-          <input id="patient_dob" placeholder="Auto" />
-        </div>
-        <div class="field">
-          <div class="label">PHN</div>
-          <input id="patient_phn" placeholder="Auto" />
-        </div>
-      </div>
-    </div>
+  <footer class="footer">
+    <div>Created by Dr. Henry Reis, MD, OD, MBA. 2026. All rights reserved.</div>
+    <div class="footerSmall">This tool supports HIPAA aligned workflows and uses evidence based sources from PubMed. It does not replace clinical judgement. Always verify outputs before use.</div>
+    <div class="footerSmall">v{{ version }}</div>
+  </footer>
 
-    <div class="buttonRow">
-      <button class="primary" id="generateBtn" type="button">
-        <span id="genText">Generate letter</span>
-        <span class="spinner" id="genSpin" aria-hidden="true"></span>
-      </button>
-      <button class="pill" id="copyPlainBtn" type="button">Copy</button>
-      <button class="pill" id="downloadBtn" type="button">Download</button>
-    </div>
-
-    <div class="statusRow">
-      <div class="status" id="statusLeft">Ready</div>
-      <div class="status mutedSmall">v{{ version }}</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="sectitle">Diagnosis</div>
-    <div class="box" id="diagnosisBox">Upload a PDF to generate results.</div>
-  </div>
-
-  <div class="section">
-    <div class="sectitle">Treatment</div>
-    <div class="box" id="treatmentBox">Upload a PDF to generate results.</div>
-  </div>
-
-  <div class="section">
-    <div class="sectitle">Letter</div>
-    <textarea class="textarea" id="letterBox" placeholder="Generate letter to see output"></textarea>
-  </div>
-
-  <div class="section">
-    <div class="sectitle">PubMed bibliography</div>
-    <div class="box" id="pubmedBox">Analyze to populate citations.</div>
-  </div>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <script src="/static/app.js"></script>
 </body>
