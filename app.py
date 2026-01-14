@@ -137,10 +137,12 @@ warnings: array of short strings
 
 Rules:
 1 Use only facts supported by the note. If unknown, leave empty.
-2 patient_block must only include what is present, formatted as a clean header block with <br> line breaks.
+2 patient_block must contain patient demographics only. Include PHN if present. Exclude provider address and clinic address. Use <br> line breaks.
 3 summary_html should be a clean summary section with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
 4 diagnoses must be problem list style, include laterality and severity when present.
 5 plan bullets must be actionable, conservative, and aligned to diagnoses.
+6 If exam findings are present, include them in summary_html with clear headings such as Exam findings and Imaging when applicable.
+
 
 Encounter note:
 {excerpt}
@@ -241,17 +243,30 @@ Otherwise write in technical physician style that is precise and concise.
 Special requests:
 special_requests is an intent signal. Never quote it verbatim. Never paste it. Use it indirectly and naturally.
 
-Structure:
-Start with patient_block as a header block, then sections with short paragraphs:
-Clinical summary
-Assessment
-Plan
-Evidence
-Closing
-Disclaimer
+Clinic context:
+clinic_name: {os.getenv("CLINIC_NAME","")}
+clinic_address: {os.getenv("CLINIC_ADDRESS","")}
+clinic_phone: {os.getenv("CLINIC_PHONE","")}
 
-Citations:
-Use bracket numbers like [1] in Assessment and Plan. Evidence section lists references in order.
+Structure:
+Create a professional referral or report letter.
+
+Letterhead rules:
+1 Use clinic_name, clinic_address, clinic_phone when present. If missing, omit that line.
+2 Include the current date.
+3 Include To and From lines.
+4 Include Reason for referral immediately under the letterhead.
+5 Then include patient_block exactly as provided.
+6 Start the letter_plain with header_block exactly as provided in Form, then a blank line, then patient_block, then a blank line, then the body sections.
+7 For letter_html, render header_block using <div> and <p> tags, then patient_block, then sections.
+
+Body rules:
+1 Use short paragraphs with good spacing.
+2 Include sections: Clinical summary, Exam findings, Assessment, Plan, Closing.
+3 Include exam findings with more granularity when available in the note. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
+4 Do not include Evidence or Disclaimer sections in the letter.
+5 Do not include citations or bracket numbers in the letter body.
+6 Closing must include Kind regards and the authoring doctor name.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
