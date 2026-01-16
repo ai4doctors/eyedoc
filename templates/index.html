@@ -3,17 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI4health</title>
+  <title>AI4Health</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css" />
   <link rel="icon" href="/static/img/logo.png" type="image/png" />
 </head>
 <body>
   <header class="topBar">
     <div class="brand">
-      <img class="logo" src="/static/img/logo.png" alt="AI4health logo" />
+      <img class="logo" src="/static/img/logo.png" alt="AI4Health logo" />
       <div class="brandText">
-        <div class="brandName">AI4health</div>
-        <div class="brandTag">Enhancing clinical outcomes with evidence based information</div>
+        <div class="brandName">AI4Health</div>
+        <div class="brandTag">Evidence ready. Clinician approved.</div>
       </div>
     </div>
 
@@ -72,32 +75,54 @@
 
       <section class="stepBar step2">
         <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
-        <div class="commControls">
-      <select id="recipientType" class="ctrl">
-        <option value="Specialist">Specialist</option>
-        <option value="Family physician">Family physician</option>
-        <option value="Patient">Patient</option>
-        <option value="Insurance">Insurance</option>
-        <option value="Other">Other</option>
-      </select>
+        <div class="commGrid">
+          <div class="field fieldDoc">
+            <label class="fieldLabel" for="recipientType">Document type</label>
+            <select id="recipientType" class="ctrl">
+              <option value="Specialist">Specialist</option>
+              <option value="Family physician">Family physician</option>
+              <option value="Patient">Patient</option>
+              <option value="Insurance">Insurance</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
 
-      <input id="toWhom" class="ctrl wide" placeholder="TO:" />
-      <input id="fromDoctor" class="ctrl wide" placeholder="FROM:" />
+          <div class="field fieldTo">
+            <label class="fieldLabel" for="toWhom">To</label>
+            <input id="toWhom" class="ctrl" placeholder="Dr Lastname" />
+          </div>
 
-      <select id="reasonDx" class="ctrl wide">
-        <option value="">REASON:</option>
-      </select>
-      <input id="reasonOther" class="ctrl wide hidden" placeholder="REASON other" />
+          <div class="field fieldFrom">
+            <label class="fieldLabel" for="fromDoctor">From</label>
+            <input id="fromDoctor" class="ctrl" placeholder="Provider" />
+          </div>
 
-      <select id="reasonFocus" class="ctrl wide" disabled>
-        <option value="">REFERRAL FOCUS:</option>
-      </select>
-      <input id="reasonFocusOther" class="ctrl wide hidden" placeholder="REFERRAL FOCUS other" />
+          <div class="field fieldAction">
+            <label class="fieldLabel">&nbsp;</label>
+            <button id="generateBtn" class="btnPrimary" type="button">Generate report</button>
+            <div id="generateStatus" class="stepStatus">Ready</div>
+          </div>
 
-      <input id="specialRequests" class="ctrl xwide" placeholder="Special requests" />
+          <div class="field fieldReason">
+            <label class="fieldLabel" for="reasonDx">Reason</label>
+            <select id="reasonDx" class="ctrl">
+              <option value="">Select diagnosis</option>
+            </select>
+            <input id="reasonOther" class="ctrl hidden" placeholder="Other reason" />
+          </div>
 
-      <button id="generateBtn" class="btnPrimary" type="button">Generate Report</button>
-      <div id="generateStatus" class="stepStatus">Ready</div>
+          <div class="field fieldFocus">
+            <label class="fieldLabel" for="reasonFocus">Referral focus</label>
+            <select id="reasonFocus" class="ctrl" disabled>
+              <option value="">Select focus</option>
+            </select>
+            <input id="reasonFocusOther" class="ctrl hidden" placeholder="Other focus" />
+          </div>
+
+          <div class="field fieldRequests">
+            <label class="fieldLabel" for="specialRequests">Special requests</label>
+            <input id="specialRequests" class="ctrl" placeholder="Optional" />
+          </div>
         </div>
       </section>
 

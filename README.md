@@ -1,4 +1,4 @@
-AI4health
+AI4Health
 
 Deploy
 

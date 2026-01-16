@@ -38,7 +38,7 @@ try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_JUSTIFY
     from reportlab.lib import colors
@@ -748,6 +748,10 @@ def export_pdf():
             continue
 
         lower = line.strip().lower()
+
+        # Drop the standalone Clinical summary label entirely.
+        if lower in {"clinical summary", "clinical summary:"}:
+            continue
         if lower.startswith("reason for referral"):
             # Render as a single, scannable line with breathing room
             value = line.split(":", 1)[1].strip() if ":" in line else ""
@@ -756,7 +760,7 @@ def export_pdf():
             story.append(Spacer(1, 10))
             continue
 
-        if lower in {"clinical summary:", "exam findings:", "assessment:", "plan:"}:
+        if lower in {"exam findings", "exam findings:", "assessment", "assessment:", "plan", "plan:"}:
             title = line.strip().replace(":", "")
             story.append(Paragraph(f"<b>{esc(title)}</b>", head))
             continue
@@ -783,15 +787,30 @@ def export_pdf():
             if sig_path and os.path.exists(sig_path):
                 try:
                     sig = RLImage(sig_path)
-                    # Keep the signature tasteful: cap width, but default smaller
-                    maxw = 500
+                    # Signature sizing and alignment
+                    # Target about a quarter page width, preserve aspect ratio, cap height.
                     page_w = rl_letter[0]
-                    w = min(maxw, int(page_w * 0.25))
-                    sig.drawWidth = w
-                    sig.drawHeight = sig.imageHeight * (w / float(sig.imageWidth))
-                    sig.hAlign = "RIGHT"
+                    max_width = int(page_w * 0.25)
+                    max_height = 90
+                    iw = float(sig.imageWidth)
+                    ih = float(sig.imageHeight)
+                    if iw > 0 and ih > 0:
+                        scale = min(max_width / iw, max_height / ih)
+                        sig.drawWidth = iw * scale
+                        sig.drawHeight = ih * scale
                     story.append(Spacer(1, 6))
-                    story.append(sig)
+                    # Use the document text width directly to avoid relying on doc before creation.
+                    text_w = rl_letter[0] - 54 - 54
+                    tbl = Table([[sig]], colWidths=[text_w])
+                    tbl.setStyle(TableStyle([
+                        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                        ("TOPPADDING", (0, 0), (-1, -1), 0),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ]))
+                    story.append(tbl)
                 except Exception:
                     story.append(Paragraph(esc(provider_name), base))
             else:
