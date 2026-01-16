@@ -87,6 +87,11 @@
             </select>
           </div>
 
+          <div class="field fieldBrand">
+            <label class="fieldLabel" for="useBranding">Branding</label>
+            <label class="checkRow"><input id="useBranding" type="checkbox" /> Use letterhead and signature</label>
+          </div>
+
           <div class="field fieldTo">
             <label class="fieldLabel" for="toWhom">To</label>
             <input id="toWhom" class="ctrl" placeholder="Dr Lastname" />
@@ -133,18 +138,18 @@
         </div>
 
         <div id="tab_primary" class="letterPage" data-tabpanel="primary" role="tabpanel">
-          <img class="letterhead" src="/static/letterhead.jpeg" alt="Letterhead" />
+          <img id="lh_primary" class="letterhead hidden" src="/static/letterhead.jpeg" alt="Letterhead" />
           <div id="editor_primary" class="letterHtml" contenteditable="true" spellcheck="false"></div>
           <div class="sigRow">
-            <img id="sig_primary" class="signature" src="/static/signatures/dr_henry_reis.png" alt="Signature" />
+            <img id="sig_primary" class="signature hidden" src="/static/signatures/dr_henry_reis.png" alt="Signature" />
           </div>
         </div>
 
         <div id="tab_patient" class="letterPage hidden" data-tabpanel="patient" role="tabpanel">
-          <img class="letterhead" src="/static/letterhead.jpeg" alt="Letterhead" />
+          <img id="lh_patient" class="letterhead hidden" src="/static/letterhead.jpeg" alt="Letterhead" />
           <div id="editor_patient" class="letterHtml" contenteditable="true" spellcheck="false"></div>
           <div class="sigRow">
-            <img id="sig_patient" class="signature" src="/static/signatures/dr_henry_reis.png" alt="Signature" />
+            <img id="sig_patient" class="signature hidden" src="/static/signatures/dr_henry_reis.png" alt="Signature" />
           </div>
         </div>
 

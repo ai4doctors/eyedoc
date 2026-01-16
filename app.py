@@ -51,6 +51,9 @@ APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
 
+# Keep analysis prompts bounded to avoid memory pressure on small instances
+MAX_NOTE_CHARS = int(os.getenv("MAX_NOTE_CHARS", "12000"))
+
 # In memory job store
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
@@ -419,60 +422,65 @@ def get_job(job_id: str) -> Dict[str, Any]:
         return dict(JOBS.get(job_id) or {})
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso())
-    obj, err = llm_json(analyze_prompt(note_text))
-    if err or not obj:
-        set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
-        return
+    try:
+        set_job(job_id, status="processing", updated_at=now_utc_iso())
 
-    analysis = dict(ANALYZE_SCHEMA)
-    analysis.update(obj)
+        # Guardrails against runaway memory use on very long notes
+        note_text = (note_text or "")
+        if len(note_text) > MAX_NOTE_CHARS:
+            note_text = note_text[:MAX_NOTE_CHARS]
 
-    # Fetch PubMed references based on diagnoses
-    terms = []
-    for dx in analysis.get("diagnoses") or []:
-        if isinstance(dx, dict):
-            label = (dx.get("label") or "").strip()
-            if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    analysis["references"] = references
+        obj, err = llm_json(analyze_prompt(note_text))
+        if err or not obj:
+            set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
+            return
 
-    # Assign citation numbers
-    if references:
-        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
-        if not cites_err and cites_obj:
-            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            for dx in analysis.get("diagnoses") or []:
-                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
-                    dx["refs"] = dx_map.get(dx["number"], [])
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
-                    pl["refs"] = pl_map.get(pl["number"], [])
+        analysis = dict(ANALYZE_SCHEMA)
+        analysis.update(obj)
 
-    # Guarantee at least one reference number is used somewhere when references exist
-    if analysis.get("references"):
-        used = False
+        # Fetch PubMed references based on diagnoses, but keep it lightweight
+        terms = []
         for dx in analysis.get("diagnoses") or []:
-            if isinstance(dx, dict) and dx.get("refs"):
-                used = True
-                break
-        if not used:
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and pl.get("refs"):
+            if isinstance(dx, dict):
+                label = (dx.get("label") or "").strip()
+                if label:
+                    terms.append(label)
+        terms = terms[:4]
+        references = pubmed_fetch_for_terms(terms)
+        analysis["references"] = references
+
+        # Assign citation numbers
+        if references:
+            cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
+            if not cites_err and cites_obj:
+                dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+                pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+                for dx in analysis.get("diagnoses") or []:
+                    if isinstance(dx, dict) and isinstance(dx.get("number"), int):
+                        dx["refs"] = dx_map.get(dx["number"], [])
+                for pl in analysis.get("plan") or []:
+                    if isinstance(pl, dict) and isinstance(pl.get("number"), int):
+                        pl["refs"] = pl_map.get(pl["number"], [])
+
+        # Guarantee at least one reference number is used somewhere when references exist
+        if analysis.get("references"):
+            used = False
+            for dx in analysis.get("diagnoses") or []:
+                if isinstance(dx, dict) and dx.get("refs"):
                     used = True
                     break
-        if not used:
-            # Attach reference 1 as a general evidence context anchor
-            if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
-                if isinstance(analysis["diagnoses"][0], dict):
+            if not used:
+                for pl in analysis.get("plan") or []:
+                    if isinstance(pl, dict) and pl.get("refs"):
+                        used = True
+                        break
+            if not used:
+                if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"] and isinstance(analysis["diagnoses"][0], dict):
                     analysis["diagnoses"][0]["refs"] = [1]
-            if isinstance(analysis.get("plan"), list) and analysis["plan"]:
-                if isinstance(analysis["plan"][0], dict):
-                    analysis["plan"][0]["refs"] = [1]
 
-    set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
+        set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
+    except Exception as e:
+        set_job(job_id, status="error", error=f"Analysis crashed: {type(e).__name__}", updated_at=now_utc_iso())
 
 @app.get("/")
 def index():

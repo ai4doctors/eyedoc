@@ -8,6 +8,30 @@ let letters = {
   primary: { html: "", plain: "", recipient_type: "Physician" },
   patient: { html: "", plain: "", recipient_type: "Patient" }
 }
+
+function setBrandingVisible(visible){
+  const ids = ["lh_primary","sig_primary","lh_patient","sig_patient"]
+  ids.forEach(id => {
+    const node = el(id)
+    if(!node) return
+    if(visible) node.classList.remove("hidden")
+    else node.classList.add("hidden")
+  })
+}
+
+function providerAllowsBranding(name){
+  const s = String(name || "").toLowerCase()
+  if(!s) return false
+  if(s.includes("reis")) return true
+  if(s.includes("integra")) return true
+  return false
+}
+
+function syncBranding(){
+  const chk = el("useBranding")
+  const on = chk ? !!chk.checked : false
+  setBrandingVisible(on)
+}
 let activeTab = "primary"
 
 function setTab(tabKey){
@@ -648,6 +672,13 @@ async function pollAnalyze(){
       setAnalyzeStatus("analysis complete")
       latestAnalysis = json.data || {}
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
+
+      // Default branding to ON only when the provider appears to match the clinic template
+      if(el("useBranding")){
+        el("useBranding").checked = providerAllowsBranding(latestAnalysis.provider_name)
+        syncBranding()
+      }
+
       buildReasonOptions()
       renderSummary()
       renderDx()
@@ -723,6 +754,7 @@ async function generateReport(){
     const patientBody = el("tab_patient")?.querySelector(".letterBody")
     if(primaryBody){ primaryBody.innerHTML = letters.primary.html }
     if(patientBody){ patientBody.innerHTML = letters.patient.html }
+    syncBranding()
     setTab("primary")
     latestLetterHtml = letters.primary.html || ""
     toast("Report ready")
@@ -892,6 +924,10 @@ el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
 
+if(el("useBranding")){
+  el("useBranding").addEventListener("change", syncBranding)
+}
+
 document.querySelectorAll(".tabBtn").forEach(btn => {
   btn.addEventListener("click", () => {
     const key = btn.dataset.tab
@@ -923,6 +959,12 @@ if(el("runOcrBtn")){
     await startAnalyze()
   })
 }
+
+// Ensure branding assets are hidden until a valid case is analyzed
+try{
+  if(el("useBranding")) el("useBranding").checked = false
+  setBrandingVisible(false)
+}catch(e){}
 
 el("resetBtn").addEventListener("click", clearAll)
 el("newCaseBtn").addEventListener("click", clearAll)
