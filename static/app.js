@@ -755,24 +755,45 @@ async function downloadPdf(){
 }
 
 async function emailPdf(){
-  const result = await fetchPdfBlob()
-  if(!result){
+  const html = getLetterHtml()
+  if(!html.trim()){
+    toast("Nothing to email")
     return
   }
-  const filename = filenameFromContentDisposition(result.contentDisposition)
-  const file = new File([result.blob], filename, { type:"application/pdf" })
-  const title = defaultPdfSubject()
+  const toEmail = window.prompt("Recipient email")
+  if(!toEmail){
+    return
+  }
+  const subject = window.prompt("Subject", defaultPdfSubject()) || defaultPdfSubject()
+  const message = window.prompt("Message", "Please see the attached report.") || ""
+  const providerName = (el("fromDoctor").value || "").trim()
+  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
+  const patientToken = patientTokenFromBlock(patientBlock)
+  const recipientType = (el("recipientType").value || "").trim()
+
   try{
-    if(navigator.share && (!navigator.canShare || navigator.canShare({ files:[file] }))){
-      await navigator.share({ title, files:[file] })
-      toast("Shared")
+    const res = await fetch("/send_pdf_email", {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        to_email: toEmail,
+        subject,
+        message,
+        html,
+        provider_name: providerName,
+        patient_token: patientToken,
+        recipient_type: recipientType
+      })
+    })
+    const j = await res.json().catch(() => ({}))
+    if(!j.ok){
+      toast(j.error || "Email failed")
       return
     }
+    toast("Sent")
   }catch(e){
-    // fall through
+    toast("Email failed")
   }
-  await downloadPdf()
-  toast("Downloaded. Attach the PDF in your email client")
 }
 
 el("uploadBtn").addEventListener("click", openPicker)

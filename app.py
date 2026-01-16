@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import PyPDF2
 import requests
 from flask import Flask, jsonify, render_template, request, send_file
+from email.message import EmailMessage
+import smtplib
 
 try:
     import fitz  # PyMuPDF
@@ -446,13 +448,8 @@ To: <recipient>
 From: <authoring provider>
 Date: <current date>
 <blank line>
-Patient: <full name>
-DOB: <date> (<age>)
-Sex: <sex>
-PHN: <phn>
-Phone: <phone>
-Email: <email>
-Address: <address>
+Patient: <full name> | DOB: <date> (<age>) | Sex: <sex> | PHN: <phn>
+Phone: <phone> | Email: <email if present> | Address: <address if present>
 <blank line>
 Reason for Referral: <diagnosis chosen plus reason_detail if provided>
 <blank line>
@@ -461,12 +458,17 @@ Then the salutation line.
 For letter_html, render the same information using <p> blocks and preserve blank lines using spacing.
 
 Body rules:
-1 Use short paragraphs with good spacing.
-2 Include sections: Clinical summary, Exam findings, Assessment, Plan.
-3 Include exam findings with more granularity when available in the note. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
-4 Do not include Evidence or Disclaimer sections in the letter.
-5 Do not include citations or bracket numbers in the letter body.
-6 End with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
+1 The first body paragraph must be a referral narrative, not a section label. Start with: Thank you for seeing <patient>, a <age> year old <sex> patient who presented with <chief complaint> and is being referred for <reason plus requested service>.
+2 The second sentence must add brief context and urgency if relevant.
+3 After the opening narrative, use these headings exactly, each on its own line: Exam findings, Assessment, Plan.
+4 Use short paragraphs and compact lists when helpful. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
+5 Do not include Evidence or Disclaimer sections.
+6 Do not include citations or bracket numbers in the letter body.
+7 The closing paragraph must always include all three elements, written naturally:
+  a A thank you and appreciation for seeing the patient
+  b A subtle comanagement and collaboration signal, for example: I truly value comanaging patients with you and look forward to collaborating on future shared cases.
+  c A request for their impressions and recommendations, asking for a reply
+8 End with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
@@ -678,16 +680,16 @@ def html_to_text_for_pdf(html_in: str) -> str:
     s = re.sub(r"\n{3,}", "\n\n", s).strip()
     return s
 
-def export_pdf_response(text_in: str, provider_name: str, patient_token: str, recipient_type: str):
+def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipient_type: str) -> Tuple[Optional[str], str, str]:
     if SimpleDocTemplate is None:
-        return jsonify({"error": "PDF generator not available"}), 500
+        return None, "", "PDF generator not available"
 
     text_in = (text_in or "").strip()
     provider_name = (provider_name or "").strip() or "Provider"
     patient_token = (patient_token or "").strip()
     recipient_type = (recipient_type or "").strip()
     if not text_in:
-        return jsonify({"error": "No content"}), 400
+        return None, "", "No content"
 
     clinic_short = (os.environ.get("CLINIC_SHORT") or "Integra").strip() or "Integra"
 
@@ -703,8 +705,7 @@ def export_pdf_response(text_in: str, provider_name: str, patient_token: str, re
         parts = [p for p in safe_token(name).split("_") if p]
         if not parts:
             return "DrProvider"
-        last = parts[-1]
-        return "Dr" + last
+        return "Dr" + parts[-1]
 
     doc_tok = doctor_token(provider_name)
     px_tok = patient_token or "PxUnknown"
@@ -717,33 +718,118 @@ def export_pdf_response(text_in: str, provider_name: str, patient_token: str, re
     out_path = os.path.join(tempfile.gettempdir(), f"ai4health_{uuid.uuid4().hex}.pdf")
 
     styles = getSampleStyleSheet()
+
+    # Slightly smaller body and tighter leading to fit more on the page while preserving readability.
     base = ParagraphStyle(
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=12,
-        leading=16,
-        spaceAfter=6,
+        fontSize=11,
+        leading=14.2,
+        spaceAfter=5,
         alignment=TA_JUSTIFY,
     )
     head = ParagraphStyle(
         "head",
         parent=base,
         fontName="Helvetica-Bold",
-        spaceBefore=10,
-        spaceAfter=6,
+        spaceBefore=8,
+        spaceAfter=5,
         alignment=TA_LEFT,
     )
     mono = ParagraphStyle(
         "mono",
         parent=base,
         fontName="Helvetica",
+        fontSize=10.5,
+        leading=13.4,
         alignment=TA_LEFT,
         spaceAfter=0,
+    )
+    demo = ParagraphStyle(
+        "demo",
+        parent=mono,
+        spaceAfter=1,
     )
 
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def parse_compact_letter(text_raw: str) -> Dict[str, Any]:
+        lines = (text_raw or "").splitlines()
+        header: List[str] = []
+        body: List[str] = []
+        demo_data: Dict[str, str] = {
+            "patient": "",
+            "dob": "",
+            "sex": "",
+            "phn": "",
+            "phone": "",
+            "email": "",
+            "address": "",
+        }
+        reason_value = ""
+
+        in_demo = False
+        after_reason = False
+        for raw in lines:
+            line = (raw or "").rstrip()
+            lower = line.strip().lower()
+            if lower.startswith("reason for referral"):
+                after_reason = True
+                in_demo = False
+                reason_value = line.split(":", 1)[1].strip() if ":" in line else ""
+                continue
+
+            if lower.startswith("patient:") or lower.startswith("dob:") or lower.startswith("sex:") or lower.startswith("phn:") or lower.startswith("phone:") or lower.startswith("email:") or lower.startswith("address:"):
+                in_demo = True
+                try:
+                    k, v = line.split(":", 1)
+                    k = k.strip().lower()
+                    v = v.strip()
+                    if k == "patient":
+                        demo_data["patient"] = v
+                    elif k == "dob":
+                        demo_data["dob"] = v
+                    elif k == "sex":
+                        demo_data["sex"] = v
+                    elif k == "phn":
+                        demo_data["phn"] = v
+                    elif k == "phone":
+                        demo_data["phone"] = v
+                    elif k == "email":
+                        demo_data["email"] = v
+                    elif k == "address":
+                        demo_data["address"] = v
+                except Exception:
+                    pass
+                continue
+
+            if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
+                header.append(line)
+                continue
+
+            if not after_reason:
+                # Skip blank spacer lines between header and demographics.
+                if in_demo and (not line.strip()):
+                    continue
+                # Skip any other stray pre body line.
+                if (not line.strip()) and (not header):
+                    continue
+                # If we have header lines but no reason yet, we ignore spacer lines.
+                if (not line.strip()) and header:
+                    continue
+                # Anything else before reason is ignored to keep the layout deterministic.
+                continue
+
+            body.append(line)
+
+        return {
+            "header": header,
+            "demo": demo_data,
+            "reason": reason_value,
+            "body": body,
+        }
 
     story = []
 
@@ -758,22 +844,54 @@ def export_pdf_response(text_in: str, provider_name: str, patient_token: str, re
         except Exception:
             pass
 
-    raw_lines = text_in.splitlines()
-    for raw in raw_lines:
+    parsed = parse_compact_letter(text_in)
+
+    for line in parsed.get("header") or []:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            story.append(Paragraph(f"<b>{esc(k.strip())}:</b> {esc(v.strip())}", mono))
+
+    d = parsed.get("demo") or {}
+    demo_1_parts = []
+    if d.get("patient"):
+        demo_1_parts.append(f"<b>Patient</b>: {esc(d.get('patient'))}")
+    if d.get("dob"):
+        demo_1_parts.append(f"<b>DOB</b>: {esc(d.get('dob'))}")
+    if d.get("sex"):
+        demo_1_parts.append(f"<b>Sex</b>: {esc(d.get('sex'))}")
+    if d.get("phn"):
+        demo_1_parts.append(f"<b>PHN</b>: {esc(d.get('phn'))}")
+    demo_1 = "   |   ".join(demo_1_parts).strip()
+
+    demo_2_parts = []
+    if d.get("phone"):
+        demo_2_parts.append(f"<b>Phone</b>: {esc(d.get('phone'))}")
+    if d.get("email"):
+        demo_2_parts.append(f"<b>Email</b>: {esc(d.get('email'))}")
+    if d.get("address"):
+        demo_2_parts.append(f"<b>Addr</b>: {esc(d.get('address'))}")
+    demo_2 = "   |   ".join(demo_2_parts).strip()
+
+    if demo_1:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph(demo_1, demo))
+        if demo_2:
+            story.append(Paragraph(demo_2, demo))
+        story.append(Spacer(1, 8))
+
+    if parsed.get("reason"):
+        story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(parsed.get('reason'))}", base))
+        story.append(Spacer(1, 10))
+
+    for raw in parsed.get("body") or []:
         line = (raw or "").rstrip()
         if not line.strip():
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 9))
             continue
 
         lower = line.strip().lower()
 
         if lower in {"clinical summary", "clinical summary:"}:
-            continue
-        if lower.startswith("reason for referral"):
-            value = line.split(":", 1)[1].strip() if ":" in line else ""
-            story.append(Spacer(1, 10))
-            story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(value)}", base))
-            story.append(Spacer(1, 10))
             continue
 
         if lower in {"exam findings", "exam findings:", "assessment", "assessment:", "plan", "plan:"}:
@@ -781,19 +899,10 @@ def export_pdf_response(text_in: str, provider_name: str, patient_token: str, re
             story.append(Paragraph(f"<b>{esc(title)}</b>", head))
             continue
 
-        if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
-            story.append(Paragraph(f"<b>{esc(line.split(':',1)[0])}:</b> {esc(line.split(':',1)[1].strip())}", mono))
-            continue
-
-        if lower.startswith("patient:") or lower.startswith("dob:") or lower.startswith("sex:") or lower.startswith("phn:") or lower.startswith("phone:") or lower.startswith("email:") or lower.startswith("address:"):
-            key, val = line.split(":", 1)
-            story.append(Paragraph(f"<b>{esc(key)}:</b> {esc(val.strip())}", mono))
-            continue
-
         if lower.startswith("dear "):
-            story.append(Spacer(1, 8))
-            story.append(Paragraph(esc(line), base))
             story.append(Spacer(1, 6))
+            story.append(Paragraph(esc(line), base))
+            story.append(Spacer(1, 4))
             continue
 
         if lower.startswith("kind regards"):
@@ -844,10 +953,17 @@ def export_pdf_response(text_in: str, provider_name: str, patient_token: str, re
 
     try:
         doc.build(story)
-        return send_file(out_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
+        return out_path, filename, ""
     except Exception as e:
-        app.logger.exception("PDF export failed")
-        return jsonify({"error": f"PDF export failed: {type(e).__name__}: {str(e)}"}), 500
+        app.logger.exception("PDF build failed")
+        return None, "", f"PDF build failed: {type(e).__name__}: {str(e)}"
+
+def export_pdf_response(text_in: str, provider_name: str, patient_token: str, recipient_type: str):
+    pdf_path, filename, err = build_pdf_file(text_in, provider_name, patient_token, recipient_type)
+    if err or not pdf_path:
+        code = 500 if "available" in (err or "").lower() else 400
+        return jsonify({"error": err or "PDF failed"}), code
+    return send_file(pdf_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 @app.post("/export_pdf")
 def export_pdf():
@@ -868,6 +984,104 @@ def export_pdf_html():
     recipient_type = (payload.get("recipient_type") or "").strip()
     text_in = html_to_text_for_pdf(html_in)
     return export_pdf_response(text_in, provider_name, patient_token, recipient_type)
+
+def smtp_settings() -> Dict[str, str]:
+    return {
+        "host": (os.getenv("SMTP_HOST") or "").strip(),
+        "port": (os.getenv("SMTP_PORT") or "").strip(),
+        "user": (os.getenv("SMTP_USER") or "").strip(),
+        "password": (os.getenv("SMTP_PASS") or "").strip(),
+        "from": (os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "").strip(),
+    }
+
+def smtp_ready() -> Tuple[bool, str]:
+    s = smtp_settings()
+    if not s.get("host"):
+        return False, "SMTP host not configured"
+    if not s.get("port"):
+        return False, "SMTP port not configured"
+    if not s.get("from"):
+        return False, "SMTP from address not configured"
+    return True, ""
+
+def send_pdf_via_email(to_email: str, subject: str, body: str, pdf_path: str, filename: str) -> Tuple[bool, str]:
+    ok, msg = smtp_ready()
+    if not ok:
+        return False, msg
+    s = smtp_settings()
+    try:
+        port = int(s.get("port") or "0")
+    except Exception:
+        return False, "SMTP port is invalid"
+
+    try:
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+    except Exception:
+        return False, "Could not read generated PDF"
+
+    m = EmailMessage()
+    m["From"] = s.get("from")
+    m["To"] = to_email
+    m["Subject"] = subject
+    m.set_content(body or "")
+    m.add_attachment(pdf_bytes, maintype="application", subtype="pdf", filename=filename)
+
+    try:
+        server = smtplib.SMTP(s.get("host"), port, timeout=20)
+        try:
+            server.ehlo()
+            if port == 587:
+                server.starttls()
+                server.ehlo()
+            if s.get("user") and s.get("password"):
+                server.login(s.get("user"), s.get("password"))
+            server.send_message(m)
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+        return True, ""
+    except Exception as e:
+        return False, f"Email failed: {type(e).__name__}: {str(e)}"
+
+
+@app.post("/send_pdf_email")
+def send_pdf_email():
+    payload = request.get_json(silent=True) or {}
+    to_email = (payload.get("to_email") or "").strip()
+    subject = (payload.get("subject") or "").strip() or "Clinical letter"
+    message = (payload.get("message") or "").strip()
+    html_in = (payload.get("html") or "").strip()
+    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
+    patient_token = (payload.get("patient_token") or "").strip()
+    recipient_type = (payload.get("recipient_type") or "").strip()
+
+    if not to_email:
+        return jsonify({"ok": False, "error": "Recipient email is required"}), 200
+    if not html_in:
+        return jsonify({"ok": False, "error": "No letter content"}), 200
+
+    ok, msg = smtp_ready()
+    if not ok:
+        return jsonify({"ok": False, "error": msg}), 200
+
+    text_in = html_to_text_for_pdf(html_in)
+
+    pdf_path, filename, build_err = build_pdf_file(text_in, provider_name, patient_token, recipient_type)
+    if build_err or not pdf_path:
+        return jsonify({"ok": False, "error": build_err or "PDF build failed"}), 200
+
+    ok_send, err_send = send_pdf_via_email(to_email, subject, message, pdf_path, filename)
+    try:
+        os.remove(pdf_path)
+    except Exception:
+        pass
+
+    if not ok_send:
+        return jsonify({"ok": False, "error": err_send}), 200
+    return jsonify({"ok": True}), 200
 
 @app.get("/healthz")
 def healthz():
