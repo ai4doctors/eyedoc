@@ -1,5 +1,7 @@
 
 import os
+import tempfile
+import uuid
 import json
 import re
 import threading
@@ -651,6 +653,10 @@ def find_signature_image(provider_name: str) -> Optional[str]:
             return cand
     return None
 
+def signature_image_for_provider(provider_name: str) -> Optional[str]:
+    """Backward compatible helper used by PDF export."""
+    return find_signature_image(provider_name)
+
 @app.post("/export_pdf")
 def export_pdf():
     if SimpleDocTemplate is None:
@@ -697,10 +703,10 @@ def export_pdf():
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=11,
-        leading=15,
+        fontSize=12,
+        leading=16,
         spaceAfter=6,
-        alignment=TA_JUSTIFY,
+        alignment=TA_LEFT,
     )
     head = ParagraphStyle(
         "head",
@@ -798,8 +804,12 @@ def export_pdf():
         title=filename,
     )
 
-    doc.build(story)
-    return send_file(out_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
+    try:
+        doc.build(story)
+        return send_file(out_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
+    except Exception as e:
+        app.logger.exception("PDF export failed")
+        return jsonify({"error": f"PDF export failed: {type(e).__name__}: {str(e)}"}), 500
 
 @app.get("/healthz")
 def healthz():

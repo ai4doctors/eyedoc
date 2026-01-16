@@ -731,7 +731,14 @@ async function exportPdf(){
     })
   })
   if(!res.ok){
-    toast("PDF export failed")
+    let msg = "PDF export failed"
+    try{
+      const j = await res.json()
+      if(j && j.error){
+        msg = j.error
+      }
+    }catch(e){}
+    toast(msg)
     return
   }
   const blob = await res.blob()
