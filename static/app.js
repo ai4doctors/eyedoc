@@ -204,8 +204,7 @@ function loadCaseById(id){
   }
   latestAnalysis = c.analysis
   latestLetterHtml = ""
-  el("letter").value = ""
-  updatePreview()
+  setLetterHtml("")
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -223,52 +222,40 @@ function clearCases(){
 
 function el(id){ return document.getElementById(id) }
 
-function updatePreview(){
-  const box = el("letterPreview")
+function getLetterHtml(){
+  const box = el("letterHtml")
+  return box ? (box.innerHTML || "").trim() : ""
+}
+
+function setLetterHtml(html){
+  const box = el("letterHtml")
   if(!box){
     return
   }
-  const text = (el("letter").value || "").trim()
-  box.innerHTML = ""
-  if(!text){
-    const empty = document.createElement("div")
-    empty.className = "previewEmpty"
-    empty.textContent = "Preview will appear here."
-    box.appendChild(empty)
-    return
-  }
-  const paras = text.split(/\n\s*\n/g)
-  paras.forEach(p => {
-    const para = document.createElement("p")
-    para.className = "previewP"
-    const lines = p.split(/\n/g)
-    lines.forEach((line, idx) => {
-      if(idx > 0){
-        para.appendChild(document.createElement("br"))
-      }
-      para.appendChild(document.createTextNode(line))
-    })
-    box.appendChild(para)
-  })
+  box.innerHTML = (html || "").trim()
 }
 
-function openEmailDraft(){
-  const text = (el("letter").value || "").trim()
-  if(!text){
-    toast("Nothing to email")
+function setLetterHtml(html){
+  const box = el("letterHtml")
+  if(!box){
     return
   }
+  box.innerHTML = html || ""
+}
 
+function getLetterHtml(){
+  const box = el("letterHtml")
+  if(!box){
+    return ""
+  }
+  return (box.innerHTML || "").trim()
+}
+
+function defaultPdfSubject(){
   const recipientType = (el("recipientType").value || "").trim()
-  const providerName = (el("fromDoctor").value || "").trim()
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
-  const subjectParts = ["AI4Health", recipientType, patientToken].filter(Boolean)
-  const subject = subjectParts.join(" ")
-
-  const body = text
-  const href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body)
-  window.location.href = href
+  return ["AI4Health", recipientType, patientToken].filter(Boolean).join(" ")
 }
 
 function toast(msg){
@@ -324,8 +311,7 @@ function clearAll(){
   el("dxBox").textContent = "No data yet."
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
-  el("letter").value = ""
-  updatePreview()
+  setLetterHtml("")
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -700,9 +686,8 @@ async function generateReport(){
       setGenerateStatus("idle")
       return
     }
-    el("letter").value = json.letter_plain || ""
     latestLetterHtml = json.letter_html || ""
-    updatePreview()
+    setLetterHtml(latestLetterHtml)
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -714,58 +699,21 @@ async function generateReport(){
   }
 }
 
-async function copyPlain(){
-  const text = el("letter").value || ""
-  if(!text.trim()){
-    toast("Nothing to copy")
-    return
-  }
-  try{
-    await navigator.clipboard.writeText(text)
-    toast("Copied")
-  }catch(e){
-    toast("Copy failed")
-  }
-}
-
-async function copyRich(){
-  const plain = el("letter").value || ""
-  const html = latestLetterHtml || ""
-  if(!plain.trim()){
-    toast("Nothing to copy")
-    return
-  }
-  try{
-    if(html.trim() && window.ClipboardItem){
-      const item = new ClipboardItem({
-        "text/plain": new Blob([plain], {type:"text/plain"}),
-        "text/html": new Blob([html], {type:"text/html"})
-      })
-      await navigator.clipboard.write([item])
-    }else{
-      await navigator.clipboard.writeText(plain)
-    }
-    toast("Copied")
-  }catch(e){
-    toast("Copy failed")
-  }
-}
-
-async function exportPdf(){
-  const text = el("letter").value || ""
-  if(!text.trim()){
+async function fetchPdfBlob(){
+  const html = getLetterHtml()
+  if(!html.trim()){
     toast("Nothing to export")
-    return
+    return null
   }
   const providerName = (el("fromDoctor").value || "").trim()
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
   const recipientType = (el("recipientType").value || "").trim()
-  const res = await fetch("/export_pdf", {
+  const res = await fetch("/export_pdf_html", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
-      text,
+      html,
       provider_name: providerName,
       patient_token: patientToken,
       recipient_type: recipientType
@@ -780,24 +728,51 @@ async function exportPdf(){
       }
     }catch(e){}
     toast(msg)
+    return null
+  }
+  return { blob: await res.blob(), contentDisposition: res.headers.get("Content-Disposition") || "" }
+}
+
+function filenameFromContentDisposition(cd){
+  const m = (cd || "").match(/filename\s*=\s*"?([^";]+)"?/i)
+  return (m && m[1]) ? m[1] : "ai4health_output.pdf"
+}
+
+async function downloadPdf(){
+  const result = await fetchPdfBlob()
+  if(!result){
     return
   }
-  const blob = await res.blob()
-  const url = URL.createObjectURL(blob)
+  const url = URL.createObjectURL(result.blob)
   const a = document.createElement("a")
   a.href = url
-  let filename = "ai4health_output.pdf"
-  const cd = res.headers.get("Content-Disposition") || ""
-  const m = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
-  if(m && m[1]){
-    filename = m[1]
-  }
-  a.download = filename
+  a.download = filenameFromContentDisposition(result.contentDisposition)
   document.body.appendChild(a)
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
   toast("Downloaded")
+}
+
+async function emailPdf(){
+  const result = await fetchPdfBlob()
+  if(!result){
+    return
+  }
+  const filename = filenameFromContentDisposition(result.contentDisposition)
+  const file = new File([result.blob], filename, { type:"application/pdf" })
+  const title = defaultPdfSubject()
+  try{
+    if(navigator.share && (!navigator.canShare || navigator.canShare({ files:[file] }))){
+      await navigator.share({ title, files:[file] })
+      toast("Shared")
+      return
+    }
+  }catch(e){
+    // fall through
+  }
+  await downloadPdf()
+  toast("Downloaded. Attach the PDF in your email client")
 }
 
 el("uploadBtn").addEventListener("click", openPicker)
@@ -837,15 +812,11 @@ el("reasonFocus").addEventListener("change", () => {
 })
 
 el("generateBtn").addEventListener("click", generateReport)
-el("copyPlain").addEventListener("click", copyPlain)
-el("copyRich").addEventListener("click", copyRich)
-if(el("emailDraft")){
-  el("emailDraft").addEventListener("click", openEmailDraft)
+if(el("downloadPdf")){
+  el("downloadPdf").addEventListener("click", downloadPdf)
 }
-el("exportPdf").addEventListener("click", exportPdf)
-
-if(el("letter")){
-  el("letter").addEventListener("input", updatePreview)
+if(el("emailPdf")){
+  el("emailPdf").addEventListener("click", emailPdf)
 }
 
 if(el("runOcrBtn")){
@@ -897,4 +868,4 @@ document.addEventListener("click", (e) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
-updatePreview()
+setLetterHtml("")

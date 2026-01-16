@@ -127,21 +127,12 @@
       </section>
 
       <section class="output">
-        <div class="outputGrid">
-          <div class="outputCol">
-            <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
-          </div>
-          <div class="outputCol">
-            <div id="letterPreview" class="letterPreview">
-              <div class="previewEmpty">Preview will appear here.</div>
-            </div>
-          </div>
+        <div class="letterShell">
+          <div class="letterPaper" id="letterHtml" contenteditable="true" spellcheck="false" aria-label="Editable letter"></div>
         </div>
         <div class="outputActions">
-          <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
-          <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
-          <button id="emailDraft" class="btn" type="button">Email draft</button>
-          <button id="exportPdf" class="btn" type="button">Export PDF</button>
+          <button id="downloadPdf" class="btnPrimary" type="button">Download PDF</button>
+          <button id="emailPdf" class="btn" type="button">Email PDF</button>
         </div>
       </section>
 

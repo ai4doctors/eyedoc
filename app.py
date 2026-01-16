@@ -4,6 +4,7 @@ import tempfile
 import uuid
 import json
 import re
+import html as html_lib
 import threading
 import time
 import io
@@ -657,16 +658,34 @@ def signature_image_for_provider(provider_name: str) -> Optional[str]:
     """Backward compatible helper used by PDF export."""
     return find_signature_image(provider_name)
 
-@app.post("/export_pdf")
-def export_pdf():
+def html_to_text_for_pdf(html_in: str) -> str:
+    s = (html_in or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"(?is)<script.*?>.*?</script>", "", s)
+    s = re.sub(r"(?is)<style.*?>.*?</style>", "", s)
+    s = re.sub(r"(?i)<br\s*/?>", "\n", s)
+    s = re.sub(r"(?i)</p\s*>", "\n\n", s)
+    s = re.sub(r"(?i)<p\b[^>]*>", "", s)
+    s = re.sub(r"(?i)</h[1-6]\s*>", "\n\n", s)
+    s = re.sub(r"(?i)<h[1-6]\b[^>]*>", "", s)
+    s = re.sub(r"(?i)<li\b[^>]*>", "* ", s)
+    s = re.sub(r"(?i)</li\s*>", "\n", s)
+    s = re.sub(r"(?i)</ul\s*>", "\n\n", s)
+    s = re.sub(r"(?i)<ul\b[^>]*>", "", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = html_lib.unescape(s)
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
+    return s
+
+def export_pdf_response(text_in: str, provider_name: str, patient_token: str, recipient_type: str):
     if SimpleDocTemplate is None:
         return jsonify({"error": "PDF generator not available"}), 500
 
-    payload = request.get_json(silent=True) or {}
-    text_in = (payload.get("text") or "").strip()
-    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
-    patient_token = (payload.get("patient_token") or "").strip()
-    recipient_type = (payload.get("recipient_type") or "").strip()
+    text_in = (text_in or "").strip()
+    provider_name = (provider_name or "").strip() or "Provider"
+    patient_token = (patient_token or "").strip()
+    recipient_type = (recipient_type or "").strip()
     if not text_in:
         return jsonify({"error": "No content"}), 400
 
@@ -695,7 +714,6 @@ def export_pdf():
     kind = safe_token(kind)
 
     filename = f"{safe_token(clinic_short)}_{doc_tok}_{safe_token(px_tok)}_{today}_{kind}.pdf"
-
     out_path = os.path.join(tempfile.gettempdir(), f"ai4health_{uuid.uuid4().hex}.pdf")
 
     styles = getSampleStyleSheet()
@@ -749,11 +767,9 @@ def export_pdf():
 
         lower = line.strip().lower()
 
-        # Drop the standalone Clinical summary label entirely.
         if lower in {"clinical summary", "clinical summary:"}:
             continue
         if lower.startswith("reason for referral"):
-            # Render as a single, scannable line with breathing room
             value = line.split(":", 1)[1].strip() if ":" in line else ""
             story.append(Spacer(1, 10))
             story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(value)}", base))
@@ -787,8 +803,6 @@ def export_pdf():
             if sig_path and os.path.exists(sig_path):
                 try:
                     sig = RLImage(sig_path)
-                    # Signature sizing and alignment
-                    # Target about a quarter page width, preserve aspect ratio, cap height.
                     page_w = rl_letter[0]
                     max_width = int(page_w * 0.25)
                     max_height = 90
@@ -799,7 +813,6 @@ def export_pdf():
                         sig.drawWidth = iw * scale
                         sig.drawHeight = ih * scale
                     story.append(Spacer(1, 6))
-                    # Use the document text width directly to avoid relying on doc before creation.
                     text_w = rl_letter[0] - 54 - 54
                     tbl = Table([[sig]], colWidths=[text_w])
                     tbl.setStyle(TableStyle([
@@ -835,6 +848,26 @@ def export_pdf():
     except Exception as e:
         app.logger.exception("PDF export failed")
         return jsonify({"error": f"PDF export failed: {type(e).__name__}: {str(e)}"}), 500
+
+@app.post("/export_pdf")
+def export_pdf():
+    payload = request.get_json(silent=True) or {}
+    text_in = (payload.get("text") or "").strip()
+    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
+    patient_token = (payload.get("patient_token") or "").strip()
+    recipient_type = (payload.get("recipient_type") or "").strip()
+    return export_pdf_response(text_in, provider_name, patient_token, recipient_type)
+
+
+@app.post("/export_pdf_html")
+def export_pdf_html():
+    payload = request.get_json(silent=True) or {}
+    html_in = (payload.get("html") or "").strip()
+    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
+    patient_token = (payload.get("patient_token") or "").strip()
+    recipient_type = (payload.get("recipient_type") or "").strip()
+    text_in = html_to_text_for_pdf(html_in)
+    return export_pdf_response(text_in, provider_name, patient_token, recipient_type)
 
 @app.get("/healthz")
 def healthz():
