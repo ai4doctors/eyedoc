@@ -1,21 +1,18 @@
-# AI4Health
-
-Stable synchronous build.
-
-Features
-
-1. Step 1 upload PDF or TXT and extract text inline
-2. Step 2 aligned fields using CSS grid
-3. Premium UI styling with Source Sans 3
-4. Generated letter rendered as rich HTML only
-5. Email button uses mailto with subject and body prefilled
-
-Local run
-
-1. Create a virtual environment
-2. pip install -r requirements.txt
-3. python app.py
+AI4Health
 
 Deploy
 
-Procfile uses gunicorn app:app
+This repo is designed to run on Render as a Python web service.
+
+Environment variables
+
+1 OPENAI_API_KEY
+2 OPENAI_MODEL optional default gpt 4.1
+
+Letterhead image for PDF export
+
+To add a letterhead to every exported PDF, replace this file with your own PNG
+
+static/letterhead.png
+
+Optionally you can set LETTERHEAD_IMAGE to a relative path inside the repo.

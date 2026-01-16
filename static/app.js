@@ -205,6 +205,7 @@ function loadCaseById(id){
   latestAnalysis = c.analysis
   latestLetterHtml = ""
   el("letter").value = ""
+  updatePreview()
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -221,6 +222,54 @@ function clearCases(){
 }
 
 function el(id){ return document.getElementById(id) }
+
+function updatePreview(){
+  const box = el("letterPreview")
+  if(!box){
+    return
+  }
+  const text = (el("letter").value || "").trim()
+  box.innerHTML = ""
+  if(!text){
+    const empty = document.createElement("div")
+    empty.className = "previewEmpty"
+    empty.textContent = "Preview will appear here."
+    box.appendChild(empty)
+    return
+  }
+  const paras = text.split(/\n\s*\n/g)
+  paras.forEach(p => {
+    const para = document.createElement("p")
+    para.className = "previewP"
+    const lines = p.split(/\n/g)
+    lines.forEach((line, idx) => {
+      if(idx > 0){
+        para.appendChild(document.createElement("br"))
+      }
+      para.appendChild(document.createTextNode(line))
+    })
+    box.appendChild(para)
+  })
+}
+
+function openEmailDraft(){
+  const text = (el("letter").value || "").trim()
+  if(!text){
+    toast("Nothing to email")
+    return
+  }
+
+  const recipientType = (el("recipientType").value || "").trim()
+  const providerName = (el("fromDoctor").value || "").trim()
+  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
+  const patientToken = patientTokenFromBlock(patientBlock)
+  const subjectParts = ["AI4Health", recipientType, patientToken].filter(Boolean)
+  const subject = subjectParts.join(" ")
+
+  const body = text
+  const href = "mailto:?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body)
+  window.location.href = href
+}
 
 function toast(msg){
   const t = el("toast")
@@ -276,6 +325,7 @@ function clearAll(){
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
   el("letter").value = ""
+  updatePreview()
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -652,6 +702,7 @@ async function generateReport(){
     }
     el("letter").value = json.letter_plain || ""
     latestLetterHtml = json.letter_html || ""
+    updatePreview()
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -788,7 +839,14 @@ el("reasonFocus").addEventListener("change", () => {
 el("generateBtn").addEventListener("click", generateReport)
 el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
+if(el("emailDraft")){
+  el("emailDraft").addEventListener("click", openEmailDraft)
+}
 el("exportPdf").addEventListener("click", exportPdf)
+
+if(el("letter")){
+  el("letter").addEventListener("input", updatePreview)
+}
 
 if(el("runOcrBtn")){
   el("runOcrBtn").addEventListener("click", async () => {
@@ -839,3 +897,4 @@ document.addEventListener("click", (e) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
+updatePreview()

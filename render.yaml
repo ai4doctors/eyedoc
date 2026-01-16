@@ -3,8 +3,5 @@ services:
     name: ai4health
     env: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
-    envVars:
-      - key: FLASK_SECRET_KEY
-        generateValue: true
+    buildCommand: apt-get update && apt-get install -y tesseract-ocr && pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: gunicorn app:app --timeout 180

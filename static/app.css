@@ -185,6 +185,8 @@ body{
 .fieldTo{grid-column: 4 / span 4}
 .fieldFrom{grid-column: 8 / span 3}
 .fieldAction{grid-column: 11 / span 2}
+.fieldAction .btnPrimary{width:100%}
+.fieldAction .stepStatus{min-height:18px}
 .fieldReason{grid-column: 1 / span 6}
 .fieldFocus{grid-column: 7 / span 3}
 .fieldRequests{grid-column: 10 / span 3}
@@ -278,6 +280,7 @@ body{
   color: var(--text);
   min-width:180px;
   font-size:16px;
+  min-height:46px;
 }
 .ctrl.wide{min-width:220px}
 .ctrl.xwide{min-width:320px}
@@ -287,11 +290,12 @@ body{
   padding:12px 18px;
   border-radius:14px;
   border:1px solid rgba(0,0,0,0.06);
-  background: linear-gradient(180deg, rgba(43,139,214,1), rgba(25,110,190,1));
+  background: linear-gradient(180deg, rgba(43,139,214,1), rgba(23,104,184,1));
   color:#ffffff;
   font-weight:900;
   cursor:pointer;
   font-size:16px;
+  min-height:46px;
   box-shadow: 0 10px 22px rgba(43,139,214,0.22);
   transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
@@ -301,6 +305,36 @@ body{
 
 .output{
   padding:0 26px 16px 26px;
+}
+
+.outputGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+
+.outputCol{min-width:0}
+
+.letterPreview{
+  width:100%;
+  min-height:420px;
+  border-radius:18px;
+  border:1px solid var(--border);
+  background: var(--panel);
+  padding:18px;
+  box-shadow: 0 10px 28px rgba(10, 20, 60, 0.08);
+  overflow:auto;
+}
+
+.previewEmpty{
+  color:var(--muted);
+  font-size:16px;
+}
+
+.previewP{
+  margin:0 0 14px 0;
+  line-height:1.75;
+  font-size:18px;
 }
 .letter{
   width:100%;
@@ -313,6 +347,10 @@ body{
   font-size:18px;
   line-height:1.75;
   resize:vertical;
+}
+
+@media (max-width: 1100px){
+  .outputGrid{grid-template-columns: 1fr}
 }
 .outputActions{
   display:flex;
@@ -330,6 +368,7 @@ body{
   cursor:pointer;
   font-size:16px;
   font-weight:800;
+  min-height:46px;
 }
 
 .spinner{
