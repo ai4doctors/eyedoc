@@ -3,7 +3,7 @@ let uploadedFile = null
 let jobId = ""
 let latestAnalysis = null
 let latestLetterHtml = ""
-let theme = "dark"
+let theme = localStorage.getItem("ai4health_theme") || "light"
 
 const CASES_KEY = "ai4health_cases_v1"
 
@@ -117,7 +117,35 @@ function toast(msg){
 }
 
 function setAnalyzeStatus(state){
-  el("analyzeStatus").textContent = `Wait for analysis to complete (${state})`
+  const box = el("analyzeStatus")
+  if(state === "processing"){
+    box.innerHTML = 'Wait for analysis to complete <span class="muted">(processing)</span> <span class="spinner" aria-hidden="true"></span>'
+    return
+  }
+  if(state === "analysis complete"){
+    box.innerHTML = 'Analysis complete <span class="muted">(ready)</span>'
+    return
+  }
+  box.innerHTML = 'Wait for analysis to complete <span class="muted">(waiting)</span>'
+}
+
+function setGenerateStatus(state){
+  const box = el("generateStatus")
+  if(!box){
+    return
+  }
+  if(state === "processing"){
+    box.classList.remove("hidden")
+    box.innerHTML = 'Generating report <span class="muted">(processing)</span> <span class="spinner" aria-hidden="true"></span>'
+    return
+  }
+  if(state === "ready"){
+    box.classList.add("hidden")
+    box.textContent = "Ready"
+    return
+  }
+  box.classList.add("hidden")
+  box.textContent = ""
 }
 
 function openPicker(){
@@ -150,15 +178,16 @@ function newCase(){
 }
 
 function applyTheme(){
-  if(theme === "light"){
-    document.body.classList.add("light")
+  if(theme === "dark"){
+    document.body.classList.add("dark")
   }else{
-    document.body.classList.remove("light")
+    document.body.classList.remove("dark")
   }
 }
 
 function toggleTheme(){
   theme = (theme === "dark") ? "light" : "dark"
+  localStorage.setItem("ai4health_theme", theme)
   applyTheme()
   toast(`Theme ${theme}`)
 }
@@ -486,20 +515,35 @@ async function generateReport(){
     toast("Analyze first")
     return
   }
+  const btn = el("generateBtn")
+  btn.disabled = true
+  setGenerateStatus("processing")
+  const originalLabel = btn.textContent
+  btn.textContent = "Generating report"
   const payload = { form: buildForm(), analysis: latestAnalysis }
-  const res = await fetch("/generate_report", {
-    method:"POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payload)
-  })
-  const json = await res.json()
-  if(!json.ok){
-    toast(json.error || "Generation failed")
-    return
+  try{
+    const res = await fetch("/generate_report", {
+      method:"POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    })
+    const json = await res.json()
+    if(!json.ok){
+      toast(json.error || "Generation failed")
+      setGenerateStatus("idle")
+      return
+    }
+    el("letter").value = json.letter_plain || ""
+    latestLetterHtml = json.letter_html || ""
+    toast("Report ready")
+    setGenerateStatus("idle")
+  }catch(e){
+    toast("Generation failed")
+    setGenerateStatus("idle")
+  }finally{
+    btn.disabled = false
+    btn.textContent = originalLabel
   }
-  el("letter").value = json.letter_plain || ""
-  latestLetterHtml = json.letter_html || ""
-  toast("Report ready")
 }
 
 async function copyPlain(){

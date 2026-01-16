@@ -420,8 +420,6 @@ def generate_report():
 
     return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
-@app.post("/export_pdf")
-
 def signature_slug(provider_name: str) -> str:
     s = (provider_name or "").strip().lower()
     s = re.sub(r"\b(dr\.?|md|od|mba)\b", "", s)
@@ -441,6 +439,7 @@ def find_signature_image(provider_name: str) -> Optional[str]:
             return cand
     return None
 
+@app.post("/export_pdf")
 def export_pdf():
     if canvas is None or rl_letter is None:
         return jsonify({"ok": False, "error": "PDF export not available"}), 500
