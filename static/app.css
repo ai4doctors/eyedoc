@@ -201,7 +201,9 @@ body{
 }
 
 /* Step 2 control sizing: fill the grid cells regardless of prepopulated values */
-.commGrid .ctrl{width:100%}
+.commGrid .ctrl{width:100%; min-width:0}
+.commGrid .field{min-width:0}
+.commGrid input.ctrl, .commGrid select.ctrl, .commGrid textarea.ctrl{min-width:0}
 .commGrid .btnPrimary{width:100%}
 .fileInput{display:none}
 .stepStatus{
@@ -306,18 +308,37 @@ body{
 .output{
   padding:0 26px 16px 26px;
 }
-.letter{
+.tabBar{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.tabBtn{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  cursor:pointer;
+  font-size:16px;
+  font-weight:900;
+}
+.tabBtn.active{background: rgba(43,139,214,0.12); border-color: rgba(43,139,214,0.35)}
+
+.letterPage{
   width:100%;
-  min-height:420px;
+  min-height:520px;
   border-radius:18px;
   border:1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  padding:18px;
-  font-size:18px;
-  line-height:1.75;
-  resize:vertical;
+  background: #ffffff;
+  color: #0f172a;
+  padding:24px;
+  box-shadow: 0 10px 30px rgba(2,6,23,0.06);
 }
+.letterheadImg{width:100%; height:auto; display:block; margin-bottom:14px}
+.letterMeta{margin:0 0 12px 0; font-size:14px; color:#334155}
+.letterBody{min-height:340px; font-size:16px; line-height:1.65; outline:none}
+.letterBody p{margin:0 0 10px 0}
+.signatureWrap{display:flex; justify-content:flex-end; margin-top:18px}
+.signatureImg{width:25%; max-width:500px; height:auto; object-fit:contain}
+
+.hidden{display:none !important}
 .outputActions{
   display:flex;
   gap:10px;

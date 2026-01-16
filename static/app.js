@@ -3,6 +3,48 @@ let uploadedFile = null
 let jobId = ""
 let latestAnalysis = null
 let latestLetterHtml = ""
+let letters = {
+  primary: { html: "", plain: "", recipient_type: "Physician" },
+  patient: { html: "", plain: "", recipient_type: "Patient" }
+}
+let activeTab = "primary"
+
+function setTab(tabKey){
+  activeTab = tabKey
+  const tabs = document.querySelectorAll(".tabBtn")
+  tabs.forEach(t => {
+    const k = t.getAttribute("data-tab")
+    if(k === tabKey){
+      t.classList.add("active")
+    }else{
+      t.classList.remove("active")
+    }
+  })
+  const panels = ["primary","patient"]
+  panels.forEach(k => {
+    const p = el("tab_" + k)
+    if(!p){ return }
+    if(k === tabKey){
+      p.classList.remove("hidden")
+    }else{
+      p.classList.add("hidden")
+    }
+  })
+}
+
+function getActiveBody(){
+  const wrapper = el("tab_" + activeTab)
+  if(!wrapper){ return null }
+  return wrapper.querySelector(".letterBody")
+}
+
+function syncActiveFromDom(){
+  const body = getActiveBody()
+  if(!body){ return }
+  letters[activeTab].html = body.innerHTML || ""
+  letters[activeTab].plain = body.innerText || ""
+  latestLetterHtml = letters[activeTab].html
+}
 // Single theme for consistency
 let theme = "light"
 
@@ -204,7 +246,7 @@ function loadCaseById(id){
   }
   latestAnalysis = c.analysis
   latestLetterHtml = ""
-  el("letter").value = ""
+  clearLetterTabs()
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -213,6 +255,18 @@ function loadCaseById(id){
   renderRefs()
   setAnalyzeStatus("analysis complete")
   toast("Case loaded")
+}
+
+function clearLetterTabs(){
+  letters.primary.html = ""
+  letters.primary.plain = ""
+  letters.patient.html = ""
+  letters.patient.plain = ""
+  const b1 = el("letterBody_primary")
+  const b2 = el("letterBody_patient")
+  if(b1){ b1.innerHTML = "" }
+  if(b2){ b2.innerHTML = "" }
+  setTab("primary")
 }
 
 function clearCases(){
@@ -275,7 +329,7 @@ function clearAll(){
   el("dxBox").textContent = "No data yet."
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
-  el("letter").value = ""
+  clearLetterTabs()
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -639,7 +693,7 @@ async function generateReport(){
   btn.textContent = "Generating report"
   const payload = { form: buildForm(), analysis: latestAnalysis }
   try{
-    const res = await fetch("/generate_report", {
+    const res = await fetch("/generate_letters", {
       method:"POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
@@ -650,8 +704,20 @@ async function generateReport(){
       setGenerateStatus("idle")
       return
     }
-    el("letter").value = json.letter_plain || ""
-    latestLetterHtml = json.letter_html || ""
+    letters.primary.html = json.primary_html || ""
+    letters.primary.plain = json.primary_plain || ""
+    letters.primary.recipient_type = (json.primary_recipient_type || "Physician")
+
+    letters.patient.html = json.patient_html || ""
+    letters.patient.plain = json.patient_plain || ""
+    letters.patient.recipient_type = (json.patient_recipient_type || "Patient")
+
+    const primaryBody = el("tab_primary")?.querySelector(".letterBody")
+    const patientBody = el("tab_patient")?.querySelector(".letterBody")
+    if(primaryBody){ primaryBody.innerHTML = letters.primary.html }
+    if(patientBody){ patientBody.innerHTML = letters.patient.html }
+    setTab("primary")
+    latestLetterHtml = letters.primary.html || ""
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -664,7 +730,8 @@ async function generateReport(){
 }
 
 async function copyPlain(){
-  const text = el("letter").value || ""
+  syncActiveFromDom()
+  const text = (letters[activeTab]?.plain || "")
   if(!text.trim()){
     toast("Nothing to copy")
     return
@@ -678,8 +745,9 @@ async function copyPlain(){
 }
 
 async function copyRich(){
-  const plain = el("letter").value || ""
-  const html = latestLetterHtml || ""
+  syncActiveFromDom()
+  const plain = (letters[activeTab]?.plain || "")
+  const html = (letters[activeTab]?.html || "")
   if(!plain.trim()){
     toast("Nothing to copy")
     return
@@ -701,7 +769,8 @@ async function copyRich(){
 }
 
 async function exportPdf(){
-  const text = el("letter").value || ""
+  syncActiveFromDom()
+  const text = (letters[activeTab]?.plain || "")
   if(!text.trim()){
     toast("Nothing to export")
     return
@@ -709,7 +778,7 @@ async function exportPdf(){
   const providerName = (el("fromDoctor").value || "").trim()
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
-  const recipientType = (el("recipientType").value || "").trim()
+  const recipientType = (letters[activeTab]?.recipient_type || (el("recipientType").value || "").trim())
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
@@ -747,6 +816,32 @@ async function exportPdf(){
   a.remove()
   URL.revokeObjectURL(url)
   toast("Downloaded")
+}
+
+function emailLetter(){
+  syncActiveFromDom()
+  const text = (letters[activeTab]?.plain || "")
+  const subject = buildEmailSubject()
+  const body = text
+  const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  window.location.href = mailto
+}
+
+function buildEmailSubject(){
+  const docType = (el("recipientType").value || "Letter")
+  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
+  const token = patientTokenFromBlock(patientBlock)
+  return `${docType} ${token}`.trim()
+}
+
+async function downloadAllPdfs(){
+  const current = activeTab
+  for(const key of Object.keys(letters)){
+    if(!(letters[key]?.plain || "").trim()) continue
+    setTab(key)
+    await exportPdf()
+  }
+  setTab(current)
 }
 
 el("uploadBtn").addEventListener("click", openPicker)
@@ -789,6 +884,29 @@ el("generateBtn").addEventListener("click", generateReport)
 el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
+
+document.querySelectorAll(".tabBtn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const key = btn.dataset.tab
+    if(key){
+      setTab(key)
+    }
+  })
+})
+
+if(el("emailBtn")){
+  el("emailBtn").addEventListener("click", emailLetter)
+}
+if(el("downloadAll")){
+  el("downloadAll").addEventListener("click", downloadAllPdfs)
+}
+
+document.querySelectorAll(".tabBtn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const key = btn.getAttribute("data-tab")
+    if(key){ setTab(key) }
+  })
+})
 
 if(el("runOcrBtn")){
   el("runOcrBtn").addEventListener("click", async () => {

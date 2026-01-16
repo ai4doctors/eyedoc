@@ -634,6 +634,63 @@ def generate_report():
 
     return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
+
+@app.post("/generate_letters")
+def generate_letters():
+    payload = request.get_json(silent=True) or {}
+    form = payload.get("form") or {}
+    analysis = payload.get("analysis") or {}
+
+    # Reuse the normalization and helper logic by calling generate_report twice
+    # without duplicating the full prompt logic.
+    def run_for(recipient_type_value: str):
+        local_form = dict(form) if isinstance(form, dict) else {}
+        local_form["recipientType"] = recipient_type_value
+        local_payload = {"form": local_form, "analysis": analysis}
+
+        # Inline the same logic as generate_report to avoid an internal HTTP call
+        pb_html = (analysis.get("patient_block") or "")
+        pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
+        pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
+        pb_plain = re.sub(r"\n{3,}", "\n\n", pb_plain).strip()
+        analysis["patient_block_plain"] = pb_plain
+
+        local_form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
+        rf = (local_form.get("reason_for_referral") or "").strip()
+        rd = (local_form.get("reason_detail") or "").strip()
+        if rf and rd:
+            local_form["reason_for_referral_combined"] = f"{rf}, {rd}"
+        else:
+            local_form["reason_for_referral_combined"] = rf or rd
+
+        obj, err = llm_json(letter_prompt(local_form, analysis))
+        if err or not obj:
+            return None, err or "Generation failed"
+
+        lp = (obj.get("letter_plain") or "").strip()
+        lh = (obj.get("letter_html") or "").strip()
+        if lp:
+            lp = re.sub(r"<\s*br\s*/?\s*>", "\n", lp, flags=re.IGNORECASE)
+            lp = re.sub(r"<\s*/?p\s*>", "\n", lp, flags=re.IGNORECASE)
+            lp = re.sub(r"<[^>]+>", "", lp)
+            lp = re.sub(r"\n{3,}", "\n\n", lp).strip()
+        if not lp:
+            return None, "Empty output"
+        return {"letter_plain": lp, "letter_html": lh}, None
+
+    primary_type = (form.get("recipientType") or "Physician").strip() or "Physician"
+
+    primary, err1 = run_for(primary_type)
+    if err1:
+        return jsonify({"ok": False, "error": err1}), 200
+
+    patient, err2 = run_for("Patient")
+    if err2:
+        # Still return primary if patient fails
+        return jsonify({"ok": True, "primary": primary, "patient": None, "warning": err2}), 200
+
+    return jsonify({"ok": True, "primary": primary, "patient": patient}), 200
+
 def signature_slug(provider_name: str) -> str:
     s = (provider_name or "").strip().lower()
     s = re.sub(r"\b(dr\.?|md|od|mba)\b", "", s)
