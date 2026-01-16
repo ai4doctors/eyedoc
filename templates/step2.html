@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block content %}
+  <section class="card">
+    <h1 class="h1">Step 2</h1>
+    <p class="muted">Confirm the details. Layout uses CSS grid for predictable alignment.</p>
+
+    <form action="{{ url_for('generate') }}" method="post" class="grid_form">
+      <div class="grid_section">
+        <h2 class="h2">Patient</h2>
+        <div class="grid">
+          <label class="grid_label" for="patient_name">Patient name</label>
+          <input class="grid_input" id="patient_name" name="patient_name" value="{{ seeded.get('patient_name','') }}" placeholder="Jane Doe">
+
+          <label class="grid_label" for="patient_dob">Date of birth</label>
+          <input class="grid_input" id="patient_dob" name="patient_dob" value="{{ seeded.get('patient_dob','') }}" placeholder="YYYY MM DD">
+
+          <label class="grid_label" for="main_complaint">Chief complaint</label>
+          <textarea class="grid_textarea" id="main_complaint" name="main_complaint" rows="3" placeholder="Dryness, irritation, fluctuating vision">{{ seeded.get('main_complaint','') }}</textarea>
+        </div>
+      </div>
+
+      <div class="grid_section">
+        <h2 class="h2">Clinic</h2>
+        <div class="grid">
+          <label class="grid_label" for="clinician_name">Clinician</label>
+          <input class="grid_input" id="clinician_name" name="clinician_name" value="{{ seeded.get('clinician_name','') }}" placeholder="Dr Name">
+
+          <label class="grid_label" for="clinic_name">Clinic name</label>
+          <input class="grid_input" id="clinic_name" name="clinic_name" value="{{ seeded.get('clinic_name','') }}" placeholder="Clinic">
+
+          <label class="grid_label" for="clinic_phone">Phone</label>
+          <input class="grid_input" id="clinic_phone" name="clinic_phone" value="{{ seeded.get('clinic_phone','') }}" placeholder="604 555 1234">
+
+          <label class="grid_label" for="clinic_fax">Fax</label>
+          <input class="grid_input" id="clinic_fax" name="clinic_fax" value="{{ seeded.get('clinic_fax','') }}" placeholder="604 555 1235">
+
+          <label class="grid_label" for="clinic_email">Email</label>
+          <input class="grid_input" id="clinic_email" name="clinic_email" value="{{ seeded.get('clinic_email','') }}" placeholder="clinic@example.com">
+        </div>
+      </div>
+
+      <div class="grid_section">
+        <h2 class="h2">Referrer</h2>
+        <div class="grid">
+          <label class="grid_label" for="referring_name">Referring clinician</label>
+          <input class="grid_input" id="referring_name" name="referring_name" value="{{ seeded.get('referring_name','') }}" placeholder="Dr Referrer">
+        </div>
+      </div>
+
+      <div class="grid_section">
+        <h2 class="h2">Assessment and plan</h2>
+        <div class="grid">
+          <label class="grid_label" for="assessment">Assessment</label>
+          <textarea class="grid_textarea" id="assessment" name="assessment" rows="4" placeholder="Key findings and working diagnoses">{{ seeded.get('assessment','') }}</textarea>
+
+          <label class="grid_label" for="plan">Plan</label>
+          <textarea class="grid_textarea" id="plan" name="plan" rows="5" placeholder="Treatments, follow up, referrals">{{ seeded.get('plan','') }}</textarea>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn_primary" type="submit">Generate letter</button>
+        <a class="btn btn_secondary" href="{{ url_for('index') }}">Start over</a>
+      </div>
+
+      <div class="card_sub">
+        <h3 class="h3">Extracted text snapshot</h3>
+        <textarea class="snapshot" rows="8" readonly>{{ extracted_text }}</textarea>
+        <div class="muted">No PDF preview, no background processing.</div>
+      </div>
+    </form>
+  </section>
+{% endblock %}

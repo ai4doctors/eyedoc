@@ -1,0 +1,107 @@
+<div class="letter">
+  <div class="letter_head">
+    <div class="letter_brand">
+      <div class="letter_app">{{ app_name }}</div>
+      <div class="letter_tagline">{{ tagline }}</div>
+    </div>
+    <div class="letter_meta">
+      <div><strong>Date</strong> {{ current_date }}</div>
+    </div>
+  </div>
+
+  <div class="letter_block">
+    <table class="meta_table">
+      <tr>
+        <td class="meta_label">Clinic</td>
+        <td>{{ clinic_name or '________________' }}</td>
+      </tr>
+      <tr>
+        <td class="meta_label">Clinician</td>
+        <td>{{ clinician_name or '________________' }}</td>
+      </tr>
+      <tr>
+        <td class="meta_label">Phone</td>
+        <td>{{ clinic_phone or '________________' }}</td>
+      </tr>
+      <tr>
+        <td class="meta_label">Fax</td>
+        <td>{{ clinic_fax or '________________' }}</td>
+      </tr>
+      <tr>
+        <td class="meta_label">Email</td>
+        <td>{{ clinic_email or '________________' }}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="letter_block">
+    <div class="letter_to">
+      <div><strong>To</strong> {{ referring_name or 'Referring clinician' }}</div>
+      <div class="muted_small">Re: {{ patient_name or 'Patient' }}{% if patient_dob %} (DOB {{ patient_dob }}){% endif %}</div>
+    </div>
+  </div>
+
+  <div class="letter_block">
+    <h3 class="letter_h">Reason for consult</h3>
+    <div class="letter_rich">
+      {% if main_complaint and main_complaint.strip() %}
+        {% for line in main_complaint.split('\n') if line.strip() %}
+          <p>{{ line }}</p>
+        {% endfor %}
+      {% else %}
+        <p>________________</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="letter_block">
+    <h3 class="letter_h">Assessment</h3>
+    {% set a_lines = (assessment or '').split('\n') %}
+    {% set a_clean = [] %}
+    {% for l in a_lines %}
+      {% if l and l.strip() %}
+        {% set _ = a_clean.append(l.strip()) %}
+      {% endif %}
+    {% endfor %}
+
+    {% if a_clean|length == 0 %}
+      <p>________________</p>
+    {% elif a_clean|length == 1 %}
+      <div class="letter_rich"><p>{{ a_clean[0] }}</p></div>
+    {% else %}
+      <ul class="letter_list_ul">
+        {% for line in a_clean %}
+          <li>{{ line }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+
+  <div class="letter_block">
+    <h3 class="letter_h">Plan</h3>
+    {% set p_lines = (plan or '').split('\n') %}
+    {% set p_clean = [] %}
+    {% for l in p_lines %}
+      {% if l and l.strip() %}
+        {% set _ = p_clean.append(l.strip()) %}
+      {% endif %}
+    {% endfor %}
+
+    {% if p_clean|length == 0 %}
+      <ol class="letter_list">
+        <li>________________</li>
+      </ol>
+    {% else %}
+      <ol class="letter_list">
+        {% for line in p_clean %}
+          <li>{{ line }}</li>
+        {% endfor %}
+      </ol>
+    {% endif %}
+  </div>
+
+  <div class="letter_block letter_close">
+    <p>Thank you for the referral. Please feel free to contact us with any questions or if additional details are needed.</p>
+    <p class="signature"><strong>{{ clinician_name or '________________' }}</strong><br>{{ clinic_name or '' }}</p>
+  </div>
+</div>

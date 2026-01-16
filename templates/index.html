@@ -1,149 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI4Health</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css" />
-  <link rel="icon" href="/static/img/logo.png" type="image/png" />
-</head>
-<body>
-  <header class="topBar">
-    <div class="brand">
-      <img class="logo" src="/static/img/logo.png" alt="AI4Health logo" />
-      <div class="brandText">
-        <div class="brandName">AI4Health</div>
-        <div class="brandTag">Evidence ready. Clinician approved.</div>
-      </div>
-    </div>
+{% extends 'base.html' %}
+{% block content %}
+  <section class="card">
+    <h1 class="h1">Step 1</h1>
+    <p class="muted">Upload a clinical document to seed the letter. PDF text extraction is best effort and runs inline for stability.</p>
 
-    <div class="topActions">
-      <a class="iconBtn linkBtn" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noreferrer" title="PubMed">PubMed</a>
-      <button id="resetBtn" class="iconBtn" type="button" title="Reset">Reset</button>
-    </div>
-  </header>
-
-  <div class="appGrid">
-    <aside class="sideBar">
-      <div class="sideHeader">
-        <div class="sideTitle">Cases</div>
-        <button id="newCaseBtn" class="sideBtn" type="button">New</button>
-      </div>
-      <div id="caseList" class="caseList"></div>
-      <div class="sideHint">Cases are stored in this browser only.</div>
-    </aside>
-
-    <div class="mainArea">
-      <section class="stepBar">
-        <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
-        <div class="stepControls">
-          <input id="file" type="file" accept="application/pdf" class="fileInput" />
-          <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
-          <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
+    <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="upload_form">
+      <label class="file_drop">
+        <input type="file" name="file" accept="application/pdf,text/plain" required>
+        <div class="file_drop_inner">
+          <div class="file_title">Choose a PDF or text file</div>
+          <div class="file_hint">Max 25 MB. No preview. Inline extraction only.</div>
         </div>
-        <div id="ocrPrompt" class="ocrPrompt hidden">
-          <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
-          <div class="ocrControls">
-            <label class="ocrLabel"><input id="handwrittenCheck" type="checkbox" /> Handwritten paper files</label>
-            <button id="runOcrBtn" class="btnSecondary" type="button">Run OCR</button>
-          </div>
-        </div>
-      </section>
+      </label>
 
-      <section class="summary">
-        <div class="sectionTitle"><b>Summary</b></div>
-        <div id="summaryBox" class="panel">Upload exam notes to begin.</div>
-      </section>
+      <button class="btn btn_primary" type="submit">Continue to Step 2</button>
+    </form>
 
-      <main class="triCols">
-        <section class="col">
-          <div class="sectionTitle"><b>Diagnosis</b></div>
-          <div id="dxBox" class="panel">No data yet.</div>
-        </section>
-        <section class="col">
-          <div class="sectionTitle"><b>Plan</b></div>
-          <div id="planBox" class="panel">No data yet.</div>
-        </section>
-        <section class="col">
-          <div class="sectionTitle"><b>References</b></div>
-          <div id="refBox" class="panel">No data yet.</div>
-        </section>
-      </main>
-
-      <section class="stepBar step2">
-        <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
-        <div class="commGrid">
-          <div class="field fieldDoc">
-            <label class="fieldLabel" for="recipientType">Document type</label>
-            <select id="recipientType" class="ctrl">
-              <option value="Specialist">Specialist</option>
-              <option value="Family physician">Family physician</option>
-              <option value="Patient">Patient</option>
-              <option value="Insurance">Insurance</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-
-          <div class="field fieldTo">
-            <label class="fieldLabel" for="toWhom">To</label>
-            <input id="toWhom" class="ctrl" placeholder="Dr Lastname" />
-          </div>
-
-          <div class="field fieldFrom">
-            <label class="fieldLabel" for="fromDoctor">From</label>
-            <input id="fromDoctor" class="ctrl" placeholder="Provider" />
-          </div>
-
-          <div class="field fieldAction">
-            <label class="fieldLabel">&nbsp;</label>
-            <button id="generateBtn" class="btnPrimary" type="button">Generate report</button>
-            <div id="generateStatus" class="stepStatus">Ready</div>
-          </div>
-
-          <div class="field fieldReason">
-            <label class="fieldLabel" for="reasonDx">Reason</label>
-            <select id="reasonDx" class="ctrl">
-              <option value="">Select diagnosis</option>
-            </select>
-            <input id="reasonOther" class="ctrl hidden" placeholder="Other reason" />
-          </div>
-
-          <div class="field fieldFocus">
-            <label class="fieldLabel" for="reasonFocus">Referral focus</label>
-            <select id="reasonFocus" class="ctrl" disabled>
-              <option value="">Select focus</option>
-            </select>
-            <input id="reasonFocusOther" class="ctrl hidden" placeholder="Other focus" />
-          </div>
-
-          <div class="field fieldRequests">
-            <label class="fieldLabel" for="specialRequests">Special requests</label>
-            <input id="specialRequests" class="ctrl" placeholder="Optional" />
-          </div>
-        </div>
-      </section>
-
-      <section class="output">
-        <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
-        <div class="outputActions">
-          <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
-          <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
-          <button id="exportPdf" class="btn" type="button">Export PDF</button>
-        </div>
-      </section>
-
-      <footer class="footer">
-        <div>Created by Dr. Henry Reis, MD, OD, MBA. 2026. All rights reserved.</div>
-        <div class="footerSmall">This tool supports HIPAA aligned workflows and uses evidence based sources from PubMed. It does not replace clinical judgement. Always verify outputs before use.</div>
-        <div class="footerSmall">v{{ version }}</div>
-      </footer>
-    </div>
-  </div>
-
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js"></script>
-</body>
-</html>
+    {% if error %}
+      <div class="alert alert_error">{{ error }}</div>
+    {% endif %}
+  </section>
+{% endblock %}

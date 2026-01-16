@@ -1,13 +1,34 @@
+{% extends 'base.html' %}
+{% block content %}
+  <section class="card">
+    <h1 class="h1">Letter</h1>
+    <p class="muted">Rich HTML formatting only. Export to PDF can be added later, but is intentionally off for stability.</p>
 
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Result</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <h2>Extracted Text</h2>
-    <pre>{{ extracted }}</pre>
-    <a href="/">Back</a>
-</body>
-</html>
+    <div class="actions">
+      {% if mailto %}
+        <a class="btn btn_primary" href="{{ mailto }}">Email</a>
+      {% else %}
+        <button class="btn btn_primary" type="button" disabled>Email</button>
+      {% endif %}
+      <button class="btn btn_secondary" type="button" onclick="copyPlainText()">Copy text</button>
+      <a class="btn btn_secondary" href="{{ url_for('index') }}">New letter</a>
+    </div>
+
+    <div class="letter_wrap" id="letterWrap">
+      {{ letter_html|safe }}
+    </div>
+
+    <textarea id="plainTextSource" class="hidden_textarea" aria-hidden="true">{{ plain_body }}</textarea>
+
+    <script>
+      function copyPlainText() {
+        const ta = document.getElementById('plainTextSource');
+        ta.classList.remove('hidden_textarea');
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        document.execCommand('copy');
+        ta.classList.add('hidden_textarea');
+      }
+    </script>
+  </section>
+{% endblock %}
