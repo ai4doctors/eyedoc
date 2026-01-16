@@ -4,7 +4,6 @@ import tempfile
 import uuid
 import json
 import re
-import html as html_lib
 import threading
 import time
 import io
@@ -14,8 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import PyPDF2
 import requests
 from flask import Flask, jsonify, render_template, request, send_file
-from email.message import EmailMessage
-import smtplib
 
 try:
     import fitz  # PyMuPDF
@@ -395,6 +392,172 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
     except Exception:
         return []
 
+
+
+def canonical_reference_pool(labels):
+    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
+    pool = []
+
+    def add(pmid, citation):
+        pool.append({"pmid": (pmid or ""), "citation": (citation or "")})
+
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
+        add("41005521", "TFOS DEWS III Executive Summary. The Ocular Surface. 2025.")
+        add("", "TFOS DEWS III Management and Therapy. The Ocular Surface. 2025.")
+        add("28736327", "TFOS DEWS II Executive Summary. The Ocular Surface. 2017.")
+
+    if "myopia" in blob:
+        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.")
+
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
+        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Primary Open Angle Glaucoma. Latest edition.")
+        add("", "European Glaucoma Society. Terminology and Guidelines. Latest edition.")
+
+    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
+        add("", "American Diabetes Association. Standards of Care in Diabetes. Latest edition.")
+        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Diabetic Retinopathy. Latest edition.")
+
+    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
+        add("", "AREDS trial publications. National Eye Institute.")
+        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Age Related Macular Degeneration. Latest edition.")
+
+    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
+        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.")
+
+    if "uveitis" in blob:
+        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.")
+
+    if "cataract" in blob:
+        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Cataract in the Adult Eye. Latest edition.")
+
+    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
+        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Rhegmatogenous Retinal Detachment. Latest edition.")
+
+    return pool[:10]
+
+
+def merge_references(pubmed_refs, canonical_refs, max_total=18):
+    seen = set()
+    merged = []
+
+    def norm_cit(s):
+        return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+    def key_for(r):
+        pmid = (r.get("pmid") or "").strip()
+        if pmid:
+            return "pmid:" + pmid
+        return "cit:" + norm_cit(r.get("citation"))
+
+    for r in (pubmed_refs or []):
+        if not isinstance(r, dict):
+            continue
+        k = key_for(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+
+    for r in (canonical_refs or []):
+        if not isinstance(r, dict):
+            continue
+        k = key_for(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+
+    numbered = []
+    for i, r in enumerate(merged[:max_total], start=1):
+        numbered.append({"number": str(i), "pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+    return numbered
+
+
+def preferred_ref_numbers(label, references):
+    l = (label or "").lower()
+    prefs = []
+
+    def add_if(match):
+        for ref in (references or []):
+            n = ref.get("number")
+            if not str(n).isdigit():
+                continue
+            num = int(n)
+            pmid = (ref.get("pmid") or "").strip()
+            cit = (ref.get("citation") or "").lower()
+            if match(pmid, cit):
+                prefs.append(num)
+
+    if any(k in l for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface"]):
+        add_if(lambda pmid, cit: ("dews" in cit) or (pmid in {"41005521", "28736327"}))
+
+    if "myopia" in l:
+        add_if(lambda pmid, cit: ("myopia institute" in cit) or ("imi" in cit and "myopia" in cit))
+
+    if any(k in l for k in ["glaucoma", "ocular hypertension", "iop"]):
+        add_if(lambda pmid, cit: ("glaucoma" in cit) or ("preferred practice pattern" in cit))
+
+    if any(k in l for k in ["diabetic", "retinopathy", "diabetes"]):
+        add_if(lambda pmid, cit: ("diabetic" in cit) or ("standards of care" in cit))
+
+    if any(k in l for k in ["macular degeneration", "amd"]):
+        add_if(lambda pmid, cit: ("areds" in cit) or ("macular degeneration" in cit))
+
+    if any(k in l for k in ["keratoconus", "ectasia"]):
+        add_if(lambda pmid, cit: ("keratoconus" in cit) or ("ectatic" in cit))
+
+    if "uveitis" in l:
+        add_if(lambda pmid, cit: ("uveitis" in cit) or ("nomenclature" in cit))
+
+    if "cataract" in l:
+        add_if(lambda pmid, cit: "cataract" in cit)
+
+    if any(k in l for k in ["retinal detachment", "rhegmatogenous", "rd"]):
+        add_if(lambda pmid, cit: "retinal detachment" in cit)
+
+    # De dup while keeping order
+    out = []
+    seen = set()
+    for n in prefs:
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+    return out
+
+
+def pad_refs(existing, preferred, all_nums, target=3):
+    out = []
+    for n in (existing or []):
+        if isinstance(n, int) and n > 0 and n not in out:
+            out.append(n)
+    for n in (preferred or []):
+        if isinstance(n, int) and n > 0 and n not in out:
+            out.append(n)
+    for n in (all_nums or []):
+        if isinstance(n, int) and n > 0 and n not in out:
+            out.append(n)
+    return out[:target]
+
+
+def enforce_minimum_citations(analysis, target=3):
+    refs = analysis.get("references") or []
+    all_nums = [int(r.get("number")) for r in refs if str(r.get("number", "")).isdigit()]
+
+    for dx in (analysis.get("diagnoses") or []):
+        if not isinstance(dx, dict):
+            continue
+        pref = preferred_ref_numbers(dx.get("label") or "", refs)
+        dx["refs"] = pad_refs(dx.get("refs"), pref, all_nums, target)
+
+    for pl in (analysis.get("plan") or []):
+        if not isinstance(pl, dict):
+            continue
+        text = " ".join([pl.get("title") or "", " ".join(pl.get("bullets") or [])])
+        pref = preferred_ref_numbers(text, refs)
+        pl["refs"] = pad_refs(pl.get("refs"), pref, all_nums, max(1, min(target, 2)))
+
+
 def assign_citations_prompt(analysis: Dict[str, Any]) -> str:
     # Ask model to add refs based on the fetched reference list
     return f"""
@@ -448,8 +611,13 @@ To: <recipient>
 From: <authoring provider>
 Date: <current date>
 <blank line>
-Patient: <full name> | DOB: <date> (<age>) | Sex: <sex> | PHN: <phn>
-Phone: <phone> | Email: <email if present> | Address: <address if present>
+Patient: <full name>
+DOB: <date> (<age>)
+Sex: <sex>
+PHN: <phn>
+Phone: <phone>
+Email: <email>
+Address: <address or leave blank>
 <blank line>
 Reason for Referral: <diagnosis chosen plus reason_detail if provided>
 <blank line>
@@ -458,17 +626,12 @@ Then the salutation line.
 For letter_html, render the same information using <p> blocks and preserve blank lines using spacing.
 
 Body rules:
-1 The first body paragraph must be a referral narrative, not a section label. Start with: Thank you for seeing <patient>, a <age> year old <sex> patient who presented with <chief complaint> and is being referred for <reason plus requested service>.
-2 The second sentence must add brief context and urgency if relevant.
-3 After the opening narrative, use these headings exactly, each on its own line: Exam findings, Assessment, Plan.
-4 Use short paragraphs and compact lists when helpful. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
-5 Do not include Evidence or Disclaimer sections.
-6 Do not include citations or bracket numbers in the letter body.
-7 The closing paragraph must always include all three elements, written naturally:
-  a A thank you and appreciation for seeing the patient
-  b A subtle comanagement and collaboration signal, for example: I truly value comanaging patients with you and look forward to collaborating on future shared cases.
-  c A request for their impressions and recommendations, asking for a reply
-8 End with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
+1 After the salutation, start with a referral narrative paragraph, not a section label. For physician letters, it should read like a real referral: Thank you for seeing <patient>, a <age> year old patient who presented with <chief complaint> and is being referred for <reason plus requested service>.
+2 Add a second sentence that gives brief context and urgency if relevant.
+3 Then use headings for Exam findings, Assessment, and Plan. Do not write a Clinical summary heading.
+4 Include exam findings with granularity when available in the note. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
+5 Do not include Evidence or Disclaimer sections in the letter. Do not include citations or bracket numbers in the letter body.
+6 End with a closing paragraph that includes: appreciation for seeing the patient, a subtle comanagement collaboration signal, and a request for their impressions and recommendations. Then finish with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
@@ -508,7 +671,8 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             if label:
                 terms.append(label)
     references = pubmed_fetch_for_terms(terms)
-    analysis["references"] = references
+    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
+    analysis['references'] = merge_references(references, canonical)
 
     # Assign citation numbers
     if references:
@@ -660,36 +824,18 @@ def signature_image_for_provider(provider_name: str) -> Optional[str]:
     """Backward compatible helper used by PDF export."""
     return find_signature_image(provider_name)
 
-def html_to_text_for_pdf(html_in: str) -> str:
-    s = (html_in or "").strip()
-    if not s:
-        return ""
-    s = re.sub(r"(?is)<script.*?>.*?</script>", "", s)
-    s = re.sub(r"(?is)<style.*?>.*?</style>", "", s)
-    s = re.sub(r"(?i)<br\s*/?>", "\n", s)
-    s = re.sub(r"(?i)</p\s*>", "\n\n", s)
-    s = re.sub(r"(?i)<p\b[^>]*>", "", s)
-    s = re.sub(r"(?i)</h[1-6]\s*>", "\n\n", s)
-    s = re.sub(r"(?i)<h[1-6]\b[^>]*>", "", s)
-    s = re.sub(r"(?i)<li\b[^>]*>", "* ", s)
-    s = re.sub(r"(?i)</li\s*>", "\n", s)
-    s = re.sub(r"(?i)</ul\s*>", "\n\n", s)
-    s = re.sub(r"(?i)<ul\b[^>]*>", "", s)
-    s = re.sub(r"<[^>]+>", "", s)
-    s = html_lib.unescape(s)
-    s = re.sub(r"\n{3,}", "\n\n", s).strip()
-    return s
-
-def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipient_type: str) -> Tuple[Optional[str], str, str]:
+@app.post("/export_pdf")
+def export_pdf():
     if SimpleDocTemplate is None:
-        return None, "", "PDF generator not available"
+        return jsonify({"error": "PDF generator not available"}), 500
 
-    text_in = (text_in or "").strip()
-    provider_name = (provider_name or "").strip() or "Provider"
-    patient_token = (patient_token or "").strip()
-    recipient_type = (recipient_type or "").strip()
+    payload = request.get_json(silent=True) or {}
+    text_in = (payload.get("text") or "").strip()
+    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
+    patient_token = (payload.get("patient_token") or "").strip()
+    recipient_type = (payload.get("recipient_type") or "").strip()
     if not text_in:
-        return None, "", "No content"
+        return jsonify({"error": "No content"}), 400
 
     clinic_short = (os.environ.get("CLINIC_SHORT") or "Integra").strip() or "Integra"
 
@@ -705,7 +851,8 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
         parts = [p for p in safe_token(name).split("_") if p]
         if not parts:
             return "DrProvider"
-        return "Dr" + parts[-1]
+        last = parts[-1]
+        return "Dr" + last
 
     doc_tok = doctor_token(provider_name)
     px_tok = patient_token or "PxUnknown"
@@ -715,17 +862,16 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
     kind = safe_token(kind)
 
     filename = f"{safe_token(clinic_short)}_{doc_tok}_{safe_token(px_tok)}_{today}_{kind}.pdf"
-    out_path = os.path.join(tempfile.gettempdir(), f"ai4health_{uuid.uuid4().hex}.pdf")
+
+    out_path = os.path.join(tempfile.gettempdir(), f"maneiro_{uuid.uuid4().hex}.pdf")
 
     styles = getSampleStyleSheet()
-
-    # Slightly smaller body and tighter leading to fit more on the page while preserving readability.
     base = ParagraphStyle(
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
         fontSize=11,
-        leading=14.2,
+        leading=14.5,
         spaceAfter=5,
         alignment=TA_JUSTIFY,
     )
@@ -741,95 +887,46 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
         "mono",
         parent=base,
         fontName="Helvetica",
-        fontSize=10.5,
-        leading=13.4,
+        fontSize=11,
+        leading=13.5,
         alignment=TA_LEFT,
         spaceAfter=0,
-    )
-    demo = ParagraphStyle(
-        "demo",
-        parent=mono,
-        spaceAfter=1,
     )
 
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    def parse_compact_letter(text_raw: str) -> Dict[str, Any]:
-        lines = (text_raw or "").splitlines()
-        header: List[str] = []
-        body: List[str] = []
-        demo_data: Dict[str, str] = {
-            "patient": "",
-            "dob": "",
-            "sex": "",
-            "phn": "",
-            "phone": "",
-            "email": "",
-            "address": "",
-        }
-        reason_value = ""
+    def meaningful(v: str) -> bool:
+        if not v:
+            return False
+        lv = v.strip().lower()
+        return lv not in {"na", "n/a", "none", "unknown", ""}
 
-        in_demo = False
-        after_reason = False
-        for raw in lines:
-            line = (raw or "").rstrip()
-            lower = line.strip().lower()
-            if lower.startswith("reason for referral"):
-                after_reason = True
-                in_demo = False
-                reason_value = line.split(":", 1)[1].strip() if ":" in line else ""
-                continue
+    def emit_demographics(demo: dict) -> list:
+        parts = []
+        if meaningful(demo.get("patient")):
+            parts.append(f"<b>Patient:</b> {esc(demo.get('patient'))}")
+        if meaningful(demo.get("dob")):
+            parts.append(f"<b>DOB:</b> {esc(demo.get('dob'))}")
+        if meaningful(demo.get("sex")):
+            parts.append(f"<b>Sex:</b> {esc(demo.get('sex'))}")
+        if meaningful(demo.get("phn")):
+            parts.append(f"<b>PHN:</b> {esc(demo.get('phn'))}")
+        lines = []
+        if parts:
+            lines.append(Paragraph("  ".join(parts), mono))
 
-            if lower.startswith("patient:") or lower.startswith("dob:") or lower.startswith("sex:") or lower.startswith("phn:") or lower.startswith("phone:") or lower.startswith("email:") or lower.startswith("address:"):
-                in_demo = True
-                try:
-                    k, v = line.split(":", 1)
-                    k = k.strip().lower()
-                    v = v.strip()
-                    if k == "patient":
-                        demo_data["patient"] = v
-                    elif k == "dob":
-                        demo_data["dob"] = v
-                    elif k == "sex":
-                        demo_data["sex"] = v
-                    elif k == "phn":
-                        demo_data["phn"] = v
-                    elif k == "phone":
-                        demo_data["phone"] = v
-                    elif k == "email":
-                        demo_data["email"] = v
-                    elif k == "address":
-                        demo_data["address"] = v
-                except Exception:
-                    pass
-                continue
-
-            if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
-                header.append(line)
-                continue
-
-            if not after_reason:
-                # Skip blank spacer lines between header and demographics.
-                if in_demo and (not line.strip()):
-                    continue
-                # Skip any other stray pre body line.
-                if (not line.strip()) and (not header):
-                    continue
-                # If we have header lines but no reason yet, we ignore spacer lines.
-                if (not line.strip()) and header:
-                    continue
-                # Anything else before reason is ignored to keep the layout deterministic.
-                continue
-
-            body.append(line)
-
-        return {
-            "header": header,
-            "demo": demo_data,
-            "reason": reason_value,
-            "body": body,
-        }
+        parts2 = []
+        if meaningful(demo.get("phone")):
+            parts2.append(f"<b>Phone:</b> {esc(demo.get('phone'))}")
+        if meaningful(demo.get("email")):
+            parts2.append(f"<b>Email:</b> {esc(demo.get('email'))}")
+        addr = demo.get("address") or ""
+        if meaningful(addr) and len(addr) <= 80:
+            parts2.append(f"<b>Address:</b> {esc(addr)}")
+        if parts2:
+            lines.append(Paragraph("  ".join(parts2), mono))
+        return lines
 
     story = []
 
@@ -844,54 +941,43 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
         except Exception:
             pass
 
-    parsed = parse_compact_letter(text_in)
+    raw_lines = text_in.splitlines()
+    demo_keys = {"patient", "dob", "sex", "phn", "phone", "email", "address"}
+    demo_data = {}
+    demo_active = False
+    demo_emitted = False
 
-    for line in parsed.get("header") or []:
-        if ":" in line:
-            k, v = line.split(":", 1)
-            story.append(Paragraph(f"<b>{esc(k.strip())}:</b> {esc(v.strip())}", mono))
-
-    d = parsed.get("demo") or {}
-    demo_1_parts = []
-    if d.get("patient"):
-        demo_1_parts.append(f"<b>Patient</b>: {esc(d.get('patient'))}")
-    if d.get("dob"):
-        demo_1_parts.append(f"<b>DOB</b>: {esc(d.get('dob'))}")
-    if d.get("sex"):
-        demo_1_parts.append(f"<b>Sex</b>: {esc(d.get('sex'))}")
-    if d.get("phn"):
-        demo_1_parts.append(f"<b>PHN</b>: {esc(d.get('phn'))}")
-    demo_1 = "   |   ".join(demo_1_parts).strip()
-
-    demo_2_parts = []
-    if d.get("phone"):
-        demo_2_parts.append(f"<b>Phone</b>: {esc(d.get('phone'))}")
-    if d.get("email"):
-        demo_2_parts.append(f"<b>Email</b>: {esc(d.get('email'))}")
-    if d.get("address"):
-        demo_2_parts.append(f"<b>Addr</b>: {esc(d.get('address'))}")
-    demo_2 = "   |   ".join(demo_2_parts).strip()
-
-    if demo_1:
-        story.append(Spacer(1, 8))
-        story.append(Paragraph(demo_1, demo))
-        if demo_2:
-            story.append(Paragraph(demo_2, demo))
-        story.append(Spacer(1, 8))
-
-    if parsed.get("reason"):
-        story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(parsed.get('reason'))}", base))
-        story.append(Spacer(1, 10))
-
-    for raw in parsed.get("body") or []:
+    for raw in raw_lines:
         line = (raw or "").rstrip()
         if not line.strip():
-            story.append(Spacer(1, 9))
+            if demo_active and not demo_emitted:
+                story.extend(emit_demographics(demo_data))
+                demo_emitted = True
+            story.append(Spacer(1, 8))
             continue
 
         lower = line.strip().lower()
+        key = lower.split(":", 1)[0].strip() if ":" in lower else ""
+
+        if key in demo_keys:
+            demo_active = True
+            try:
+                demo_data[key] = line.split(":", 1)[1].strip()
+            except Exception:
+                demo_data[key] = ""
+            continue
+
+        if demo_active and not demo_emitted:
+            story.extend(emit_demographics(demo_data))
+            demo_emitted = True
 
         if lower in {"clinical summary", "clinical summary:"}:
+            continue
+        if lower.startswith("reason for referral"):
+            value = line.split(":", 1)[1].strip() if ":" in line else ""
+            story.append(Spacer(1, 10))
+            story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(value)}", base))
+            story.append(Spacer(1, 10))
             continue
 
         if lower in {"exam findings", "exam findings:", "assessment", "assessment:", "plan", "plan:"}:
@@ -899,10 +985,18 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
             story.append(Paragraph(f"<b>{esc(title)}</b>", head))
             continue
 
+        if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
+            try:
+                k, v = line.split(":", 1)
+                story.append(Paragraph(f"<b>{esc(k)}:</b> {esc(v.strip())}", mono))
+            except Exception:
+                story.append(Paragraph(esc(line), mono))
+            continue
+
         if lower.startswith("dear "):
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
             story.append(Paragraph(esc(line), base))
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 6))
             continue
 
         if lower.startswith("kind regards"):
@@ -941,6 +1035,9 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
 
         story.append(Paragraph(esc(line), base))
 
+    if demo_active and not demo_emitted:
+        story.extend(emit_demographics(demo_data))
+
     doc = SimpleDocTemplate(
         out_path,
         pagesize=rl_letter,
@@ -953,137 +1050,14 @@ def build_pdf_file(text_in: str, provider_name: str, patient_token: str, recipie
 
     try:
         doc.build(story)
-        return out_path, filename, ""
+        return send_file(out_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
     except Exception as e:
-        app.logger.exception("PDF build failed")
-        return None, "", f"PDF build failed: {type(e).__name__}: {str(e)}"
+        app.logger.exception("PDF export failed")
+        return jsonify({"error": f"PDF export failed: {type(e).__name__}: {str(e)}"}), 500
 
-def export_pdf_response(text_in: str, provider_name: str, patient_token: str, recipient_type: str):
-    pdf_path, filename, err = build_pdf_file(text_in, provider_name, patient_token, recipient_type)
-    if err or not pdf_path:
-        code = 500 if "available" in (err or "").lower() else 400
-        return jsonify({"error": err or "PDF failed"}), code
-    return send_file(pdf_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
-
-@app.post("/export_pdf")
-def export_pdf():
-    payload = request.get_json(silent=True) or {}
-    text_in = (payload.get("text") or "").strip()
-    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
-    patient_token = (payload.get("patient_token") or "").strip()
-    recipient_type = (payload.get("recipient_type") or "").strip()
-    return export_pdf_response(text_in, provider_name, patient_token, recipient_type)
-
-
-@app.post("/export_pdf_html")
-def export_pdf_html():
-    payload = request.get_json(silent=True) or {}
-    html_in = (payload.get("html") or "").strip()
-    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
-    patient_token = (payload.get("patient_token") or "").strip()
-    recipient_type = (payload.get("recipient_type") or "").strip()
-    text_in = html_to_text_for_pdf(html_in)
-    return export_pdf_response(text_in, provider_name, patient_token, recipient_type)
-
-def smtp_settings() -> Dict[str, str]:
-    return {
-        "host": (os.getenv("SMTP_HOST") or "").strip(),
-        "port": (os.getenv("SMTP_PORT") or "").strip(),
-        "user": (os.getenv("SMTP_USER") or "").strip(),
-        "password": (os.getenv("SMTP_PASS") or "").strip(),
-        "from": (os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "").strip(),
-    }
-
-def smtp_ready() -> Tuple[bool, str]:
-    s = smtp_settings()
-    if not s.get("host"):
-        return False, "SMTP host not configured"
-    if not s.get("port"):
-        return False, "SMTP port not configured"
-    if not s.get("from"):
-        return False, "SMTP from address not configured"
-    return True, ""
-
-def send_pdf_via_email(to_email: str, subject: str, body: str, pdf_path: str, filename: str) -> Tuple[bool, str]:
-    ok, msg = smtp_ready()
-    if not ok:
-        return False, msg
-    s = smtp_settings()
-    try:
-        port = int(s.get("port") or "0")
-    except Exception:
-        return False, "SMTP port is invalid"
-
-    try:
-        with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
-    except Exception:
-        return False, "Could not read generated PDF"
-
-    m = EmailMessage()
-    m["From"] = s.get("from")
-    m["To"] = to_email
-    m["Subject"] = subject
-    m.set_content(body or "")
-    m.add_attachment(pdf_bytes, maintype="application", subtype="pdf", filename=filename)
-
-    try:
-        server = smtplib.SMTP(s.get("host"), port, timeout=20)
-        try:
-            server.ehlo()
-            if port == 587:
-                server.starttls()
-                server.ehlo()
-            if s.get("user") and s.get("password"):
-                server.login(s.get("user"), s.get("password"))
-            server.send_message(m)
-        finally:
-            try:
-                server.quit()
-            except Exception:
-                pass
-        return True, ""
-    except Exception as e:
-        return False, f"Email failed: {type(e).__name__}: {str(e)}"
-
-
-@app.post("/send_pdf_email")
-def send_pdf_email():
-    payload = request.get_json(silent=True) or {}
-    to_email = (payload.get("to_email") or "").strip()
-    subject = (payload.get("subject") or "").strip() or "Clinical letter"
-    message = (payload.get("message") or "").strip()
-    html_in = (payload.get("html") or "").strip()
-    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
-    patient_token = (payload.get("patient_token") or "").strip()
-    recipient_type = (payload.get("recipient_type") or "").strip()
-
-    if not to_email:
-        return jsonify({"ok": False, "error": "Recipient email is required"}), 200
-    if not html_in:
-        return jsonify({"ok": False, "error": "No letter content"}), 200
-
-    ok, msg = smtp_ready()
-    if not ok:
-        return jsonify({"ok": False, "error": msg}), 200
-
-    text_in = html_to_text_for_pdf(html_in)
-
-    pdf_path, filename, build_err = build_pdf_file(text_in, provider_name, patient_token, recipient_type)
-    if build_err or not pdf_path:
-        return jsonify({"ok": False, "error": build_err or "PDF build failed"}), 200
-
-    ok_send, err_send = send_pdf_via_email(to_email, subject, message, pdf_path, filename)
-    try:
-        os.remove(pdf_path)
-    except Exception:
-        pass
-
-    if not ok_send:
-        return jsonify({"ok": False, "error": err_send}), 200
-    return jsonify({"ok": True}), 200
 
 @app.get("/healthz")
+
 def healthz():
     ok, msg = client_ready()
     return jsonify({

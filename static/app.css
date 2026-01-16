@@ -119,23 +119,20 @@ body{
   align-items:center;
   gap:14px;
 }
-.logo{
-  width:150px;
-  height:150px;
-  border-radius:18px;
-  object-fit:cover;
-}
-.brandName{
+.brandMark{
   font-size:28px;
   font-weight:900;
   letter-spacing:0.2px;
 }
-.brandTag{
-  font-size:17px;
+.brandName{
+  font-weight:900;
+}
+.brandDot{
+  color:var(--accent);
+}
+.brandAi{
   color:var(--muted);
-  margin-top:6px;
-  line-height:1.3;
-  max-width:720px;
+  font-weight:800;
 }
 .topActions{
   display:flex;
@@ -174,48 +171,30 @@ body{
 }
 .commGrid{
   display:grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(12, 1fr);
   gap:12px;
   align-items:end;
   padding:10px 26px 14px 26px;
 }
-.commGrid .ctrl{width:100%; min-width:0}
 .field{display:flex; flex-direction:column; gap:6px}
 .fieldLabel{font-weight:800; font-size:14px; color:var(--muted)}
-.fieldDoc{grid-column: 1 / span 1}
-.fieldTo{grid-column: 2 / span 1}
-.fieldFrom{grid-column: 3 / span 1}
-.fieldAction{grid-column: 4 / span 1}
-.fieldAction .btnPrimary{width:100%}
-.fieldAction{position:relative}
-.fieldAction .stepStatus{position:absolute; right:0; bottom:-20px; min-height:0; font-size:13px}
-.fieldReason{grid-column: 1 / span 1}
-.fieldFocus{grid-column: 2 / span 1}
-.fieldRequests{grid-column: 3 / span 2}
-
-.ctrl{
-  height:46px;
-  padding:10px 12px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background:var(--panel);
-  color:var(--text);
-  box-sizing:border-box;
-}
-
-select.ctrl{
-  appearance:none;
-}
+.fieldDoc{grid-column: 1 / span 3}
+.fieldTo{grid-column: 4 / span 4}
+.fieldFrom{grid-column: 8 / span 3}
+.fieldAction{grid-column: 11 / span 2}
+.fieldReason{grid-column: 1 / span 6}
+.fieldFocus{grid-column: 7 / span 3}
+.fieldRequests{grid-column: 10 / span 3}
 
 @media (max-width: 1100px){
-  .commGrid{grid-template-columns: 1fr}
-  .fieldDoc{grid-column: 1 / span 1}
-  .fieldTo{grid-column: 1 / span 1}
-  .fieldFrom{grid-column: 1 / span 1}
-  .fieldAction{grid-column: 1 / span 1}
-  .fieldReason{grid-column: 1 / span 1}
-  .fieldFocus{grid-column: 1 / span 1}
-  .fieldRequests{grid-column: 1 / span 1}
+  .commGrid{grid-template-columns: repeat(6, 1fr)}
+  .fieldDoc{grid-column: 1 / span 6}
+  .fieldTo{grid-column: 1 / span 3}
+  .fieldFrom{grid-column: 4 / span 3}
+  .fieldAction{grid-column: 1 / span 6}
+  .fieldReason{grid-column: 1 / span 6}
+  .fieldFocus{grid-column: 1 / span 3}
+  .fieldRequests{grid-column: 4 / span 3}
 }
 .fileInput{display:none}
 .stepStatus{
@@ -296,7 +275,6 @@ select.ctrl{
   color: var(--text);
   min-width:180px;
   font-size:16px;
-  min-height:46px;
 }
 .ctrl.wide{min-width:220px}
 .ctrl.xwide{min-width:320px}
@@ -306,12 +284,11 @@ select.ctrl{
   padding:12px 18px;
   border-radius:14px;
   border:1px solid rgba(0,0,0,0.06);
-  background: linear-gradient(180deg, rgba(43,139,214,1), rgba(23,104,184,1));
+  background: linear-gradient(180deg, rgba(43,139,214,1), rgba(25,110,190,1));
   color:#ffffff;
   font-weight:900;
   cursor:pointer;
   font-size:16px;
-  min-height:46px;
   box-shadow: 0 10px 22px rgba(43,139,214,0.22);
   transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
@@ -321,70 +298,6 @@ select.ctrl{
 
 .output{
   padding:0 26px 16px 26px;
-}
-
-.letterShell{
-  border-radius:18px;
-  border:1px solid var(--border);
-  background: var(--panel);
-  box-shadow: 0 10px 28px rgba(10, 20, 60, 0.08);
-  padding:20px;
-  min-height:520px;
-}
-
-.letterPaper{
-  max-width:860px;
-  margin:0 auto;
-  min-height:480px;
-  padding:34px 44px;
-  border:1px solid rgba(0,0,0,0.08);
-  border-radius:14px;
-  background:#ffffff;
-  color:#111827;
-  font-family: Helvetica, Arial, sans-serif;
-  font-size:16px;
-  line-height:1.33;
-  outline:none;
-}
-
-.letterPaper:empty:before{
-  content:"Generated output will appear here";
-  color:#6b7280;
-}
-
-.letterPaper p{margin:0 0 12px 0}
-.letterPaper h2{margin:18px 0 10px 0; font-size:18px}
-.letterPaper ul{margin:0 0 12px 20px}
-.letterPaper li{margin:6px 0}
-
-.outputGrid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:12px;
-}
-
-.outputCol{min-width:0}
-
-.letterPreview{
-  width:100%;
-  min-height:420px;
-  border-radius:18px;
-  border:1px solid var(--border);
-  background: var(--panel);
-  padding:18px;
-  box-shadow: 0 10px 28px rgba(10, 20, 60, 0.08);
-  overflow:auto;
-}
-
-.previewEmpty{
-  color:var(--muted);
-  font-size:16px;
-}
-
-.previewP{
-  margin:0 0 14px 0;
-  line-height:1.75;
-  font-size:18px;
 }
 .letter{
   width:100%;
@@ -397,10 +310,6 @@ select.ctrl{
   font-size:18px;
   line-height:1.75;
   resize:vertical;
-}
-
-@media (max-width: 1100px){
-  .outputGrid{grid-template-columns: 1fr}
 }
 .outputActions{
   display:flex;
@@ -418,7 +327,6 @@ select.ctrl{
   cursor:pointer;
   font-size:16px;
   font-weight:800;
-  min-height:46px;
 }
 
 .spinner{
@@ -477,7 +385,51 @@ select.ctrl{
   .appGrid{grid-template-columns: 1fr}
   .sideBar{position:relative; top:0; height:auto}
   .triCols{grid-template-columns: 1fr}
-  .logo{width:96px; height:96px}
   .brandName{font-size:22px}
-  .brandTag{font-size:14px}
 }
+
+.footerLegal{
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.45;
+  margin-bottom:6px;
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  z-index:60;
+}
+.modalBackdrop{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,0.35);
+}
+.modalCard{
+  position:relative;
+  width:min(760px, calc(100vw - 32px));
+  margin:80px auto;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:18px;
+  box-shadow:0 20px 60px rgba(0,0,0,0.25);
+  overflow:hidden;
+}
+.modalHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 16px;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg, var(--panel), var(--panel2));
+}
+.modalTitle{
+  font-weight:900;
+  font-size:16px;
+}
+.modalBody{
+  padding:16px;
+}
+.faqItem{margin-bottom:14px}
+.faqQ{font-weight:900; margin-bottom:4px}
+.faqA{color:var(--muted); font-size:14px; line-height:1.45}

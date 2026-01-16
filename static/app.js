@@ -118,7 +118,32 @@ function setFocusOptions(){
   focusOther.value = ""
 }
 
-const CASES_KEY = "ai4health_cases_v1"
+const CASES_KEY = "maneiro_cases_v1"
+const CASE_COUNTER_KEY = "maneiro_case_counter_v1"
+
+function patientInitials(name){
+  const cleaned = cleanNameToken(name)
+  const parts = cleaned.split(" ").filter(Boolean)
+  if(!parts.length){
+    return "PX"
+  }
+  const a = parts[0][0] || "P"
+  const b = parts.length > 1 ? (parts[parts.length-1][0] || "X") : (parts[0][1] || "X")
+  return (a + b).toUpperCase()
+}
+
+function nextCaseNumber(){
+  try{
+    const raw = localStorage.getItem(CASE_COUNTER_KEY)
+    const n = raw ? parseInt(raw, 10) : 0
+    const next = (isNaN(n) ? 0 : n) + 1
+    localStorage.setItem(CASE_COUNTER_KEY, String(next))
+    return next
+  }catch(e){
+    return Math.floor(Date.now()/1000)
+  }
+}
+
 
 function loadCases(){
   try{
@@ -143,6 +168,8 @@ function upsertCase(analysis){
   }
   const cases = loadCases()
   const patient = (analysis.patient_name || "").trim() || "Untitled case"
+  const caseNumber = nextCaseNumber()
+  const initials = patientInitials(patient)
   const provider = (analysis.provider_name || "").trim()
   const ts = Date.now()
   const id = `${ts}_${Math.random().toString(16).slice(2)}`
@@ -150,6 +177,8 @@ function upsertCase(analysis){
     id,
     ts,
     patient,
+    case_number: caseNumber,
+    initials,
     provider,
     dx_count: (analysis.diagnoses || []).length,
     analysis
@@ -177,7 +206,7 @@ function renderCaseList(){
 
     const t = document.createElement("div")
     t.className = "caseTitle"
-    t.textContent = c.patient
+    t.textContent = `${(c.initials || patientInitials(c.patient || ""))} ${(c.case_number || "").toString()}`.trim()
     card.appendChild(t)
 
     const m = document.createElement("div")
@@ -204,7 +233,7 @@ function loadCaseById(id){
   }
   latestAnalysis = c.analysis
   latestLetterHtml = ""
-  setLetterHtml("")
+  el("letter").value = ""
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -221,42 +250,6 @@ function clearCases(){
 }
 
 function el(id){ return document.getElementById(id) }
-
-function getLetterHtml(){
-  const box = el("letterHtml")
-  return box ? (box.innerHTML || "").trim() : ""
-}
-
-function setLetterHtml(html){
-  const box = el("letterHtml")
-  if(!box){
-    return
-  }
-  box.innerHTML = (html || "").trim()
-}
-
-function setLetterHtml(html){
-  const box = el("letterHtml")
-  if(!box){
-    return
-  }
-  box.innerHTML = html || ""
-}
-
-function getLetterHtml(){
-  const box = el("letterHtml")
-  if(!box){
-    return ""
-  }
-  return (box.innerHTML || "").trim()
-}
-
-function defaultPdfSubject(){
-  const recipientType = (el("recipientType").value || "").trim()
-  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
-  const patientToken = patientTokenFromBlock(patientBlock)
-  return ["AI4Health", recipientType, patientToken].filter(Boolean).join(" ")
-}
 
 function toast(msg){
   const t = el("toast")
@@ -311,7 +304,7 @@ function clearAll(){
   el("dxBox").textContent = "No data yet."
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
-  setLetterHtml("")
+  el("letter").value = ""
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -325,6 +318,60 @@ function clearAll(){
 function newCase(){
   clearAll()
 }
+
+function openFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.remove("hidden") }
+}
+function closeFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.add("hidden") }
+}
+if(el("faqBtn")){
+  el("faqBtn").addEventListener("click", openFaq)
+}
+if(el("faqClose")){
+  el("faqClose").addEventListener("click", closeFaq)
+}
+if(el("faqModal")){
+  el("faqModal").addEventListener("click", (e) => {
+    if(e.target && (e.target.dataset && e.target.dataset.close)){
+      closeFaq()
+    }
+  })
+}
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeFaq()
+  }
+})
+
+function openFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.remove("hidden") }
+}
+function closeFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.add("hidden") }
+}
+if(el("faqBtn")){
+  el("faqBtn").addEventListener("click", openFaq)
+}
+if(el("faqClose")){
+  el("faqClose").addEventListener("click", closeFaq)
+}
+if(el("faqModal")){
+  el("faqModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeFaq()
+    }
+  })
+}
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeFaq()
+  }
+})
 
 function applyTheme(){
   document.body.classList.remove("dark")
@@ -686,8 +733,8 @@ async function generateReport(){
       setGenerateStatus("idle")
       return
     }
+    el("letter").value = json.letter_plain || ""
     latestLetterHtml = json.letter_html || ""
-    setLetterHtml(latestLetterHtml)
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -699,21 +746,58 @@ async function generateReport(){
   }
 }
 
-async function fetchPdfBlob(){
-  const html = getLetterHtml()
-  if(!html.trim()){
+async function copyPlain(){
+  const text = el("letter").value || ""
+  if(!text.trim()){
+    toast("Nothing to copy")
+    return
+  }
+  try{
+    await navigator.clipboard.writeText(text)
+    toast("Copied")
+  }catch(e){
+    toast("Copy failed")
+  }
+}
+
+async function copyRich(){
+  const plain = el("letter").value || ""
+  const html = latestLetterHtml || ""
+  if(!plain.trim()){
+    toast("Nothing to copy")
+    return
+  }
+  try{
+    if(html.trim() && window.ClipboardItem){
+      const item = new ClipboardItem({
+        "text/plain": new Blob([plain], {type:"text/plain"}),
+        "text/html": new Blob([html], {type:"text/html"})
+      })
+      await navigator.clipboard.write([item])
+    }else{
+      await navigator.clipboard.writeText(plain)
+    }
+    toast("Copied")
+  }catch(e){
+    toast("Copy failed")
+  }
+}
+
+async function exportPdf(){
+  const text = el("letter").value || ""
+  if(!text.trim()){
     toast("Nothing to export")
-    return null
+    return
   }
   const providerName = (el("fromDoctor").value || "").trim()
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
   const recipientType = (el("recipientType").value || "").trim()
-  const res = await fetch("/export_pdf_html", {
+  const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
-      html,
+      text,
       provider_name: providerName,
       patient_token: patientToken,
       recipient_type: recipientType
@@ -728,72 +812,24 @@ async function fetchPdfBlob(){
       }
     }catch(e){}
     toast(msg)
-    return null
-  }
-  return { blob: await res.blob(), contentDisposition: res.headers.get("Content-Disposition") || "" }
-}
-
-function filenameFromContentDisposition(cd){
-  const m = (cd || "").match(/filename\s*=\s*"?([^";]+)"?/i)
-  return (m && m[1]) ? m[1] : "ai4health_output.pdf"
-}
-
-async function downloadPdf(){
-  const result = await fetchPdfBlob()
-  if(!result){
     return
   }
-  const url = URL.createObjectURL(result.blob)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  a.download = filenameFromContentDisposition(result.contentDisposition)
+  let filename = "ai4health_output.pdf"
+  const cd = res.headers.get("Content-Disposition") || ""
+  const m = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
+  if(m && m[1]){
+    filename = m[1]
+  }
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
   toast("Downloaded")
-}
-
-async function emailPdf(){
-  const html = getLetterHtml()
-  if(!html.trim()){
-    toast("Nothing to email")
-    return
-  }
-  const toEmail = window.prompt("Recipient email")
-  if(!toEmail){
-    return
-  }
-  const subject = window.prompt("Subject", defaultPdfSubject()) || defaultPdfSubject()
-  const message = window.prompt("Message", "Please see the attached report.") || ""
-  const providerName = (el("fromDoctor").value || "").trim()
-  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
-  const patientToken = patientTokenFromBlock(patientBlock)
-  const recipientType = (el("recipientType").value || "").trim()
-
-  try{
-    const res = await fetch("/send_pdf_email", {
-      method:"POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        to_email: toEmail,
-        subject,
-        message,
-        html,
-        provider_name: providerName,
-        patient_token: patientToken,
-        recipient_type: recipientType
-      })
-    })
-    const j = await res.json().catch(() => ({}))
-    if(!j.ok){
-      toast(j.error || "Email failed")
-      return
-    }
-    toast("Sent")
-  }catch(e){
-    toast("Email failed")
-  }
 }
 
 el("uploadBtn").addEventListener("click", openPicker)
@@ -833,12 +869,9 @@ el("reasonFocus").addEventListener("change", () => {
 })
 
 el("generateBtn").addEventListener("click", generateReport)
-if(el("downloadPdf")){
-  el("downloadPdf").addEventListener("click", downloadPdf)
-}
-if(el("emailPdf")){
-  el("emailPdf").addEventListener("click", emailPdf)
-}
+el("copyPlain").addEventListener("click", copyPlain)
+el("copyRich").addEventListener("click", copyRich)
+el("exportPdf").addEventListener("click", exportPdf)
 
 if(el("runOcrBtn")){
   el("runOcrBtn").addEventListener("click", async () => {
@@ -886,7 +919,33 @@ document.addEventListener("click", (e) => {
 })
 
 
+function openFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.remove("hidden") }
+}
+function closeFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.add("hidden") }
+}
+if(el("faqBtn")){
+  el("faqBtn").addEventListener("click", openFaq)
+}
+if(el("faqClose")){
+  el("faqClose").addEventListener("click", closeFaq)
+}
+if(el("faqModal")){
+  el("faqModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeFaq()
+    }
+  })
+}
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeFaq()
+  }
+})
+
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
-setLetterHtml("")

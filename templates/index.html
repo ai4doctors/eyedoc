@@ -3,24 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI4Health</title>
+  <title>Maneiro.ai</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/app.css" />
-  <link rel="icon" href="/static/img/logo.png" type="image/png" />
 </head>
 <body>
   <header class="topBar">
     <div class="brand">
-      <img class="logo" src="/static/img/logo.png" alt="AI4Health logo" />
-      <div class="brandText">
-        <div class="brandName">AI4Health</div>
-        <div class="brandTag">Evidence ready. Clinician approved.</div>
+      <div class="brandMark" aria-label="Maneiro.ai">
+        <span class="brandName">maneiro</span><span class="brandDot">.</span><span class="brandAi">ai</span>
       </div>
     </div>
 
+    
     <div class="topActions">
+      <button id="faqBtn" class="iconBtn" type="button" title="FAQ">FAQ</button>
       <a class="iconBtn linkBtn" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noreferrer" title="PubMed">PubMed</a>
       <button id="resetBtn" class="iconBtn" type="button" title="Reset">Reset</button>
     </div>
@@ -127,20 +126,46 @@
       </section>
 
       <section class="output">
-        <div class="letterShell">
-          <div class="letterPaper" id="letterHtml" contenteditable="true" spellcheck="false" aria-label="Editable letter"></div>
-        </div>
+        <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
         <div class="outputActions">
-          <button id="downloadPdf" class="btnPrimary" type="button">Download PDF</button>
-          <button id="emailPdf" class="btn" type="button">Email PDF</button>
+          <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
+          <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
+          <button id="exportPdf" class="btn" type="button">Export PDF</button>
         </div>
       </section>
 
       <footer class="footer">
-        <div>Created by Dr. Henry Reis, MD, OD, MBA. 2026. All rights reserved.</div>
-        <div class="footerSmall">This tool supports HIPAA aligned workflows and uses evidence based sources from PubMed. It does not replace clinical judgement. Always verify outputs before use.</div>
+        <div class="footerLegal">Maneiro.ai is a documentation support tool. It does not provide medical advice and is not a substitute for professional judgement. You are responsible for verifying accuracy, completeness, and appropriateness before use or transmission.</div>
+        <div class="footerLegal">Do not include unnecessary patient identifiers. Use within your clinic privacy requirements and applicable laws. No warranties are provided. To the fullest extent permitted by law, liability is limited for any indirect, incidental, special, or consequential damages.</div>
         <div class="footerSmall">v{{ version }}</div>
       </footer>
+    </div>
+  </div>
+  <div id="faqModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="faqTitle">
+    <div class="modalBackdrop" data-close="1"></div>
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div id="faqTitle" class="modalTitle">FAQ</div>
+        <button id="faqClose" class="iconBtn" type="button" title="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="faqItem">
+          <div class="faqQ">What does Maneiro.ai do</div>
+          <div class="faqA">It turns clinical notes into a structured referral or report letter you can edit and export as a PDF.</div>
+        </div>
+        <div class="faqItem">
+          <div class="faqQ">Does it replace my clinical judgement</div>
+          <div class="faqA">No. You remain responsible for review, edits, and the final clinical content before sending.</div>
+        </div>
+        <div class="faqItem">
+          <div class="faqQ">How are references selected</div>
+          <div class="faqA">The app pulls relevant PubMed results based on the case and adds canonical consensus or guideline references when a diagnosis has too few citations.</div>
+        </div>
+        <div class="faqItem">
+          <div class="faqQ">Where are cases stored</div>
+          <div class="faqA">Cases are saved locally in your browser. Clearing browser storage removes them.</div>
+        </div>
+      </div>
     </div>
   </div>
 
