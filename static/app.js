@@ -5,6 +5,118 @@ let latestAnalysis = null
 let latestLetterHtml = ""
 let theme = localStorage.getItem("ai4health_theme") || "light"
 
+function cleanNameToken(s){
+  return (s || "")
+    .toString()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[^A-Za-z0-9 ]+/g, "")
+}
+
+function patientTokenFromBlock(block){
+  const raw = (block || "").toString()
+  const first = raw.split(/<br\s*\/?\s*>|\n/gi)[0] || ""
+  const cleaned = cleanNameToken(first)
+  if(!cleaned){
+    return "PxUnknown_Unknown"
+  }
+  const parts = cleaned.split(" ").filter(Boolean)
+  if(parts.length === 1){
+    return `Px${parts[0]}_Unknown`
+  }
+  const firstName = parts[0]
+  const lastName = parts[parts.length - 1]
+  return `Px${lastName}_${firstName}`
+}
+
+function doctorToken(providerName){
+  const low = (providerName || "").toLowerCase()
+  if(low.includes("henry") && low.includes("reis")){
+    return "DrReis"
+  }
+  const cleaned = cleanNameToken(providerName)
+  const parts = cleaned.split(" ").filter(Boolean)
+  const last = parts.length ? parts[parts.length - 1] : "Doctor"
+  return `Dr${last}`
+}
+
+function focusOptionsForDiagnosis(dxLabel){
+  const d = (dxLabel || "").toLowerCase()
+  if(d.includes("glaucoma")){
+    return [
+      "Consult and management recommendations",
+      "Laser evaluation",
+      "LPI evaluation",
+      "Gonioscopy and angle assessment",
+      "Surgical opinion",
+      "Other"
+    ]
+  }
+  if(d.includes("dry eye") || d.includes("mgd") || d.includes("blephar") || d.includes("meibomian")){
+    return [
+      "Confirm diagnosis and stage severity",
+      "Advanced therapy recommendations",
+      "Procedure consideration",
+      "Medication options",
+      "Other"
+    ]
+  }
+  if(d.includes("cataract")){
+    return [
+      "Surgical consultation",
+      "Pre operative evaluation",
+      "Co management plan",
+      "Other"
+    ]
+  }
+  if(d.includes("retina") || d.includes("macula") || d.includes("amd") || d.includes("diabetic")){
+    return [
+      "Urgent assessment",
+      "Treatment options and follow up plan",
+      "Imaging review",
+      "Other"
+    ]
+  }
+  return [
+    "Consultation",
+    "Management recommendations",
+    "Second opinion",
+    "Co management",
+    "Other"
+  ]
+}
+
+function setFocusOptions(){
+  const dx = el("reasonDx").value
+  const focus = el("reasonFocus")
+  const focusOther = el("reasonFocusOther")
+
+  focus.innerHTML = ""
+  const placeholder = document.createElement("option")
+  placeholder.value = ""
+  placeholder.textContent = "REFERRAL FOCUS:"
+  focus.appendChild(placeholder)
+
+  if(!dx || dx === "Other"){
+    focus.disabled = true
+    focusOther.classList.add("hidden")
+    focusOther.value = ""
+    return
+  }
+
+  const opts = focusOptionsForDiagnosis(dx)
+  for(const o of opts){
+    const opt = document.createElement("option")
+    opt.value = o
+    opt.textContent = o
+    focus.appendChild(opt)
+  }
+  focus.disabled = false
+  focus.value = ""
+  focusOther.classList.add("hidden")
+  focusOther.value = ""
+}
+
 const CASES_KEY = "ai4health_cases_v1"
 
 function loadCases(){
@@ -428,13 +540,24 @@ async function startAnalyze(){
     return
   }
   setAnalyzeStatus("processing")
+  el("ocrPrompt").classList.add("hidden")
   const fd = new FormData()
   fd.append("pdf", uploadedFile)
+
+  const handwritten = el("handwrittenCheck") && el("handwrittenCheck").checked
+  if(handwritten){
+    fd.append("handwritten", "1")
+  }
 
   const res = await fetch("/analyze_start", { method:"POST", body: fd })
   const json = await res.json()
   if(!json.ok){
     setAnalyzeStatus("waiting")
+    if(json.needs_ocr){
+      el("ocrPrompt").classList.remove("hidden")
+      toast(json.error || "Text extraction failed")
+      return
+    }
     toast(json.error || "Analyze failed")
     return
   }
@@ -496,6 +619,9 @@ function buildForm(){
   const reasonDx = el("reasonDx").value
   const reasonOther = el("reasonOther").value.trim()
   const reason = (reasonDx === "Other") ? reasonOther : reasonDx
+  const focusSel = el("reasonFocus").value
+  const focusOther = el("reasonFocusOther").value.trim()
+  const reasonDetail = (focusSel === "Other") ? focusOther : focusSel
   const special = el("specialRequests").value.trim()
 
   const mappedRecipient = (recipientType === "Family physician" || recipientType === "Specialist") ? "Physician" : recipientType
@@ -505,6 +631,7 @@ function buildForm(){
     to_whom: toWhom,
     from_doctor: fromDoctor,
     reason_for_referral: reason,
+    reason_detail: reasonDetail,
     special_requests: special,
     letter_type: "Report"
   }
@@ -589,10 +716,19 @@ async function exportPdf(){
     toast("Nothing to export")
     return
   }
+  const providerName = (el("fromDoctor").value || "").trim()
+  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
+  const patientToken = patientTokenFromBlock(patientBlock)
+  const recipientType = (el("recipientType").value || "").trim()
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ text, provider_name: (el("fromDoctor").value || "").trim() })
+    body: JSON.stringify({
+      text,
+      provider_name: providerName,
+      patient_token: patientToken,
+      recipient_type: recipientType
+    })
   })
   if(!res.ok){
     toast("PDF export failed")
@@ -602,7 +738,13 @@ async function exportPdf(){
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  a.download = "ai4health_output.pdf"
+  let filename = "ai4health_output.pdf"
+  const cd = res.headers.get("Content-Disposition") || ""
+  const m = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
+  if(m && m[1]){
+    filename = m[1]
+  }
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -633,12 +775,32 @@ el("reasonDx").addEventListener("change", () => {
     el("reasonOther").classList.add("hidden")
     el("reasonOther").value = ""
   }
+  setFocusOptions()
+})
+
+el("reasonFocus").addEventListener("change", () => {
+  const v = el("reasonFocus").value
+  if(v === "Other"){
+    el("reasonFocusOther").classList.remove("hidden")
+  }else{
+    el("reasonFocusOther").classList.add("hidden")
+    el("reasonFocusOther").value = ""
+  }
 })
 
 el("generateBtn").addEventListener("click", generateReport)
 el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
+
+if(el("runOcrBtn")){
+  el("runOcrBtn").addEventListener("click", async () => {
+    if(el("handwrittenCheck")){
+      el("handwrittenCheck").checked = true
+    }
+    await startAnalyze()
+  })
+}
 
 el("resetBtn").addEventListener("click", clearAll)
 el("newCaseBtn").addEventListener("click", clearAll)

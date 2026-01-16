@@ -359,6 +359,12 @@ body.dark .sideBar{background: linear-gradient(180deg, rgba(11,18,38,0.98), rgba
 body.dark .caseCard{background: rgba(6,8,19,0.35)}
 body.dark .panel{box-shadow:none}
 
+.ocrPrompt{margin-top:12px; padding:12px 14px; border:1px solid var(--border); border-radius:14px; background: rgba(255,255,255,0.55)}
+body.dark .ocrPrompt{background: rgba(11,18,38,0.65)}
+.ocrText{font-size:14px; color: var(--text); margin-bottom:10px}
+.ocrControls{display:flex; gap:12px; align-items:center; flex-wrap:wrap}
+.ocrLabel{font-size:14px; color: var(--text); display:flex; gap:8px; align-items:center}
+
 
 @keyframes spin{
   to{transform: rotate(360deg)}

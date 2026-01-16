@@ -42,6 +42,13 @@
           <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
           <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
         </div>
+        <div id="ocrPrompt" class="ocrPrompt hidden">
+          <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
+          <div class="ocrControls">
+            <label class="ocrLabel"><input id="handwrittenCheck" type="checkbox" /> Handwritten paper files</label>
+            <button id="runOcrBtn" class="btnSecondary" type="button">Run OCR</button>
+          </div>
+        </div>
       </section>
 
       <section class="summary">
@@ -82,6 +89,11 @@
         <option value="">REASON:</option>
       </select>
       <input id="reasonOther" class="ctrl wide hidden" placeholder="REASON other" />
+
+      <select id="reasonFocus" class="ctrl wide" disabled>
+        <option value="">REFERRAL FOCUS:</option>
+      </select>
+      <input id="reasonFocusOther" class="ctrl wide hidden" placeholder="REFERRAL FOCUS other" />
 
       <input id="specialRequests" class="ctrl xwide" placeholder="Special requests" />
 
