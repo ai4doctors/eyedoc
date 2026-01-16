@@ -706,7 +706,7 @@ def export_pdf():
         fontSize=12,
         leading=16,
         spaceAfter=6,
-        alignment=TA_LEFT,
+        alignment=TA_JUSTIFY,
     )
     head = ParagraphStyle(
         "head",
@@ -749,8 +749,11 @@ def export_pdf():
 
         lower = line.strip().lower()
         if lower.startswith("reason for referral"):
-            story.append(Paragraph("<b>Reason for Referral</b>", head))
-            story.append(Paragraph(esc(line), base))
+            # Render as a single, scannable line with breathing room
+            value = line.split(":", 1)[1].strip() if ":" in line else ""
+            story.append(Spacer(1, 10))
+            story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(value)}", base))
+            story.append(Spacer(1, 10))
             continue
 
         if lower in {"clinical summary:", "exam findings:", "assessment:", "plan:"}:
@@ -769,7 +772,7 @@ def export_pdf():
 
         if lower.startswith("dear "):
             story.append(Spacer(1, 8))
-            story.append(Paragraph(f"<b>{esc(line)}</b>", base))
+            story.append(Paragraph(esc(line), base))
             story.append(Spacer(1, 6))
             continue
 
@@ -780,9 +783,12 @@ def export_pdf():
             if sig_path and os.path.exists(sig_path):
                 try:
                     sig = RLImage(sig_path)
+                    # Keep the signature tasteful: cap width, but default smaller
                     maxw = 500
-                    sig.drawWidth = maxw
-                    sig.drawHeight = sig.imageHeight * (maxw / float(sig.imageWidth))
+                    page_w = rl_letter[0]
+                    w = min(maxw, int(page_w * 0.25))
+                    sig.drawWidth = w
+                    sig.drawHeight = sig.imageHeight * (w / float(sig.imageWidth))
                     sig.hAlign = "RIGHT"
                     story.append(Spacer(1, 6))
                     story.append(sig)

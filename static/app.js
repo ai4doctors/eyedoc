@@ -3,7 +3,8 @@ let uploadedFile = null
 let jobId = ""
 let latestAnalysis = null
 let latestLetterHtml = ""
-let theme = localStorage.getItem("ai4health_theme") || "light"
+// Single theme for consistency
+let theme = "light"
 
 function cleanNameToken(s){
   return (s || "")
@@ -290,18 +291,7 @@ function newCase(){
 }
 
 function applyTheme(){
-  if(theme === "dark"){
-    document.body.classList.add("dark")
-  }else{
-    document.body.classList.remove("dark")
-  }
-}
-
-function toggleTheme(){
-  theme = (theme === "dark") ? "light" : "dark"
-  localStorage.setItem("ai4health_theme", theme)
-  applyTheme()
-  toast(`Theme ${theme}`)
+  document.body.classList.remove("dark")
 }
 
 function buildReasonOptions(){
@@ -845,7 +835,6 @@ document.addEventListener("click", (e) => {
   }
 })
 
-el("themeBtn").addEventListener("click", toggleTheme)
 
 applyTheme()
 setAnalyzeStatus("waiting")
