@@ -1,6 +1,7 @@
 
 let uploadedFile = null
 let jobId = ""
+let analyzeStartTs = 0
 let latestAnalysis = null
 let latestLetterHtml = ""
 let letters = {
@@ -606,11 +607,17 @@ async function startAnalyze(){
     return
   }
   jobId = json.job_id
+  analyzeStartTs = Date.now()
   pollAnalyze()
 }
 
 async function pollAnalyze(){
   if(!jobId){
+    return
+  }
+  if(analyzeStartTs && (Date.now() - analyzeStartTs) > 180000){
+    setAnalyzeStatus("waiting")
+    toast("Analysis is taking too long. Try again or enable handwritten mode.")
     return
   }
   try{

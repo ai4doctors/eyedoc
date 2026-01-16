@@ -59,7 +59,11 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def clamp_text(s: str, limit: int) -> str:
-    return (s or "")[:limit]
+    # Keep payloads modest to avoid memory pressure on small instances.
+    s = (s or "").strip()
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "\n\n[TRUNCATED]"
 
 def extract_pdf_text(file_storage) -> str:
     reader = PyPDF2.PdfReader(file_storage)
@@ -133,85 +137,11 @@ def extract_text_from_upload(file_storage, force_ocr: bool) -> Tuple[str, bool, 
 
     return "", False, True, "Unsupported file type"
 
-def is_meaningful_text(text: str) -> bool:
-    t = (text or "").strip()
-    if len(t) < 250:
-        return False
-    letters = sum(1 for c in t if c.isalpha())
-    ratio = letters / max(1, len(t))
-    return ratio >= 0.25
+"""OCR helper variants removed.
 
-def ocr_ready() -> Tuple[bool, str]:
-    if fitz is None:
-        return False, "PyMuPDF not available"
-    if Image is None:
-        return False, "Pillow not available"
-    if pytesseract is None:
-        return False, "pytesseract not available"
-    return True, ""
-
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
-    ok, _ = ocr_ready()
-    if not ok:
-        return ""
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception:
-        return ""
-    parts: List[str] = []
-    try:
-        pages = min(len(doc), max_pages)
-        for i in range(pages):
-            page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=220)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            txt = pytesseract.image_to_string(img) or ""
-            parts.append(txt)
-    finally:
-        try:
-            doc.close()
-        except Exception:
-            pass
-    return "\n".join(parts).strip()
-
-def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
-    """
-    Returns: text, used_ocr, needs_ocr, error
-    """
-    try:
-        pdf_bytes = file_storage.read()
-    except Exception:
-        return "", False, False, "Unable to read uploaded file"
-    # Reset stream for any later reads
-    try:
-        file_storage.stream.seek(0)
-    except Exception:
-        pass
-
-    extracted = ""
-    try:
-        extracted = extract_pdf_text(io.BytesIO(pdf_bytes))
-    except Exception:
-        extracted = ""
-
-    if is_meaningful_text(extracted) and not force_ocr:
-        return extracted, False, False, ""
-
-    # If not meaningful and OCR not requested, ask for OCR
-    if (not is_meaningful_text(extracted)) and (not force_ocr):
-        return "", False, True, "No readable text extracted"
-
-    # OCR path
-    ok, msg = ocr_ready()
-    if not ok:
-        return "", False, False, f"OCR not available: {msg}"
-    ocr_text = ocr_pdf_bytes(pdf_bytes)
-    if is_meaningful_text(ocr_text):
-        return ocr_text, True, False, ""
-    # Fall back to whatever we extracted
-    if extracted.strip():
-        return extracted, True, False, ""
-    return "", True, False, "OCR produced no readable text"
+We keep a single OCR pipeline (ocr_pdf_bytes) near the top of the file which
+returns (text, error). Upload handling uses extract_text_from_upload.
+"""
 
 def client_ready() -> Tuple[bool, str]:
     if OpenAI is None:
@@ -229,8 +159,8 @@ def get_client():
     if not ok:
         return None
     key = os.getenv("OPENAI_API_KEY").strip()
-    # Set a sane timeout to avoid hanging requests
-    return OpenAI(api_key=key, timeout=60)
+    # Keep timeouts modest to avoid hung workers.
+    return OpenAI(api_key=key, timeout=45)
 
 def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
     if not s:
@@ -264,6 +194,7 @@ def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, 
                 {"role": "user", "content": prompt},
             ],
             temperature=temperature,
+            max_tokens=1200,
         )
         text = (res.choices[0].message.content or "").strip()
         obj, err = safe_json_loads(text)
@@ -284,7 +215,7 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 }
 
 def analyze_prompt(note_text: str) -> str:
-    excerpt = clamp_text(note_text, 16000)
+    excerpt = clamp_text(note_text, 9000)
     return f"""
 You are a clinician assistant. You are given an encounter note extracted from a PDF.
 
