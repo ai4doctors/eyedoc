@@ -36,7 +36,8 @@ except Exception:
 
 try:
     from reportlab.lib.pagesizes import letter as rl_letter
-    from reportlab.pdfgen import canvas
+from reportlab.pdfgen import canvas
+import html as _html
     from reportlab.lib.utils import ImageReader
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -611,13 +612,8 @@ To: <recipient>
 From: <authoring provider>
 Date: <current date>
 <blank line>
-Patient: <full name>
-DOB: <date> (<age>)
-Sex: <sex>
-PHN: <phn>
-Phone: <phone>
-Email: <email>
-Address: <address or leave blank>
+Patient: <full name>  DOB: <date> (<age>)  Sex: <sex>  PHN: <phn>
+Phone: <phone>  Email: <email>  Address: <address or leave blank>
 <blank line>
 Reason for Referral: <diagnosis chosen plus reason_detail if provided>
 <blank line>
@@ -831,6 +827,7 @@ def export_pdf():
 
     payload = request.get_json(silent=True) or {}
     text_in = (payload.get("text") or "").strip()
+    html_in = (payload.get("html") or "").strip()
     provider_name = (payload.get("provider_name") or "").strip() or "Provider"
     patient_token = (payload.get("patient_token") or "").strip()
     recipient_type = (payload.get("recipient_type") or "").strip()
@@ -870,9 +867,9 @@ def export_pdf():
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=11,
-        leading=14.5,
-        spaceAfter=5,
+        fontSize=10,
+        leading=13.5,
+        spaceAfter=4,
         alignment=TA_JUSTIFY,
     )
     head = ParagraphStyle(
@@ -887,11 +884,49 @@ def export_pdf():
         "mono",
         parent=base,
         fontName="Helvetica",
-        fontSize=11,
-        leading=13.5,
+        fontSize=10,
+        leading=12.5,
         alignment=TA_LEFT,
         spaceAfter=0,
     )
+
+    html_mode = bool(html_in)
+
+    allowed_tag_pat = re.compile(r"<\s*/?\s*(b|i|u)\b[^>]*>|<\s*br\b[^>]*>", re.IGNORECASE)
+
+    def strip_tags(s: str) -> str:
+        return re.sub(r"<[^>]+>", "", s or "")
+
+    def sanitize_inline_markup(s: str) -> str:
+        if not s:
+            return ""
+        s = re.sub(r"<\s*br\b[^>]*>", "<br/>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*b\b[^>]*>", "<b>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*/\s*b\s*>", "</b>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*i\b[^>]*>", "<i>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*/\s*i\s*>", "</i>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*u\b[^>]*>", "<u>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<\s*/\s*u\s*>", "</u>", s, flags=re.IGNORECASE)
+        s = re.sub(r"<(?!/?(b|i|u)\b|br\b)[^>]+>", "", s, flags=re.IGNORECASE)
+        tags = []
+        def _tag_repl(m):
+            tags.append(m.group(0))
+            return f"__TAG{len(tags)-1}__"
+        tmp = allowed_tag_pat.sub(_tag_repl, s)
+        tmp = _html.escape(tmp, quote=False)
+        for i, t in enumerate(tags):
+            tmp = tmp.replace(f"__TAG{i}__", t)
+        return tmp
+
+    def html_to_lines(h: str) -> list:
+        if not h:
+            return []
+        x = h
+        x = re.sub(r"<\s*br\s*/?\s*>", "\n", x, flags=re.IGNORECASE)
+        x = re.sub(r"<\s*/\s*p\s*>", "\n", x, flags=re.IGNORECASE)
+        x = re.sub(r"<\s*p\b[^>]*>", "", x, flags=re.IGNORECASE)
+        x = re.sub(r"\n{3,}", "\n\n", x)
+        return [ln.rstrip() for ln in x.splitlines()]
 
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -941,7 +976,7 @@ def export_pdf():
         except Exception:
             pass
 
-    raw_lines = text_in.splitlines()
+    raw_lines = html_to_lines(html_in) if html_mode else text_in.splitlines()
     demo_keys = {"patient", "dob", "sex", "phn", "phone", "email", "address"}
     demo_data = {}
     demo_active = False
@@ -949,14 +984,15 @@ def export_pdf():
 
     for raw in raw_lines:
         line = (raw or "").rstrip()
+        compare = strip_tags(line).strip()
         if not line.strip():
             if demo_active and not demo_emitted:
                 story.extend(emit_demographics(demo_data))
                 demo_emitted = True
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 6))
             continue
 
-        lower = line.strip().lower()
+        lower = compare.lower()
         key = lower.split(":", 1)[0].strip() if ":" in lower else ""
 
         if key in demo_keys:
@@ -987,15 +1023,15 @@ def export_pdf():
 
         if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
             try:
-                k, v = line.split(":", 1)
+                k, v = compare.split(":", 1)
                 story.append(Paragraph(f"<b>{esc(k)}:</b> {esc(v.strip())}", mono))
             except Exception:
-                story.append(Paragraph(esc(line), mono))
+                story.append(Paragraph(esc(compare), mono))
             continue
 
         if lower.startswith("dear "):
             story.append(Spacer(1, 8))
-            story.append(Paragraph(esc(line), base))
+            story.append(Paragraph(esc(compare), base))
             story.append(Spacer(1, 6))
             continue
 
@@ -1033,7 +1069,8 @@ def export_pdf():
                 story.append(Paragraph(esc(provider_name), base))
             continue
 
-        story.append(Paragraph(esc(line), base))
+        content = sanitize_inline_markup(line) if html_mode else esc(line)
+        story.append(Paragraph(content, base))
 
     if demo_active and not demo_emitted:
         story.extend(emit_demographics(demo_data))

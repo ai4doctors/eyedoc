@@ -13,7 +13,7 @@
   <header class="topBar">
     <div class="brand">
       <div class="brandMark" aria-label="Maneiro.ai">
-        <span class="brandName">maneiro</span><span class="brandDot">.</span><span class="brandAi">ai</span>
+        <img class="brandLogo" src="/static/img/logo.png" alt="maneiro" />
       </div>
     </div>
 
@@ -37,7 +37,7 @@
 
     <div class="mainArea">
       <section class="stepBar">
-        <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
+        <div class="stepTitle"><span class="stepPill">Step 1</span><span class="stepName">Analyze</span></div>
         <div class="stepControls">
           <input id="file" type="file" accept="application/pdf" class="fileInput" />
           <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
@@ -73,7 +73,7 @@
       </main>
 
       <section class="stepBar step2">
-        <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
+        <div class="stepTitle"><span class="stepPill">Step 2</span><span class="stepName">Communicate</span></div>
         <div class="commGrid">
           <div class="field fieldDoc">
             <label class="fieldLabel" for="recipientType">Document type</label>
@@ -126,11 +126,13 @@
       </section>
 
       <section class="output">
-        <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
+        <div id="letterEditor" class="letterEditor" contenteditable="true" aria-label="Letter editor"></div>
+        <textarea id="letter" class="hidden" aria-hidden="true"></textarea>
         <div class="outputActions">
           <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
           <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
           <button id="exportPdf" class="btn" type="button">Export PDF</button>
+          <button id="emailBtn" class="btn" type="button">Email</button>
         </div>
       </section>
 
