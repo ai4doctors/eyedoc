@@ -1,75 +1,8 @@
 
 let uploadedFile = null
 let jobId = ""
-let analyzeStartTs = 0
 let latestAnalysis = null
 let latestLetterHtml = ""
-let letters = {
-  primary: { html: "", plain: "", recipient_type: "Physician" },
-  patient: { html: "", plain: "", recipient_type: "Patient" }
-}
-
-function setBrandingVisible(visible){
-  const ids = ["lh_primary","sig_primary","lh_patient","sig_patient"]
-  ids.forEach(id => {
-    const node = el(id)
-    if(!node) return
-    if(visible) node.classList.remove("hidden")
-    else node.classList.add("hidden")
-  })
-}
-
-function providerAllowsBranding(name){
-  const s = String(name || "").toLowerCase()
-  if(!s) return false
-  if(s.includes("reis")) return true
-  if(s.includes("integra")) return true
-  return false
-}
-
-function syncBranding(){
-  const chk = el("useBranding")
-  const on = chk ? !!chk.checked : false
-  setBrandingVisible(on)
-}
-let activeTab = "primary"
-
-function setTab(tabKey){
-  activeTab = tabKey
-  const tabs = document.querySelectorAll(".tabBtn")
-  tabs.forEach(t => {
-    const k = t.getAttribute("data-tab")
-    if(k === tabKey){
-      t.classList.add("active")
-    }else{
-      t.classList.remove("active")
-    }
-  })
-  const panels = ["primary","patient"]
-  panels.forEach(k => {
-    const p = el("tab_" + k)
-    if(!p){ return }
-    if(k === tabKey){
-      p.classList.remove("hidden")
-    }else{
-      p.classList.add("hidden")
-    }
-  })
-}
-
-function getActiveBody(){
-  const wrapper = el("tab_" + activeTab)
-  if(!wrapper){ return null }
-  return wrapper.querySelector(".letterBody")
-}
-
-function syncActiveFromDom(){
-  const body = getActiveBody()
-  if(!body){ return }
-  letters[activeTab].html = body.innerHTML || ""
-  letters[activeTab].plain = body.innerText || ""
-  latestLetterHtml = letters[activeTab].html
-}
 // Single theme for consistency
 let theme = "light"
 
@@ -271,7 +204,7 @@ function loadCaseById(id){
   }
   latestAnalysis = c.analysis
   latestLetterHtml = ""
-  clearLetterTabs()
+  el("letter").value = ""
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -280,18 +213,6 @@ function loadCaseById(id){
   renderRefs()
   setAnalyzeStatus("analysis complete")
   toast("Case loaded")
-}
-
-function clearLetterTabs(){
-  letters.primary.html = ""
-  letters.primary.plain = ""
-  letters.patient.html = ""
-  letters.patient.plain = ""
-  const b1 = el("letterBody_primary")
-  const b2 = el("letterBody_patient")
-  if(b1){ b1.innerHTML = "" }
-  if(b2){ b2.innerHTML = "" }
-  setTab("primary")
 }
 
 function clearCases(){
@@ -354,7 +275,7 @@ function clearAll(){
   el("dxBox").textContent = "No data yet."
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
-  clearLetterTabs()
+  el("letter").value = ""
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -631,17 +552,11 @@ async function startAnalyze(){
     return
   }
   jobId = json.job_id
-  analyzeStartTs = Date.now()
   pollAnalyze()
 }
 
 async function pollAnalyze(){
   if(!jobId){
-    return
-  }
-  if(analyzeStartTs && (Date.now() - analyzeStartTs) > 180000){
-    setAnalyzeStatus("waiting")
-    toast("Analysis is taking too long. Try again or enable handwritten mode.")
     return
   }
   try{
@@ -672,13 +587,6 @@ async function pollAnalyze(){
       setAnalyzeStatus("analysis complete")
       latestAnalysis = json.data || {}
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
-
-      // Default branding to ON only when the provider appears to match the clinic template
-      if(el("useBranding")){
-        el("useBranding").checked = providerAllowsBranding(latestAnalysis.provider_name)
-        syncBranding()
-      }
-
       buildReasonOptions()
       renderSummary()
       renderDx()
@@ -731,7 +639,7 @@ async function generateReport(){
   btn.textContent = "Generating report"
   const payload = { form: buildForm(), analysis: latestAnalysis }
   try{
-    const res = await fetch("/generate_letters", {
+    const res = await fetch("/generate_report", {
       method:"POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
@@ -742,21 +650,8 @@ async function generateReport(){
       setGenerateStatus("idle")
       return
     }
-    letters.primary.html = json.primary_html || ""
-    letters.primary.plain = json.primary_plain || ""
-    letters.primary.recipient_type = (json.primary_recipient_type || "Physician")
-
-    letters.patient.html = json.patient_html || ""
-    letters.patient.plain = json.patient_plain || ""
-    letters.patient.recipient_type = (json.patient_recipient_type || "Patient")
-
-    const primaryBody = el("tab_primary")?.querySelector(".letterBody")
-    const patientBody = el("tab_patient")?.querySelector(".letterBody")
-    if(primaryBody){ primaryBody.innerHTML = letters.primary.html }
-    if(patientBody){ patientBody.innerHTML = letters.patient.html }
-    syncBranding()
-    setTab("primary")
-    latestLetterHtml = letters.primary.html || ""
+    el("letter").value = json.letter_plain || ""
+    latestLetterHtml = json.letter_html || ""
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -769,8 +664,7 @@ async function generateReport(){
 }
 
 async function copyPlain(){
-  syncActiveFromDom()
-  const text = (letters[activeTab]?.plain || "")
+  const text = el("letter").value || ""
   if(!text.trim()){
     toast("Nothing to copy")
     return
@@ -784,9 +678,8 @@ async function copyPlain(){
 }
 
 async function copyRich(){
-  syncActiveFromDom()
-  const plain = (letters[activeTab]?.plain || "")
-  const html = (letters[activeTab]?.html || "")
+  const plain = el("letter").value || ""
+  const html = latestLetterHtml || ""
   if(!plain.trim()){
     toast("Nothing to copy")
     return
@@ -808,8 +701,7 @@ async function copyRich(){
 }
 
 async function exportPdf(){
-  syncActiveFromDom()
-  const text = (letters[activeTab]?.plain || "")
+  const text = el("letter").value || ""
   if(!text.trim()){
     toast("Nothing to export")
     return
@@ -817,7 +709,7 @@ async function exportPdf(){
   const providerName = (el("fromDoctor").value || "").trim()
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
-  const recipientType = (letters[activeTab]?.recipient_type || (el("recipientType").value || "").trim())
+  const recipientType = (el("recipientType").value || "").trim()
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
@@ -855,32 +747,6 @@ async function exportPdf(){
   a.remove()
   URL.revokeObjectURL(url)
   toast("Downloaded")
-}
-
-function emailLetter(){
-  syncActiveFromDom()
-  const text = (letters[activeTab]?.plain || "")
-  const subject = buildEmailSubject()
-  const body = text
-  const mailto = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-  window.location.href = mailto
-}
-
-function buildEmailSubject(){
-  const docType = (el("recipientType").value || "Letter")
-  const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
-  const token = patientTokenFromBlock(patientBlock)
-  return `${docType} ${token}`.trim()
-}
-
-async function downloadAllPdfs(){
-  const current = activeTab
-  for(const key of Object.keys(letters)){
-    if(!(letters[key]?.plain || "").trim()) continue
-    setTab(key)
-    await exportPdf()
-  }
-  setTab(current)
 }
 
 el("uploadBtn").addEventListener("click", openPicker)
@@ -924,33 +790,6 @@ el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
 
-if(el("useBranding")){
-  el("useBranding").addEventListener("change", syncBranding)
-}
-
-document.querySelectorAll(".tabBtn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const key = btn.dataset.tab
-    if(key){
-      setTab(key)
-    }
-  })
-})
-
-if(el("emailBtn")){
-  el("emailBtn").addEventListener("click", emailLetter)
-}
-if(el("downloadAll")){
-  el("downloadAll").addEventListener("click", downloadAllPdfs)
-}
-
-document.querySelectorAll(".tabBtn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const key = btn.getAttribute("data-tab")
-    if(key){ setTab(key) }
-  })
-})
-
 if(el("runOcrBtn")){
   el("runOcrBtn").addEventListener("click", async () => {
     if(el("handwrittenCheck")){
@@ -959,12 +798,6 @@ if(el("runOcrBtn")){
     await startAnalyze()
   })
 }
-
-// Ensure branding assets are hidden until a valid case is analyzed
-try{
-  if(el("useBranding")) el("useBranding").checked = false
-  setBrandingVisible(false)
-}catch(e){}
 
 el("resetBtn").addEventListener("click", clearAll)
 el("newCaseBtn").addEventListener("click", clearAll)

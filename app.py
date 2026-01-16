@@ -51,9 +51,6 @@ APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
 
-# Keep analysis prompts bounded to avoid memory pressure on small instances
-MAX_NOTE_CHARS = int(os.getenv("MAX_NOTE_CHARS", "12000"))
-
 # In memory job store
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
@@ -62,11 +59,7 @@ def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def clamp_text(s: str, limit: int) -> str:
-    # Keep payloads modest to avoid memory pressure on small instances.
-    s = (s or "").strip()
-    if len(s) <= limit:
-        return s
-    return s[:limit] + "\n\n[TRUNCATED]"
+    return (s or "")[:limit]
 
 def extract_pdf_text(file_storage) -> str:
     reader = PyPDF2.PdfReader(file_storage)
@@ -140,11 +133,85 @@ def extract_text_from_upload(file_storage, force_ocr: bool) -> Tuple[str, bool, 
 
     return "", False, True, "Unsupported file type"
 
-"""OCR helper variants removed.
+def is_meaningful_text(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) < 250:
+        return False
+    letters = sum(1 for c in t if c.isalpha())
+    ratio = letters / max(1, len(t))
+    return ratio >= 0.25
 
-We keep a single OCR pipeline (ocr_pdf_bytes) near the top of the file which
-returns (text, error). Upload handling uses extract_text_from_upload.
-"""
+def ocr_ready() -> Tuple[bool, str]:
+    if fitz is None:
+        return False, "PyMuPDF not available"
+    if Image is None:
+        return False, "Pillow not available"
+    if pytesseract is None:
+        return False, "pytesseract not available"
+    return True, ""
+
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
+    ok, _ = ocr_ready()
+    if not ok:
+        return ""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception:
+        return ""
+    parts: List[str] = []
+    try:
+        pages = min(len(doc), max_pages)
+        for i in range(pages):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(dpi=220)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            txt = pytesseract.image_to_string(img) or ""
+            parts.append(txt)
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+    return "\n".join(parts).strip()
+
+def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
+    """
+    Returns: text, used_ocr, needs_ocr, error
+    """
+    try:
+        pdf_bytes = file_storage.read()
+    except Exception:
+        return "", False, False, "Unable to read uploaded file"
+    # Reset stream for any later reads
+    try:
+        file_storage.stream.seek(0)
+    except Exception:
+        pass
+
+    extracted = ""
+    try:
+        extracted = extract_pdf_text(io.BytesIO(pdf_bytes))
+    except Exception:
+        extracted = ""
+
+    if is_meaningful_text(extracted) and not force_ocr:
+        return extracted, False, False, ""
+
+    # If not meaningful and OCR not requested, ask for OCR
+    if (not is_meaningful_text(extracted)) and (not force_ocr):
+        return "", False, True, "No readable text extracted"
+
+    # OCR path
+    ok, msg = ocr_ready()
+    if not ok:
+        return "", False, False, f"OCR not available: {msg}"
+    ocr_text = ocr_pdf_bytes(pdf_bytes)
+    if is_meaningful_text(ocr_text):
+        return ocr_text, True, False, ""
+    # Fall back to whatever we extracted
+    if extracted.strip():
+        return extracted, True, False, ""
+    return "", True, False, "OCR produced no readable text"
 
 def client_ready() -> Tuple[bool, str]:
     if OpenAI is None:
@@ -162,8 +229,8 @@ def get_client():
     if not ok:
         return None
     key = os.getenv("OPENAI_API_KEY").strip()
-    # Keep timeouts modest to avoid hung workers.
-    return OpenAI(api_key=key, timeout=45)
+    # Set a sane timeout to avoid hanging requests
+    return OpenAI(api_key=key, timeout=60)
 
 def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
     if not s:
@@ -197,7 +264,6 @@ def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, 
                 {"role": "user", "content": prompt},
             ],
             temperature=temperature,
-            max_tokens=1200,
         )
         text = (res.choices[0].message.content or "").strip()
         obj, err = safe_json_loads(text)
@@ -218,7 +284,7 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 }
 
 def analyze_prompt(note_text: str) -> str:
-    excerpt = clamp_text(note_text, 9000)
+    excerpt = clamp_text(note_text, 16000)
     return f"""
 You are a clinician assistant. You are given an encounter note extracted from a PDF.
 
@@ -422,65 +488,60 @@ def get_job(job_id: str) -> Dict[str, Any]:
         return dict(JOBS.get(job_id) or {})
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    try:
-        set_job(job_id, status="processing", updated_at=now_utc_iso())
+    set_job(job_id, status="processing", updated_at=now_utc_iso())
+    obj, err = llm_json(analyze_prompt(note_text))
+    if err or not obj:
+        set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
+        return
 
-        # Guardrails against runaway memory use on very long notes
-        note_text = (note_text or "")
-        if len(note_text) > MAX_NOTE_CHARS:
-            note_text = note_text[:MAX_NOTE_CHARS]
+    analysis = dict(ANALYZE_SCHEMA)
+    analysis.update(obj)
 
-        obj, err = llm_json(analyze_prompt(note_text))
-        if err or not obj:
-            set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
-            return
+    # Fetch PubMed references based on diagnoses
+    terms = []
+    for dx in analysis.get("diagnoses") or []:
+        if isinstance(dx, dict):
+            label = (dx.get("label") or "").strip()
+            if label:
+                terms.append(label)
+    references = pubmed_fetch_for_terms(terms)
+    analysis["references"] = references
 
-        analysis = dict(ANALYZE_SCHEMA)
-        analysis.update(obj)
-
-        # Fetch PubMed references based on diagnoses, but keep it lightweight
-        terms = []
-        for dx in analysis.get("diagnoses") or []:
-            if isinstance(dx, dict):
-                label = (dx.get("label") or "").strip()
-                if label:
-                    terms.append(label)
-        terms = terms[:4]
-        references = pubmed_fetch_for_terms(terms)
-        analysis["references"] = references
-
-        # Assign citation numbers
-        if references:
-            cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
-            if not cites_err and cites_obj:
-                dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-                pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-                for dx in analysis.get("diagnoses") or []:
-                    if isinstance(dx, dict) and isinstance(dx.get("number"), int):
-                        dx["refs"] = dx_map.get(dx["number"], [])
-                for pl in analysis.get("plan") or []:
-                    if isinstance(pl, dict) and isinstance(pl.get("number"), int):
-                        pl["refs"] = pl_map.get(pl["number"], [])
-
-        # Guarantee at least one reference number is used somewhere when references exist
-        if analysis.get("references"):
-            used = False
+    # Assign citation numbers
+    if references:
+        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
+        if not cites_err and cites_obj:
+            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
             for dx in analysis.get("diagnoses") or []:
-                if isinstance(dx, dict) and dx.get("refs"):
+                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
+                    dx["refs"] = dx_map.get(dx["number"], [])
+            for pl in analysis.get("plan") or []:
+                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
+                    pl["refs"] = pl_map.get(pl["number"], [])
+
+    # Guarantee at least one reference number is used somewhere when references exist
+    if analysis.get("references"):
+        used = False
+        for dx in analysis.get("diagnoses") or []:
+            if isinstance(dx, dict) and dx.get("refs"):
+                used = True
+                break
+        if not used:
+            for pl in analysis.get("plan") or []:
+                if isinstance(pl, dict) and pl.get("refs"):
                     used = True
                     break
-            if not used:
-                for pl in analysis.get("plan") or []:
-                    if isinstance(pl, dict) and pl.get("refs"):
-                        used = True
-                        break
-            if not used:
-                if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"] and isinstance(analysis["diagnoses"][0], dict):
+        if not used:
+            # Attach reference 1 as a general evidence context anchor
+            if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
+                if isinstance(analysis["diagnoses"][0], dict):
                     analysis["diagnoses"][0]["refs"] = [1]
+            if isinstance(analysis.get("plan"), list) and analysis["plan"]:
+                if isinstance(analysis["plan"][0], dict):
+                    analysis["plan"][0]["refs"] = [1]
 
-        set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
-    except Exception as e:
-        set_job(job_id, status="error", error=f"Analysis crashed: {type(e).__name__}", updated_at=now_utc_iso())
+    set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 @app.get("/")
 def index():
@@ -572,63 +633,6 @@ def generate_report():
         return jsonify({"ok": False, "error": "Empty output"}), 200
 
     return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
-
-
-@app.post("/generate_letters")
-def generate_letters():
-    payload = request.get_json(silent=True) or {}
-    form = payload.get("form") or {}
-    analysis = payload.get("analysis") or {}
-
-    # Reuse the normalization and helper logic by calling generate_report twice
-    # without duplicating the full prompt logic.
-    def run_for(recipient_type_value: str):
-        local_form = dict(form) if isinstance(form, dict) else {}
-        local_form["recipientType"] = recipient_type_value
-        local_payload = {"form": local_form, "analysis": analysis}
-
-        # Inline the same logic as generate_report to avoid an internal HTTP call
-        pb_html = (analysis.get("patient_block") or "")
-        pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
-        pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
-        pb_plain = re.sub(r"\n{3,}", "\n\n", pb_plain).strip()
-        analysis["patient_block_plain"] = pb_plain
-
-        local_form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
-        rf = (local_form.get("reason_for_referral") or "").strip()
-        rd = (local_form.get("reason_detail") or "").strip()
-        if rf and rd:
-            local_form["reason_for_referral_combined"] = f"{rf}, {rd}"
-        else:
-            local_form["reason_for_referral_combined"] = rf or rd
-
-        obj, err = llm_json(letter_prompt(local_form, analysis))
-        if err or not obj:
-            return None, err or "Generation failed"
-
-        lp = (obj.get("letter_plain") or "").strip()
-        lh = (obj.get("letter_html") or "").strip()
-        if lp:
-            lp = re.sub(r"<\s*br\s*/?\s*>", "\n", lp, flags=re.IGNORECASE)
-            lp = re.sub(r"<\s*/?p\s*>", "\n", lp, flags=re.IGNORECASE)
-            lp = re.sub(r"<[^>]+>", "", lp)
-            lp = re.sub(r"\n{3,}", "\n\n", lp).strip()
-        if not lp:
-            return None, "Empty output"
-        return {"letter_plain": lp, "letter_html": lh}, None
-
-    primary_type = (form.get("recipientType") or "Physician").strip() or "Physician"
-
-    primary, err1 = run_for(primary_type)
-    if err1:
-        return jsonify({"ok": False, "error": err1}), 200
-
-    patient, err2 = run_for("Patient")
-    if err2:
-        # Still return primary if patient fails
-        return jsonify({"ok": True, "primary": primary, "patient": None, "warning": err2}), 200
-
-    return jsonify({"ok": True, "primary": primary, "patient": patient}), 200
 
 def signature_slug(provider_name: str) -> str:
     s = (provider_name or "").strip().lower()

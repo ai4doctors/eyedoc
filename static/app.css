@@ -176,15 +176,14 @@ body{
   display:grid;
   grid-template-columns: repeat(12, 1fr);
   gap:12px;
-  align-items:start;
+  align-items:end;
   padding:10px 26px 14px 26px;
 }
 .field{display:flex; flex-direction:column; gap:6px}
 .fieldLabel{font-weight:800; font-size:14px; color:var(--muted)}
-.fieldDoc{grid-column: 1 / span 2}
-.fieldBrand{grid-column: 3 / span 2}
-.fieldTo{grid-column: 5 / span 4}
-.fieldFrom{grid-column: 9 / span 2}
+.fieldDoc{grid-column: 1 / span 3}
+.fieldTo{grid-column: 4 / span 4}
+.fieldFrom{grid-column: 8 / span 3}
 .fieldAction{grid-column: 11 / span 2}
 .fieldReason{grid-column: 1 / span 6}
 .fieldFocus{grid-column: 7 / span 3}
@@ -193,7 +192,6 @@ body{
 @media (max-width: 1100px){
   .commGrid{grid-template-columns: repeat(6, 1fr)}
   .fieldDoc{grid-column: 1 / span 6}
-  .fieldBrand{grid-column: 1 / span 6}
   .fieldTo{grid-column: 1 / span 3}
   .fieldFrom{grid-column: 4 / span 3}
   .fieldAction{grid-column: 1 / span 6}
@@ -201,21 +199,11 @@ body{
   .fieldFocus{grid-column: 1 / span 3}
   .fieldRequests{grid-column: 4 / span 3}
 }
-
-/* Step 2 control sizing: fill the grid cells regardless of prepopulated values */
-.commGrid .ctrl{width:100%; min-width:0}
-.commGrid .field{min-width:0}
-.commGrid input.ctrl, .commGrid select.ctrl, .commGrid textarea.ctrl{min-width:0}
-.commGrid input.ctrl, .commGrid select.ctrl{height:46px}
-.commGrid .btnPrimary{width:100%}
 .fileInput{display:none}
 .stepStatus{
   color:var(--muted);
   font-size:14px;
 }
-
-.checkRow{display:flex; gap:10px; align-items:center; font-size:16px; color:var(--text); user-select:none}
-.checkRow input{width:18px; height:18px}
 
 .sectionTitle{
   font-size:22px;
@@ -296,11 +284,7 @@ body{
 .hidden{display:none}
 
 .btnPrimary{
-  height:46px;
-  padding:0 18px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  padding:12px 18px;
   border-radius:14px;
   border:1px solid rgba(0,0,0,0.06);
   background: linear-gradient(180deg, rgba(43,139,214,1), rgba(25,110,190,1));
@@ -318,37 +302,18 @@ body{
 .output{
   padding:0 26px 16px 26px;
 }
-.tabBar{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
-.tabBtn{
-  padding:10px 12px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background: var(--panel2);
-  color: var(--text);
-  cursor:pointer;
-  font-size:16px;
-  font-weight:900;
-}
-.tabBtn.active{background: rgba(43,139,214,0.12); border-color: rgba(43,139,214,0.35)}
-
-.letterPage{
+.letter{
   width:100%;
-  min-height:520px;
+  min-height:420px;
   border-radius:18px;
   border:1px solid var(--border);
-  background: #ffffff;
-  color: #0f172a;
-  padding:24px;
-  box-shadow: 0 10px 30px rgba(2,6,23,0.06);
+  background: var(--panel);
+  color: var(--text);
+  padding:18px;
+  font-size:18px;
+  line-height:1.75;
+  resize:vertical;
 }
-.letterheadImg{width:100%; height:auto; display:block; margin-bottom:14px}
-.letterMeta{margin:0 0 12px 0; font-size:14px; color:#334155}
-.letterBody{min-height:340px; font-size:16px; line-height:1.65; outline:none}
-.letterBody p{margin:0 0 10px 0}
-.signatureWrap{display:flex; justify-content:flex-end; margin-top:18px}
-.signatureImg, .signature{width:25%; max-width:500px; height:auto; object-fit:contain}
-
-.hidden{display:none !important}
 .outputActions{
   display:flex;
   gap:10px;
