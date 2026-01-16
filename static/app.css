@@ -15,7 +15,7 @@ body{
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   background: radial-gradient(1400px 900px at 15% 0%, var(--bgAccent) 0%, var(--bg) 58%);
   color:var(--text);
-  font-size:15px;
+  font-size:16px;
 }
 .topBar{
   display:flex;
@@ -28,6 +28,90 @@ body{
   position:sticky;
   top:0;
   z-index:20;
+}
+
+.appGrid{
+  display:grid;
+  grid-template-columns: 300px 1fr;
+  gap:0;
+  min-height:calc(100vh - 0px);
+}
+
+.sideBar{
+  border-right:1px solid var(--border);
+  background: linear-gradient(180deg, rgba(11,18,38,0.98), rgba(7,12,27,0.98));
+  padding:16px;
+  position:sticky;
+  top:180px;
+  align-self:start;
+  height:calc(100vh - 180px);
+  overflow:auto;
+}
+
+.sideHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+}
+
+.sideTitle{
+  font-weight:900;
+  font-size:18px;
+}
+
+.sideBtn{
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  cursor:pointer;
+  font-size:13px;
+  font-weight:900;
+}
+
+.caseList{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  margin-top:10px;
+}
+
+.caseCard{
+  border:1px solid var(--border);
+  background: rgba(6,8,19,0.35);
+  border-radius:16px;
+  padding:12px;
+  cursor:pointer;
+}
+
+.caseCard:hover{
+  outline:2px solid rgba(78,168,222,0.35);
+}
+
+.caseTitle{
+  font-weight:900;
+  font-size:14px;
+  margin-bottom:4px;
+}
+
+.caseMeta{
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.35;
+}
+
+.sideHint{
+  color:var(--muted);
+  font-size:12px;
+  margin-top:14px;
+  line-height:1.35;
+}
+
+.mainArea{
+  padding:0 10px;
 }
 .brand{
   display:flex;
@@ -94,7 +178,7 @@ body{
 }
 
 .sectionTitle{
-  font-size:18px;
+  font-size:19px;
   margin:12px 16px 8px 16px;
 }
 
@@ -105,7 +189,7 @@ body{
   padding:16px;
   background: linear-gradient(180deg, rgba(11,18,38,0.95), rgba(7,12,27,0.95));
   line-height:1.6;
-  font-size:15px;
+  font-size:16px;
   min-height:120px;
 }
 .summary .panel{min-height:180px}
@@ -123,12 +207,33 @@ body{
   font-weight:900;
   margin-top:12px;
   margin-bottom:6px;
-  font-size:16px;
+  font-size:17px;
 }
 .itemMeta{
   color:var(--muted);
-  font-size:13px;
+  font-size:14px;
   margin-bottom:6px;
+}
+
+.clickableRef{
+  cursor:pointer;
+}
+
+.citeRef{
+  cursor:pointer;
+  color:var(--accent);
+  font-weight:800;
+}
+
+.citeRef:hover{
+  filter:brightness(1.15);
+}
+
+.highlight{
+  outline:2px solid rgba(78,168,222,0.65);
+  border-radius:12px;
+  padding:8px;
+  margin:-8px;
 }
 .bullets{
   margin:0 0 10px 18px;
@@ -171,7 +276,7 @@ body{
   background: var(--panel);
   color: var(--text);
   padding:18px;
-  font-size:15px;
+  font-size:16px;
   line-height:1.75;
   resize:vertical;
 }
@@ -228,7 +333,17 @@ body{
   --border:#d8def0;
 }
 
+.light .sideBar{
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(241,244,255,0.98));
+}
+
+.light .caseCard{
+  background: rgba(241,244,255,0.75);
+}
+
 @media (max-width: 1200px){
+  .appGrid{grid-template-columns: 1fr}
+  .sideBar{position:relative; top:0; height:auto}
   .triCols{grid-template-columns: 1fr}
   .logo{width:96px; height:96px}
   .brandName{font-size:22px}

@@ -5,6 +5,108 @@ let latestAnalysis = null
 let latestLetterHtml = ""
 let theme = "dark"
 
+const CASES_KEY = "ai4health_cases_v1"
+
+function loadCases(){
+  try{
+    const raw = localStorage.getItem(CASES_KEY)
+    return raw ? JSON.parse(raw) : []
+  }catch(e){
+    return []
+  }
+}
+
+function saveCases(cases){
+  try{
+    localStorage.setItem(CASES_KEY, JSON.stringify(cases))
+  }catch(e){
+    return
+  }
+}
+
+function upsertCase(analysis){
+  if(!analysis){
+    return
+  }
+  const cases = loadCases()
+  const patient = (analysis.patient_name || "").trim() || "Untitled case"
+  const provider = (analysis.provider_name || "").trim()
+  const ts = Date.now()
+  const id = `${ts}_${Math.random().toString(16).slice(2)}`
+  const entry = {
+    id,
+    ts,
+    patient,
+    provider,
+    dx_count: (analysis.diagnoses || []).length,
+    analysis
+  }
+  cases.unshift(entry)
+  saveCases(cases.slice(0, 30))
+  renderCaseList()
+}
+
+function renderCaseList(){
+  const list = el("caseList")
+  if(!list){
+    return
+  }
+  const cases = loadCases()
+  if(!cases.length){
+    list.innerHTML = "<div class=\"caseMeta\">No saved cases yet.</div>"
+    return
+  }
+  const frag = document.createDocumentFragment()
+  cases.forEach(c => {
+    const card = document.createElement("div")
+    card.className = "caseCard"
+    card.dataset.caseId = c.id
+
+    const t = document.createElement("div")
+    t.className = "caseTitle"
+    t.textContent = c.patient
+    card.appendChild(t)
+
+    const m = document.createElement("div")
+    m.className = "caseMeta"
+    const d = new Date(c.ts)
+    const when = d.toLocaleString()
+    const dx = c.dx_count ? `${c.dx_count} dx` : ""
+    const prov = c.provider ? c.provider : ""
+    m.textContent = [when, prov, dx].filter(Boolean).join("  ")
+    card.appendChild(m)
+
+    frag.appendChild(card)
+  })
+  list.innerHTML = ""
+  list.appendChild(frag)
+}
+
+function loadCaseById(id){
+  const cases = loadCases()
+  const c = cases.find(x => x.id === id)
+  if(!c){
+    toast("Case not found")
+    return
+  }
+  latestAnalysis = c.analysis
+  latestLetterHtml = ""
+  el("letter").value = ""
+  el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
+  buildReasonOptions()
+  renderSummary()
+  renderDx()
+  renderPlan()
+  renderRefs()
+  setAnalyzeStatus("analysis complete")
+  toast("Case loaded")
+}
+
+function clearCases(){
+  saveCases([])
+  renderCaseList()
+}
+
 function el(id){ return document.getElementById(id) }
 
 function toast(msg){
@@ -41,6 +143,10 @@ function clearAll(){
   el("reasonOther").value = ""
   setAnalyzeStatus("waiting")
   toast("Reset complete")
+}
+
+function newCase(){
+  clearAll()
 }
 
 function applyTheme(){
@@ -125,6 +231,8 @@ function renderDx(){
   const frag = document.createDocumentFragment()
   dx.forEach(item => {
     const wrap = document.createElement("div")
+    wrap.dataset.refs = (item.refs || []).join(",")
+    wrap.id = `dx_${item.number}`
 
     const title = document.createElement("div")
     title.className = "itemTitle"
@@ -134,8 +242,22 @@ function renderDx(){
 
     const meta = document.createElement("div")
     meta.className = "itemMeta"
-    const refs = (item.refs || []).map(n => `[${n}]`).join(" ")
-    meta.textContent = refs ? `Evidence ${refs}` : ""
+    const refs = (item.refs || []).map(n => String(n)).filter(Boolean)
+    if(refs.length){
+      const label = document.createElement("span")
+      label.textContent = "Evidence "
+      meta.appendChild(label)
+      refs.forEach((n, idx) => {
+        const s = document.createElement("span")
+        s.className = "citeRef"
+        s.dataset.ref = n
+        s.textContent = `[${n}]`
+        meta.appendChild(s)
+        if(idx < refs.length - 1){
+          meta.appendChild(document.createTextNode(" "))
+        }
+      })
+    }
     wrap.appendChild(meta)
 
     const ul = document.createElement("ul")
@@ -163,6 +285,8 @@ function renderPlan(){
   const frag = document.createDocumentFragment()
   plan.forEach(item => {
     const wrap = document.createElement("div")
+    wrap.dataset.refs = (item.refs || []).join(",")
+    wrap.id = `plan_${item.number}`
 
     const title = document.createElement("div")
     title.className = "itemTitle"
@@ -171,10 +295,31 @@ function renderPlan(){
 
     const meta = document.createElement("div")
     meta.className = "itemMeta"
-    const refs = (item.refs || []).map(n => `[${n}]`).join(" ")
     const aligned = (item.aligned_dx_numbers || []).length ? `Dx ${item.aligned_dx_numbers.join(", ")}` : ""
-    const metaText = [aligned, refs ? `Evidence ${refs}` : ""].filter(Boolean).join("   ")
-    meta.textContent = metaText
+    if(aligned){
+      const a = document.createElement("span")
+      a.textContent = aligned
+      meta.appendChild(a)
+    }
+    const refs = (item.refs || []).map(n => String(n)).filter(Boolean)
+    if(refs.length){
+      if(aligned){
+        meta.appendChild(document.createTextNode("   "))
+      }
+      const label = document.createElement("span")
+      label.textContent = "Evidence "
+      meta.appendChild(label)
+      refs.forEach((n, idx) => {
+        const s = document.createElement("span")
+        s.className = "citeRef"
+        s.dataset.ref = n
+        s.textContent = `[${n}]`
+        meta.appendChild(s)
+        if(idx < refs.length - 1){
+          meta.appendChild(document.createTextNode(" "))
+        }
+      })
+    }
     wrap.appendChild(meta)
 
     const ul = document.createElement("ul")
@@ -202,6 +347,8 @@ function renderRefs(){
   const frag = document.createDocumentFragment()
   refs.forEach(r => {
     const wrap = document.createElement("div")
+    wrap.className = "clickableRef"
+    wrap.dataset.ref = String(r.number)
 
     const title = document.createElement("div")
     title.className = "itemTitle"
@@ -219,6 +366,31 @@ function renderRefs(){
   })
   box.innerHTML = ""
   box.appendChild(frag)
+}
+
+function clearHighlights(){
+  document.querySelectorAll(".highlight").forEach(n => n.classList.remove("highlight"))
+}
+
+function highlightRef(refNum){
+  const n = String(refNum)
+  clearHighlights()
+  const candidates = []
+  ;[el("dxBox"), el("planBox")].forEach(container => {
+    if(!container){
+      return
+    }
+    Array.from(container.children).forEach(child => {
+      const refs = (child.dataset && child.dataset.refs) ? child.dataset.refs.split(",").filter(Boolean) : []
+      if(refs.includes(n)){
+        child.classList.add("highlight")
+        candidates.push(child)
+      }
+    })
+  })
+  if(candidates.length){
+    candidates[0].scrollIntoView({behavior:"smooth", block:"center"})
+  }
 }
 
 async function startAnalyze(){
@@ -278,6 +450,7 @@ async function pollAnalyze(){
       renderDx()
       renderPlan()
       renderRefs()
+      upsertCase(latestAnalysis)
       toast("Analysis complete")
       return
     }
@@ -375,7 +548,7 @@ async function exportPdf(){
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ text })
+    body: JSON.stringify({ text, provider_name: (el("fromDoctor").value || "").trim() })
   })
   if(!res.ok){
     toast("PDF export failed")
@@ -424,7 +597,43 @@ el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
 
 el("resetBtn").addEventListener("click", clearAll)
+el("newCaseBtn").addEventListener("click", clearAll)
+
+el("caseList").addEventListener("click", (e) => {
+  const card = e.target.closest(".caseCard")
+  if(!card){
+    return
+  }
+  const id = card.dataset.caseId
+  if(id){
+    loadCaseById(id)
+  }
+})
+
+el("refBox").addEventListener("click", (e) => {
+  const node = e.target.closest(".clickableRef")
+  if(!node){
+    return
+  }
+  const ref = node.dataset.ref
+  if(ref){
+    highlightRef(ref)
+  }
+})
+
+document.addEventListener("click", (e) => {
+  const n = e.target.closest(".citeRef")
+  if(!n){
+    return
+  }
+  const ref = n.dataset.ref
+  if(ref){
+    highlightRef(ref)
+  }
+})
+
 el("themeBtn").addEventListener("click", toggleTheme)
 
 applyTheme()
 setAnalyzeStatus("waiting")
+renderCaseList()

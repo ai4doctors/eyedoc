@@ -24,38 +24,49 @@
     </div>
   </header>
 
-  <section class="stepBar">
-    <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
-    <div class="stepControls">
-      <input id="file" type="file" accept="application/pdf" class="fileInput" />
-      <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
-      <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
-    </div>
-  </section>
+  <div class="appGrid">
+    <aside class="sideBar">
+      <div class="sideHeader">
+        <div class="sideTitle">Cases</div>
+        <button id="newCaseBtn" class="sideBtn" type="button">New</button>
+      </div>
+      <div id="caseList" class="caseList"></div>
+      <div class="sideHint">Cases are stored in this browser only.</div>
+    </aside>
 
-  <section class="summary">
-    <div class="sectionTitle"><b>Summary</b></div>
-    <div id="summaryBox" class="panel">Upload exam notes to begin.</div>
-  </section>
+    <div class="mainArea">
+      <section class="stepBar">
+        <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
+        <div class="stepControls">
+          <input id="file" type="file" accept="application/pdf" class="fileInput" />
+          <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
+          <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
+        </div>
+      </section>
 
-  <main class="triCols">
-    <section class="col">
-      <div class="sectionTitle"><b>Diagnosis</b></div>
-      <div id="dxBox" class="panel">No data yet.</div>
-    </section>
-    <section class="col">
-      <div class="sectionTitle"><b>Plan</b></div>
-      <div id="planBox" class="panel">No data yet.</div>
-    </section>
-    <section class="col">
-      <div class="sectionTitle"><b>References</b></div>
-      <div id="refBox" class="panel">No data yet.</div>
-    </section>
-  </main>
+      <section class="summary">
+        <div class="sectionTitle"><b>Summary</b></div>
+        <div id="summaryBox" class="panel">Upload exam notes to begin.</div>
+      </section>
 
-  <section class="stepBar step2">
-    <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
-    <div class="commControls">
+      <main class="triCols">
+        <section class="col">
+          <div class="sectionTitle"><b>Diagnosis</b></div>
+          <div id="dxBox" class="panel">No data yet.</div>
+        </section>
+        <section class="col">
+          <div class="sectionTitle"><b>Plan</b></div>
+          <div id="planBox" class="panel">No data yet.</div>
+        </section>
+        <section class="col">
+          <div class="sectionTitle"><b>References</b></div>
+          <div id="refBox" class="panel">No data yet.</div>
+        </section>
+      </main>
+
+      <section class="stepBar step2">
+        <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
+        <div class="commControls">
       <select id="recipientType" class="ctrl">
         <option value="Specialist">Specialist</option>
         <option value="Family physician">Family physician</option>
@@ -75,23 +86,25 @@
       <input id="specialRequests" class="ctrl xwide" placeholder="Special requests" />
 
       <button id="generateBtn" class="btnPrimary" type="button">Generate Report</button>
-    </div>
-  </section>
+        </div>
+      </section>
 
-  <section class="output">
-    <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
-    <div class="outputActions">
-      <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
-      <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
-      <button id="exportPdf" class="btn" type="button">Export PDF</button>
-    </div>
-  </section>
+      <section class="output">
+        <textarea id="letter" class="letter" placeholder="Generated output will appear here"></textarea>
+        <div class="outputActions">
+          <button id="copyRich" class="btn" type="button">Copy Rich Text</button>
+          <button id="copyPlain" class="btn" type="button">Copy Plain Text</button>
+          <button id="exportPdf" class="btn" type="button">Export PDF</button>
+        </div>
+      </section>
 
-  <footer class="footer">
-    <div>Created by Dr. Henry Reis, MD, OD, MBA. 2026. All rights reserved.</div>
-    <div class="footerSmall">This tool supports HIPAA aligned workflows and uses evidence based sources from PubMed. It does not replace clinical judgement. Always verify outputs before use.</div>
-    <div class="footerSmall">v{{ version }}</div>
-  </footer>
+      <footer class="footer">
+        <div>Created by Dr. Henry Reis, MD, OD, MBA. 2026. All rights reserved.</div>
+        <div class="footerSmall">This tool supports HIPAA aligned workflows and uses evidence based sources from PubMed. It does not replace clinical judgement. Always verify outputs before use.</div>
+        <div class="footerSmall">v{{ version }}</div>
+      </footer>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="/static/app.js"></script>

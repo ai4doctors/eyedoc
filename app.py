@@ -19,9 +19,11 @@ except Exception:
 try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
 except Exception:
     canvas = None
     rl_letter = None
+    ImageReader = None
 
 APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
@@ -156,7 +158,9 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         if t and t.lower() not in [x.lower() for x in uniq_terms]:
             uniq_terms.append(t)
     if not uniq_terms:
-        return []
+        # Fallback to a broad ophthalmology evidence search to ensure we can always
+        # return at least one PubMed reference for the case.
+        uniq_terms = ["ophthalmology clinical practice guideline"]
 
     pmids: List[str] = []
     for term in uniq_terms[:6]:
@@ -178,6 +182,22 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         except Exception:
             continue
 
+    if not pmids:
+        # Final fallback query to guarantee at least one reference.
+        try:
+            r = requests.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                params={"db": "pubmed", "term": "ophthalmology review", "retmax": 3, "retmode": "json"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            data = r.json()
+            ids = (data.get("esearchresult") or {}).get("idlist") or []
+            for pid in ids:
+                if pid not in pmids:
+                    pmids.append(pid)
+        except Exception:
+            pass
     if not pmids:
         return []
 
@@ -221,8 +241,9 @@ plan: array of items, each item:
 
 Rules:
 1 Use only reference numbers that exist in references.
-2 If uncertain, leave refs empty.
-3 Prefer 1 to 3 refs per item.
+2 Prefer 1 to 3 refs per item.
+3 There must always be at least one reference number used somewhere in diagnoses or plan.
+4 If a direct match is unclear, choose the most relevant general reference for the condition or specialty area to provide evidence context.
 
 Analysis:
 {json.dumps(analysis, ensure_ascii=False)}
@@ -262,11 +283,11 @@ Letterhead rules:
 
 Body rules:
 1 Use short paragraphs with good spacing.
-2 Include sections: Clinical summary, Exam findings, Assessment, Plan, Closing.
+2 Include sections: Clinical summary, Exam findings, Assessment, Plan.
 3 Include exam findings with more granularity when available in the note. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
 4 Do not include Evidence or Disclaimer sections in the letter.
 5 Do not include citations or bracket numbers in the letter body.
-6 Closing must include Kind regards and the authoring doctor name.
+6 End with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
@@ -321,6 +342,27 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(pl, dict) and isinstance(pl.get("number"), int):
                     pl["refs"] = pl_map.get(pl["number"], [])
 
+    # Guarantee at least one reference number is used somewhere when references exist
+    if analysis.get("references"):
+        used = False
+        for dx in analysis.get("diagnoses") or []:
+            if isinstance(dx, dict) and dx.get("refs"):
+                used = True
+                break
+        if not used:
+            for pl in analysis.get("plan") or []:
+                if isinstance(pl, dict) and pl.get("refs"):
+                    used = True
+                    break
+        if not used:
+            # Attach reference 1 as a general evidence context anchor
+            if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
+                if isinstance(analysis["diagnoses"][0], dict):
+                    analysis["diagnoses"][0]["refs"] = [1]
+            if isinstance(analysis.get("plan"), list) and analysis["plan"]:
+                if isinstance(analysis["plan"][0], dict):
+                    analysis["plan"][0]["refs"] = [1]
+
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 @app.get("/")
@@ -367,18 +409,45 @@ def generate_report():
 
     letter_plain = (obj.get("letter_plain") or "").strip()
     letter_html = (obj.get("letter_html") or "").strip()
+    # Some model outputs may leak html breaks into the plain text. Normalize.
+    if letter_plain:
+        letter_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", letter_plain, flags=re.IGNORECASE)
+        letter_plain = re.sub(r"<\s*/?p\s*>", "\n", letter_plain, flags=re.IGNORECASE)
+        letter_plain = re.sub(r"<[^>]+>", "", letter_plain)
+        letter_plain = re.sub(r"\n{3,}", "\n\n", letter_plain).strip()
     if not letter_plain:
         return jsonify({"ok": False, "error": "Empty output"}), 200
 
     return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
 @app.post("/export_pdf")
+
+def signature_slug(provider_name: str) -> str:
+    s = (provider_name or "").strip().lower()
+    s = re.sub(r"\b(dr\.?|md|od|mba)\b", "", s)
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s
+
+def find_signature_image(provider_name: str) -> Optional[str]:
+    base_dir = os.getenv("SIGNATURE_DIR", "static/signatures")
+    abs_dir = os.path.join(os.path.dirname(__file__), base_dir)
+    slug = signature_slug(provider_name)
+    if not slug:
+        return None
+    for ext in (".png", ".jpg", ".jpeg"):
+        cand = os.path.join(abs_dir, slug + ext)
+        if os.path.exists(cand):
+            return cand
+    return None
+
 def export_pdf():
     if canvas is None or rl_letter is None:
         return jsonify({"ok": False, "error": "PDF export not available"}), 500
 
     payload = request.get_json(silent=True) or {}
     text = (payload.get("text") or "").strip()
+    provider_name = (payload.get("provider_name") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "No text to export"}), 400
 
@@ -389,7 +458,30 @@ def export_pdf():
     left = 54
     top = height - 54
     line_height = 13
-    y = top
+    # Optional letterhead image at top of each page
+    # Place a PNG at static/letterhead.png (or set LETTERHEAD_IMAGE) to enable
+    letterhead_path = os.getenv("LETTERHEAD_IMAGE", "static/letterhead.png")
+    abs_letterhead = os.path.join(os.path.dirname(__file__), letterhead_path)
+
+    def draw_letterhead_and_get_start_y() -> float:
+        if ImageReader is None:
+            return top
+        try:
+            if not os.path.exists(abs_letterhead):
+                return top
+            img = ImageReader(abs_letterhead)
+            iw, ih = img.getSize()
+            target_w = 504  # 7 inches at 72 dpi
+            scale = target_w / float(iw) if iw else 1.0
+            target_h = float(ih) * scale
+            c.drawImage(img, left, top - target_h + 12, width=target_w, height=target_h, mask="auto")
+            return top - target_h - 6
+        except Exception:
+            return top
+
+    y = draw_letterhead_and_get_start_y()
+
+    signature_path = find_signature_image(provider_name) if provider_name else None
 
     c.setFont("Times-Roman", 12)
 
@@ -407,16 +499,59 @@ def export_pdf():
             if y < 72:
                 c.showPage()
                 c.setFont("Times-Roman", 12)
-                y = top
+                y = draw_letterhead_and_get_start_y()
         c.drawString(left, y, line)
         y -= line_height
 
-    for raw_line in text.splitlines():
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        raw_line = lines[i]
+        line = (raw_line or "").rstrip()
         if y < 72:
             c.showPage()
             c.setFont("Times-Roman", 12)
-            y = top
+            y = draw_letterhead_and_get_start_y()
+        # Signature handling
+        if line.strip().lower() in ("kind regards,", "kind regards", "regards,", "regards"):
+            draw_wrapped(raw_line)
+            if signature_path and ImageReader is not None:
+                try:
+                    img = ImageReader(signature_path)
+                    iw, ih = img.getSize()
+                    target_w = 320
+                    scale = target_w / float(iw) if iw else 1.0
+                    target_h = float(ih) * scale
+                    if y - target_h < 72:
+                        c.showPage()
+                        c.setFont("Times-Roman", 12)
+                        y = draw_letterhead_and_get_start_y()
+                    c.drawImage(img, left, y - target_h + 6, width=target_w, height=target_h, mask="auto")
+                    y -= (target_h + 8)
+                    # Skip next non empty provider line
+                    j = i + 1
+                    while j < len(lines) and not (lines[j] or "").strip():
+                        j += 1
+                    if j < len(lines):
+                        nxt = (lines[j] or "").strip().lower()
+                        prov = (provider_name or "").strip().lower()
+                        if prov and (prov in nxt or nxt.startswith("dr")):
+                            i = j + 1
+                            continue
+                except Exception:
+                    pass
+            else:
+                # If the next line is empty, inject provider name
+                if provider_name:
+                    j = i + 1
+                    while j < len(lines) and not (lines[j] or "").strip():
+                        j += 1
+                    if j >= len(lines):
+                        draw_wrapped(provider_name)
+            i += 1
+            continue
         draw_wrapped(raw_line)
+        i += 1
 
     c.save()
     return send_file(out_path, as_attachment=True, download_name="ai4health_output.pdf", mimetype="application/pdf")
