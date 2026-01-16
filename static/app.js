@@ -234,9 +234,6 @@ function loadCaseById(id){
   latestAnalysis = c.analysis
   latestLetterHtml = ""
   el("letter").value = ""
-  if(el("letterEditor")){
-    el("letterEditor").innerHTML = ""
-  }
   el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
   buildReasonOptions()
   renderSummary()
@@ -259,30 +256,6 @@ function toast(msg){
   t.textContent = msg
   t.style.display = "block"
   setTimeout(() => { t.style.display = "none" }, 2400)
-}
-
-function normalizePlainFromEditor(text){
-  const t = (text || "")
-    .replace(/\r/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-  return t
-}
-
-function getLetterPlain(){
-  const ed = el("letterEditor")
-  if(ed){
-    return normalizePlainFromEditor(ed.innerText || "")
-  }
-  return (el("letter").value || "").trim()
-}
-
-function getLetterHtml(){
-  const ed = el("letterEditor")
-  if(ed){
-    return (ed.innerHTML || "").trim()
-  }
-  return (latestLetterHtml || "").trim()
 }
 
 function setAnalyzeStatus(state){
@@ -332,9 +305,6 @@ function clearAll(){
   el("planBox").textContent = "No data yet."
   el("refBox").textContent = "No data yet."
   el("letter").value = ""
-  if(el("letterEditor")){
-    el("letterEditor").innerHTML = ""
-  }
   el("fromDoctor").value = ""
   el("toWhom").value = ""
   el("specialRequests").value = ""
@@ -763,17 +733,8 @@ async function generateReport(){
       setGenerateStatus("idle")
       return
     }
-    const plain = json.letter_plain || ""
-    const html = json.letter_html || ""
-    el("letter").value = plain
-    latestLetterHtml = html
-    if(el("letterEditor")){
-      if(html.trim()){
-        el("letterEditor").innerHTML = html
-      }else{
-        el("letterEditor").innerText = plain
-      }
-    }
+    el("letter").value = json.letter_plain || ""
+    latestLetterHtml = json.letter_html || ""
     toast("Report ready")
     setGenerateStatus("idle")
   }catch(e){
@@ -786,7 +747,7 @@ async function generateReport(){
 }
 
 async function copyPlain(){
-  const text = getLetterPlain()
+  const text = el("letter").value || ""
   if(!text.trim()){
     toast("Nothing to copy")
     return
@@ -800,8 +761,8 @@ async function copyPlain(){
 }
 
 async function copyRich(){
-  const plain = getLetterPlain()
-  const html = getLetterHtml()
+  const plain = el("letter").value || ""
+  const html = latestLetterHtml || ""
   if(!plain.trim()){
     toast("Nothing to copy")
     return
@@ -823,8 +784,7 @@ async function copyRich(){
 }
 
 async function exportPdf(){
-  const text = getLetterPlain()
-  const html = getLetterHtml()
+  const text = el("letter").value || ""
   if(!text.trim()){
     toast("Nothing to export")
     return
@@ -838,7 +798,6 @@ async function exportPdf(){
     headers: {"Content-Type":"application/json"},
     body: JSON.stringify({
       text,
-      html,
       provider_name: providerName,
       patient_token: patientToken,
       recipient_type: recipientType
@@ -859,7 +818,7 @@ async function exportPdf(){
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  let filename = "maneiro_output.pdf"
+  let filename = "ai4health_output.pdf"
   const cd = res.headers.get("Content-Disposition") || ""
   const m = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
   if(m && m[1]){
@@ -871,26 +830,6 @@ async function exportPdf(){
   a.remove()
   URL.revokeObjectURL(url)
   toast("Downloaded")
-}
-
-function bestExamDate(){
-  const plain = getLetterPlain()
-  const m = plain.match(/^Date:\s*(.+)$/im)
-  if(m && m[1]){
-    return m[1].trim()
-  }
-  const now = new Date()
-  return now.toLocaleDateString(undefined, {year:"numeric", month:"long", day:"2-digit"})
-}
-
-function emailDraft(){
-  const px = latestAnalysis ? (latestAnalysis.patient_name || "") : ""
-  const doc = (el("fromDoctor").value || "").trim()
-  const date = bestExamDate()
-  const subj = px ? `Clinical note and referral for ${px}` : "Clinical note and referral"
-  const body = `Hi,\n\nPlease find attached the exam notes and referral letter related to ${px || "the patient"} exam on ${date}.\n\nFeel free to reach out should you have any questions or concerns.\n\nKind regards,\n${doc || ""}`.trim()
-  const href = `mailto:?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`
-  window.location.href = href
 }
 
 el("uploadBtn").addEventListener("click", openPicker)
@@ -933,17 +872,6 @@ el("generateBtn").addEventListener("click", generateReport)
 el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
-if(el("emailBtn")){
-  el("emailBtn").addEventListener("click", emailDraft)
-}
-
-if(el("letterEditor")){
-  el("letterEditor").addEventListener("input", () => {
-    const plain = getLetterPlain()
-    el("letter").value = plain
-    latestLetterHtml = getLetterHtml()
-  })
-}
 
 if(el("runOcrBtn")){
   el("runOcrBtn").addEventListener("click", async () => {

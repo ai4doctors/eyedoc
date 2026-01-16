@@ -36,8 +36,7 @@ except Exception:
 
 try:
     from reportlab.lib.pagesizes import letter as rl_letter
-from reportlab.pdfgen import canvas
-import html as _html
+    from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -276,7 +275,17 @@ def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, 
 
 ANALYZE_SCHEMA: Dict[str, Any] = {
     "provider_name": "",
+    "patient_name": "",
+    "exam_date": "",
+    "dob": "",
+    "age": "",
+    "sex": "",
+    "phn": "",
+    "phone": "",
+    "email": "",
+    "address": "",
     "patient_block": "",
+    "chief_complaint": "",
     "summary_html": "",
     "diagnoses": [],
     "plan": [],
@@ -285,13 +294,23 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 }
 
 def analyze_prompt(note_text: str) -> str:
-    excerpt = clamp_text(note_text, 16000)
+    excerpt = clamp_text(note_text, 20000)
     return f"""
-You are a clinician assistant. You are given an encounter note extracted from a PDF.
+You are a clinician documentation assistant. You are given an encounter note extracted from a PDF.
 
 Output VALID JSON only, matching this schema exactly:
 provider_name: string
+patient_name: string
+exam_date: string
+dob: string
+age: string
+sex: string
+phn: string
+phone: string
+email: string
+address: string
 patient_block: string
+chief_complaint: string
 summary_html: string
 diagnoses: array of items, each item:
   number: integer
@@ -306,257 +325,302 @@ plan: array of items, each item:
 warnings: array of short strings
 
 Rules:
-1 Use only facts supported by the note. If unknown, leave empty.
-2 patient_block must contain patient demographics only. Include PHN if present. Exclude provider address and clinic address. Use <br> line breaks.
-3 summary_html should be a clean summary section with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
-4 diagnoses must be problem list style, include laterality and severity when present.
-5 plan bullets must be actionable, conservative, and aligned to diagnoses.
-6 If exam findings are present, include them in summary_html with clear headings such as Exam findings and Imaging when applicable.
-
+1 Use only facts supported by the note. If unknown, leave empty. Do not guess values.
+2 patient_name should be the full name as written.
+3 patient_block must contain patient demographics only, in a compact format. Use <br> line breaks. Aim for 2 to 3 lines max.
+4 summary_html should read like a real chart summary with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
+5 Always include key objective findings if present. Prefer concise lines with OD and OS.
+   Examples include visual acuity, refraction, IOP, pupils, EOM, slit lamp, fundus, imaging, and special tests.
+6 diagnoses must be problem list style. Include laterality and severity when present.
+7 plan bullets must be actionable and aligned to diagnoses.
 
 Encounter note:
 {excerpt}
 """.strip()
 
-def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
-    # NCBI E utilities. Keep it lightweight, avoid rate limits
-    uniq_terms = []
-    for t in terms:
-        t = (t or "").strip()
-        if t and t.lower() not in [x.lower() for x in uniq_terms]:
-            uniq_terms.append(t)
-    if not uniq_terms:
-        # Fallback to a broad ophthalmology evidence search to ensure we can always
-        # return at least one PubMed reference for the case.
-        uniq_terms = ["ophthalmology clinical practice guideline"]
 
-    pmids: List[str] = []
-    for term in uniq_terms[:6]:
-        q = f"{term} ophthalmology"
-        try:
-            r = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={"db": "pubmed", "term": q, "retmax": 3, "retmode": "json"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            ids = (data.get("esearchresult") or {}).get("idlist") or []
-            for pid in ids:
-                if pid not in pmids:
-                    pmids.append(pid)
-            if len(pmids) >= max_items:
-                break
-        except Exception:
-            continue
+def _pubmed_norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip())
 
-    if not pmids:
-        # Final fallback query to guarantee at least one reference.
-        try:
-            r = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={"db": "pubmed", "term": "ophthalmology review", "retmax": 3, "retmode": "json"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            ids = (data.get("esearchresult") or {}).get("idlist") or []
-            for pid in ids:
-                if pid not in pmids:
-                    pmids.append(pid)
-        except Exception:
-            pass
-    if not pmids:
+
+PUBMED_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def pubmed_esearch(term: str, retmax: int = 25) -> List[str]:
+    q = _pubmed_norm(term)
+    if not q:
         return []
 
-    pmids = pmids[:max_items]
+    # Prefer high quality evidence when possible
+    evidence_filter = (
+        "(practice guideline[pt] OR guideline[pt] OR consensus[tiab] OR "
+        "systematic review[pt] OR meta analysis[pt] OR randomized controlled trial[pt] OR review[pt])"
+    )
+
+    # Use a broad search that works across specialties, while still prioritizing strong evidence
+    query = f"({q}) AND {evidence_filter}"
+
     try:
         r = requests.get(
-            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-            params={"db": "pubmed", "id": ",".join(pmids), "retmode": "json"},
-            timeout=10,
+            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+            params={"db": "pubmed", "term": query, "retmax": retmax, "retmode": "json", "sort": "relevance"},
+            timeout=12,
         )
         r.raise_for_status()
         data = r.json()
-        result = data.get("result") or {}
-        out: List[Dict[str, str]] = []
-        for i, pid in enumerate(pmids, start=1):
-            item = result.get(pid) or {}
-            title = (item.get("title") or "").strip().rstrip(".")
-            source = (item.get("source") or "").strip()
-            pubdate = (item.get("pubdate") or "").strip()
-            authors = item.get("authors") or []
-            first_author = (authors[0].get("name") if authors else "") or ""
-            citation = " ".join([x for x in [first_author, title, source, pubdate] if x]).strip()
-            out.append({"number": str(i), "pmid": pid, "citation": citation})
-        return out
+        ids = (data.get("esearchresult") or {}).get("idlist") or []
+        return [str(x) for x in ids if str(x).strip()]
     except Exception:
         return []
 
 
+def pubmed_esummary(pmids: List[str]) -> Dict[str, Dict[str, Any]]:
+    ids = [str(x).strip() for x in (pmids or []) if str(x).strip()]
+    ids = [x for x in ids if x not in PUBMED_CACHE]
 
-def canonical_reference_pool(labels):
-    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
-    pool = []
+    if not ids:
+        return {k: PUBMED_CACHE.get(k, {}) for k in (pmids or []) if str(k).strip()}
 
-    def add(pmid, citation):
-        pool.append({"pmid": (pmid or ""), "citation": (citation or "")})
-
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-        add("41005521", "TFOS DEWS III Executive Summary. The Ocular Surface. 2025.")
-        add("", "TFOS DEWS III Management and Therapy. The Ocular Surface. 2025.")
-        add("28736327", "TFOS DEWS II Executive Summary. The Ocular Surface. 2017.")
-
-    if "myopia" in blob:
-        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.")
-
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Primary Open Angle Glaucoma. Latest edition.")
-        add("", "European Glaucoma Society. Terminology and Guidelines. Latest edition.")
-
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
-        add("", "American Diabetes Association. Standards of Care in Diabetes. Latest edition.")
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Diabetic Retinopathy. Latest edition.")
-
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
-        add("", "AREDS trial publications. National Eye Institute.")
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Age Related Macular Degeneration. Latest edition.")
-
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
-        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.")
-
-    if "uveitis" in blob:
-        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.")
-
-    if "cataract" in blob:
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Cataract in the Adult Eye. Latest edition.")
-
-    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Rhegmatogenous Retinal Detachment. Latest edition.")
-
-    return pool[:10]
-
-
-def merge_references(pubmed_refs, canonical_refs, max_total=18):
-    seen = set()
-    merged = []
-
-    def norm_cit(s):
-        return re.sub(r"\s+", " ", (s or "").strip().lower())
-
-    def key_for(r):
-        pmid = (r.get("pmid") or "").strip()
-        if pmid:
-            return "pmid:" + pmid
-        return "cit:" + norm_cit(r.get("citation"))
-
-    for r in (pubmed_refs or []):
-        if not isinstance(r, dict):
+    # Chunk to keep requests small
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        try:
+            r = requests.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                params={"db": "pubmed", "id": ",".join(chunk), "retmode": "json"},
+                timeout=12,
+            )
+            r.raise_for_status()
+            data = r.json()
+            result = data.get("result") or {}
+            for pid in chunk:
+                item = result.get(pid) or {}
+                if isinstance(item, dict) and item:
+                    PUBMED_CACHE[pid] = item
+        except Exception:
             continue
-        k = key_for(r)
-        if k in seen:
+
+    return {k: PUBMED_CACHE.get(str(k).strip(), {}) for k in (pmids or []) if str(k).strip()}
+
+
+def _pubmed_year(pubdate: str) -> int:
+    m = re.search(r"(19\d{2}|20\d{2})", pubdate or "")
+    return int(m.group(1)) if m else 0
+
+
+def _pubmed_score(item: Dict[str, Any], term: str) -> float:
+    title = (item.get("title") or "").lower()
+    pubdate = item.get("pubdate") or ""
+    pubtypes = [str(x).lower() for x in (item.get("pubtype") or [])]
+
+    score = 0.0
+
+    # Evidence hierarchy
+    if any("practice guideline" in p or p == "guideline" for p in pubtypes):
+        score += 120
+    if any("systematic review" in p for p in pubtypes):
+        score += 110
+    if any("meta-analysis" in p or "meta analysis" in p for p in pubtypes):
+        score += 105
+    if any("consensus" in p for p in pubtypes):
+        score += 95
+    if any("randomized controlled trial" in p for p in pubtypes):
+        score += 80
+    if any(p == "review" or "review" in p for p in pubtypes):
+        score += 60
+
+    # Recency
+    y = _pubmed_year(pubdate)
+    if y:
+        score += max(0, min(30, (y - 2005) * 1.2))
+
+    # Term match
+    t = (term or "").lower()
+    tokens = [x for x in re.split(r"[^a-z0-9]+", t) if len(x) > 3]
+    if tokens:
+        hits = sum(1 for tok in tokens if tok in title)
+        score += hits * 6
+
+    return score
+
+
+def _pubmed_citation(item: Dict[str, Any]) -> str:
+    title = _pubmed_norm((item.get("title") or "").rstrip("."))
+    source = _pubmed_norm(item.get("source") or "")
+    pubdate = _pubmed_norm(item.get("pubdate") or "")
+    authors = item.get("authors") or []
+    first_author = (authors[0].get("name") if authors else "") or ""
+    parts = [x for x in [first_author, title, source, pubdate] if x]
+    return _pubmed_norm(" ".join(parts))
+
+
+def pubmed_ranked_refs_for_term(term: str, max_items: int = 8) -> List[Dict[str, Any]]:
+    pmids = pubmed_esearch(term, retmax=25)
+    if not pmids:
+        pmids = pubmed_esearch(term + " review", retmax=20)
+    if not pmids:
+        return []
+
+    meta = pubmed_esummary(pmids)
+    scored = []
+    for pid in pmids:
+        item = meta.get(pid) or {}
+        if not item:
             continue
-        seen.add(k)
-        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
-
-    for r in (canonical_refs or []):
-        if not isinstance(r, dict):
+        citation = _pubmed_citation(item)
+        if not citation:
             continue
-        k = key_for(r)
-        if k in seen:
-            continue
-        seen.add(k)
-        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+        scored.append({
+            "pmid": pid,
+            "citation": citation,
+            "score": _pubmed_score(item, term),
+        })
 
-    numbered = []
-    for i, r in enumerate(merged[:max_total], start=1):
-        numbered.append({"number": str(i), "pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
-    return numbered
-
-
-def preferred_ref_numbers(label, references):
-    l = (label or "").lower()
-    prefs = []
-
-    def add_if(match):
-        for ref in (references or []):
-            n = ref.get("number")
-            if not str(n).isdigit():
-                continue
-            num = int(n)
-            pmid = (ref.get("pmid") or "").strip()
-            cit = (ref.get("citation") or "").lower()
-            if match(pmid, cit):
-                prefs.append(num)
-
-    if any(k in l for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface"]):
-        add_if(lambda pmid, cit: ("dews" in cit) or (pmid in {"41005521", "28736327"}))
-
-    if "myopia" in l:
-        add_if(lambda pmid, cit: ("myopia institute" in cit) or ("imi" in cit and "myopia" in cit))
-
-    if any(k in l for k in ["glaucoma", "ocular hypertension", "iop"]):
-        add_if(lambda pmid, cit: ("glaucoma" in cit) or ("preferred practice pattern" in cit))
-
-    if any(k in l for k in ["diabetic", "retinopathy", "diabetes"]):
-        add_if(lambda pmid, cit: ("diabetic" in cit) or ("standards of care" in cit))
-
-    if any(k in l for k in ["macular degeneration", "amd"]):
-        add_if(lambda pmid, cit: ("areds" in cit) or ("macular degeneration" in cit))
-
-    if any(k in l for k in ["keratoconus", "ectasia"]):
-        add_if(lambda pmid, cit: ("keratoconus" in cit) or ("ectatic" in cit))
-
-    if "uveitis" in l:
-        add_if(lambda pmid, cit: ("uveitis" in cit) or ("nomenclature" in cit))
-
-    if "cataract" in l:
-        add_if(lambda pmid, cit: "cataract" in cit)
-
-    if any(k in l for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add_if(lambda pmid, cit: "retinal detachment" in cit)
-
-    # De dup while keeping order
+    scored.sort(key=lambda x: x.get("score", 0), reverse=True)
     out = []
     seen = set()
-    for n in prefs:
-        if n in seen:
+    for r in scored:
+        pid = r.get("pmid")
+        if not pid or pid in seen:
             continue
-        seen.add(n)
-        out.append(n)
+        seen.add(pid)
+        out.append({"pmid": pid, "citation": r.get("citation") or ""})
+        if len(out) >= max_items:
+            break
     return out
 
 
-def pad_refs(existing, preferred, all_nums, target=3):
+def cornerstone_pmids_for_label(label: str) -> List[str]:
+    l = (label or "").lower()
+
+    # Ophthalmic cornerstone references. Extendable to other fields.
+    if any(k in l for k in ["dry eye", "meibom", "mgd", "blephar", "ocular surface"]):
+        return ["41005521", "40451408", "28797892", "28736335", "28736342"]
+
+    if "cataract" in l or "phaco" in l:
+        return ["34780842", "27745902"]
+
+    if any(k in l for k in ["glaucoma", "ocular hypertension", "iop"]):
+        return ["34933745", "26581556"]
+
+    if any(k in l for k in ["diabetic retinopathy", "diabetic", "retinopathy"]):
+        return ["31757498", "39918521"]
+
+    if any(k in l for k in ["retinal vein", "rvo", "crvo", "brvo"]):
+        return ["31757503", "39918523"]
+
+    if any(k in l for k in ["macular degeneration", "amd", "age related macular"]):
+        return ["23644932", "22840421"]
+
+    if "myopia" in l:
+        return ["33909031"]
+
+    if any(k in l for k in ["keratoconus", "ectasia", "ectatic"]):
+        return ["25738235"]
+
+    if "uveitis" in l:
+        return ["16196117", "23392263"]
+
+    return []
+
+
+def pubmed_refs_for_pmids(pmids: List[str]) -> List[Dict[str, str]]:
+    ids = [str(x).strip() for x in (pmids or []) if str(x).strip()]
+    if not ids:
+        return []
+    meta = pubmed_esummary(ids)
     out = []
-    for n in (existing or []):
-        if isinstance(n, int) and n > 0 and n not in out:
-            out.append(n)
-    for n in (preferred or []):
-        if isinstance(n, int) and n > 0 and n not in out:
-            out.append(n)
-    for n in (all_nums or []):
-        if isinstance(n, int) and n > 0 and n not in out:
-            out.append(n)
-    return out[:target]
-
-
-def enforce_minimum_citations(analysis, target=3):
-    refs = analysis.get("references") or []
-    all_nums = [int(r.get("number")) for r in refs if str(r.get("number", "")).isdigit()]
-
-    for dx in (analysis.get("diagnoses") or []):
-        if not isinstance(dx, dict):
+    for pid in ids:
+        item = meta.get(pid) or {}
+        if not item:
             continue
-        pref = preferred_ref_numbers(dx.get("label") or "", refs)
-        dx["refs"] = pad_refs(dx.get("refs"), pref, all_nums, target)
+        out.append({"pmid": pid, "citation": _pubmed_citation(item)})
+    return out
 
+
+def build_references_for_analysis(analysis: Dict[str, Any], min_per_dx: int = 3, max_total: int = 18) -> None:
+    diagnoses = [dx for dx in (analysis.get("diagnoses") or []) if isinstance(dx, dict)]
+
+    global_refs: List[Dict[str, str]] = []
+    ref_index: Dict[str, int] = {}
+
+    def add_ref(ref: Dict[str, str]) -> int:
+        pmid = (ref.get("pmid") or "").strip()
+        cit = (ref.get("citation") or "").strip()
+        key = f"pmid:{pmid}" if pmid else f"cit:{cit.lower()}"
+        if key in ref_index:
+            return ref_index[key]
+        if len(global_refs) >= max_total:
+            # Reuse the last slot if we run out of room
+            return len(global_refs)
+        global_refs.append({"pmid": pmid, "citation": cit})
+        ref_index[key] = len(global_refs)
+        return len(global_refs)
+
+    dx_to_refnums: Dict[int, List[int]] = {}
+
+    for dx in diagnoses:
+        dx_num = dx.get("number") if isinstance(dx.get("number"), int) else None
+        label = (dx.get("label") or "").strip()
+        if not dx_num or not label:
+            continue
+
+        chosen: List[Dict[str, str]] = []
+
+        # Ranked PubMed for the diagnosis label
+        chosen.extend(pubmed_ranked_refs_for_term(label, max_items=6))
+
+        # Cornerstone padding
+        cornerstone_pmids = cornerstone_pmids_for_label(label)
+        cornerstone_refs = pubmed_refs_for_pmids(cornerstone_pmids)
+
+        # Keep unique by PMID
+        seen_pmids = set([r.get("pmid") for r in chosen if r.get("pmid")])
+        for r in cornerstone_refs:
+            if r.get("pmid") and r.get("pmid") not in seen_pmids:
+                chosen.append(r)
+                seen_pmids.add(r.get("pmid"))
+
+        # Ensure minimum per dx
+        dx_refs = []
+        for r in chosen:
+            n = add_ref(r)
+            if n:
+                dx_refs.append(int(n))
+            if len(dx_refs) >= min_per_dx:
+                break
+
+        # Fall back to at least one global reference
+        if not dx_refs and global_refs:
+            dx_refs = [1]
+
+        dx_to_refnums[int(dx_num)] = dx_refs
+        dx["refs"] = dx_refs
+
+    # Attach plan refs based on aligned diagnoses
     for pl in (analysis.get("plan") or []):
         if not isinstance(pl, dict):
             continue
-        text = " ".join([pl.get("title") or "", " ".join(pl.get("bullets") or [])])
-        pref = preferred_ref_numbers(text, refs)
-        pl["refs"] = pad_refs(pl.get("refs"), pref, all_nums, max(1, min(target, 2)))
+        aligned = [int(x) for x in (pl.get("aligned_dx_numbers") or []) if isinstance(x, int) and x in dx_to_refnums]
+        refs = []
+        for dn in aligned:
+            refs.extend(dx_to_refnums.get(dn, []))
+        # De dup while keeping order
+        out = []
+        seen = set()
+        for n in refs:
+            if n in seen:
+                continue
+            seen.add(n)
+            out.append(n)
+        pl["refs"] = out[:4]
+
+    numbered = []
+    for i, r in enumerate(global_refs[:max_total], start=1):
+        numbered.append({"number": str(i), "pmid": r.get("pmid") or "", "citation": r.get("citation") or ""})
+    analysis["references"] = numbered
+
+
 
 
 def assign_citations_prompt(analysis: Dict[str, Any]) -> str:
@@ -612,8 +676,13 @@ To: <recipient>
 From: <authoring provider>
 Date: <current date>
 <blank line>
-Patient: <full name>  DOB: <date> (<age>)  Sex: <sex>  PHN: <phn>
-Phone: <phone>  Email: <email>  Address: <address or leave blank>
+Patient: <full name>
+DOB: <date> (<age>)
+Sex: <sex>
+PHN: <phn>
+Phone: <phone>
+Email: <email>
+Address: <address or leave blank>
 <blank line>
 Reason for Referral: <diagnosis chosen plus reason_detail if provided>
 <blank line>
@@ -651,6 +720,7 @@ def get_job(job_id: str) -> Dict[str, Any]:
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
     set_job(job_id, status="processing", updated_at=now_utc_iso())
+
     obj, err = llm_json(analyze_prompt(note_text))
     if err or not obj:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
@@ -659,50 +729,18 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
     analysis = dict(ANALYZE_SCHEMA)
     analysis.update(obj)
 
-    # Fetch PubMed references based on diagnoses
-    terms = []
-    for dx in analysis.get("diagnoses") or []:
-        if isinstance(dx, dict):
-            label = (dx.get("label") or "").strip()
-            if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
-    analysis['references'] = merge_references(references, canonical)
-
-    # Assign citation numbers
-    if references:
-        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
-        if not cites_err and cites_obj:
-            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            for dx in analysis.get("diagnoses") or []:
-                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
-                    dx["refs"] = dx_map.get(dx["number"], [])
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
-                    pl["refs"] = pl_map.get(pl["number"], [])
-
-    # Guarantee at least one reference number is used somewhere when references exist
-    if analysis.get("references"):
-        used = False
+    # Deterministic evidence selection
+    try:
+        build_references_for_analysis(analysis)
+    except Exception:
+        # Never fail the workflow because evidence retrieval failed
+        analysis["references"] = []
         for dx in analysis.get("diagnoses") or []:
-            if isinstance(dx, dict) and dx.get("refs"):
-                used = True
-                break
-        if not used:
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and pl.get("refs"):
-                    used = True
-                    break
-        if not used:
-            # Attach reference 1 as a general evidence context anchor
-            if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
-                if isinstance(analysis["diagnoses"][0], dict):
-                    analysis["diagnoses"][0]["refs"] = [1]
-            if isinstance(analysis.get("plan"), list) and analysis["plan"]:
-                if isinstance(analysis["plan"][0], dict):
-                    analysis["plan"][0]["refs"] = [1]
+            if isinstance(dx, dict):
+                dx["refs"] = []
+        for pl in analysis.get("plan") or []:
+            if isinstance(pl, dict):
+                pl["refs"] = []
 
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
@@ -827,7 +865,6 @@ def export_pdf():
 
     payload = request.get_json(silent=True) or {}
     text_in = (payload.get("text") or "").strip()
-    html_in = (payload.get("html") or "").strip()
     provider_name = (payload.get("provider_name") or "").strip() or "Provider"
     patient_token = (payload.get("patient_token") or "").strip()
     recipient_type = (payload.get("recipient_type") or "").strip()
@@ -867,9 +904,9 @@ def export_pdf():
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=10,
-        leading=13.5,
-        spaceAfter=4,
+        fontSize=11,
+        leading=14.5,
+        spaceAfter=5,
         alignment=TA_JUSTIFY,
     )
     head = ParagraphStyle(
@@ -884,49 +921,11 @@ def export_pdf():
         "mono",
         parent=base,
         fontName="Helvetica",
-        fontSize=10,
-        leading=12.5,
+        fontSize=11,
+        leading=13.5,
         alignment=TA_LEFT,
         spaceAfter=0,
     )
-
-    html_mode = bool(html_in)
-
-    allowed_tag_pat = re.compile(r"<\s*/?\s*(b|i|u)\b[^>]*>|<\s*br\b[^>]*>", re.IGNORECASE)
-
-    def strip_tags(s: str) -> str:
-        return re.sub(r"<[^>]+>", "", s or "")
-
-    def sanitize_inline_markup(s: str) -> str:
-        if not s:
-            return ""
-        s = re.sub(r"<\s*br\b[^>]*>", "<br/>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*b\b[^>]*>", "<b>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*/\s*b\s*>", "</b>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*i\b[^>]*>", "<i>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*/\s*i\s*>", "</i>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*u\b[^>]*>", "<u>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<\s*/\s*u\s*>", "</u>", s, flags=re.IGNORECASE)
-        s = re.sub(r"<(?!/?(b|i|u)\b|br\b)[^>]+>", "", s, flags=re.IGNORECASE)
-        tags = []
-        def _tag_repl(m):
-            tags.append(m.group(0))
-            return f"__TAG{len(tags)-1}__"
-        tmp = allowed_tag_pat.sub(_tag_repl, s)
-        tmp = _html.escape(tmp, quote=False)
-        for i, t in enumerate(tags):
-            tmp = tmp.replace(f"__TAG{i}__", t)
-        return tmp
-
-    def html_to_lines(h: str) -> list:
-        if not h:
-            return []
-        x = h
-        x = re.sub(r"<\s*br\s*/?\s*>", "\n", x, flags=re.IGNORECASE)
-        x = re.sub(r"<\s*/\s*p\s*>", "\n", x, flags=re.IGNORECASE)
-        x = re.sub(r"<\s*p\b[^>]*>", "", x, flags=re.IGNORECASE)
-        x = re.sub(r"\n{3,}", "\n\n", x)
-        return [ln.rstrip() for ln in x.splitlines()]
 
     def esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -976,7 +975,7 @@ def export_pdf():
         except Exception:
             pass
 
-    raw_lines = html_to_lines(html_in) if html_mode else text_in.splitlines()
+    raw_lines = text_in.splitlines()
     demo_keys = {"patient", "dob", "sex", "phn", "phone", "email", "address"}
     demo_data = {}
     demo_active = False
@@ -984,15 +983,14 @@ def export_pdf():
 
     for raw in raw_lines:
         line = (raw or "").rstrip()
-        compare = strip_tags(line).strip()
         if not line.strip():
             if demo_active and not demo_emitted:
                 story.extend(emit_demographics(demo_data))
                 demo_emitted = True
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
             continue
 
-        lower = compare.lower()
+        lower = line.strip().lower()
         key = lower.split(":", 1)[0].strip() if ":" in lower else ""
 
         if key in demo_keys:
@@ -1023,15 +1021,15 @@ def export_pdf():
 
         if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
             try:
-                k, v = compare.split(":", 1)
+                k, v = line.split(":", 1)
                 story.append(Paragraph(f"<b>{esc(k)}:</b> {esc(v.strip())}", mono))
             except Exception:
-                story.append(Paragraph(esc(compare), mono))
+                story.append(Paragraph(esc(line), mono))
             continue
 
         if lower.startswith("dear "):
             story.append(Spacer(1, 8))
-            story.append(Paragraph(esc(compare), base))
+            story.append(Paragraph(esc(line), base))
             story.append(Spacer(1, 6))
             continue
 
@@ -1069,8 +1067,7 @@ def export_pdf():
                 story.append(Paragraph(esc(provider_name), base))
             continue
 
-        content = sanitize_inline_markup(line) if html_mode else esc(line)
-        story.append(Paragraph(content, base))
+        story.append(Paragraph(esc(line), base))
 
     if demo_active and not demo_emitted:
         story.extend(emit_demographics(demo_data))
