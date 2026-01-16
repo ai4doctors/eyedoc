@@ -181,9 +181,9 @@ body{
 }
 .field{display:flex; flex-direction:column; gap:6px}
 .fieldLabel{font-weight:800; font-size:14px; color:var(--muted)}
-.fieldDoc{grid-column: 1 / span 3}
-.fieldTo{grid-column: 4 / span 4}
-.fieldFrom{grid-column: 8 / span 3}
+.fieldDoc{grid-column: 1 / span 2}
+.fieldTo{grid-column: 3 / span 4}
+.fieldFrom{grid-column: 7 / span 4}
 .fieldAction{grid-column: 11 / span 2}
 .fieldReason{grid-column: 1 / span 6}
 .fieldFocus{grid-column: 7 / span 3}
@@ -199,6 +199,10 @@ body{
   .fieldFocus{grid-column: 1 / span 3}
   .fieldRequests{grid-column: 4 / span 3}
 }
+
+/* Step 2 control sizing: fill the grid cells regardless of prepopulated values */
+.commGrid .ctrl{width:100%}
+.commGrid .btnPrimary{width:100%}
 .fileInput{display:none}
 .stepStatus{
   color:var(--muted);
