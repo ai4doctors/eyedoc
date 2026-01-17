@@ -825,7 +825,7 @@ async function exportPdf(){
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  let filename = "maneiro_output.pdf"
+  let filename = "ai4health_output.pdf"
   const cd = res.headers.get("Content-Disposition") || ""
   const m = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
   if(m && m[1]){
@@ -956,25 +956,38 @@ document.addEventListener("keydown", (e) => {
 
 function emailDraft(){
   const providerName = (el("fromDoctor").value || "").trim()
-  const patientName = (latestAnalysis && latestAnalysis.patient_name) ? String(latestAnalysis.patient_name).trim() : ""
-  const examDate = (latestAnalysis && (latestAnalysis.exam_date || latestAnalysis.date)) ? String(latestAnalysis.exam_date || latestAnalysis.date).trim() : ""
+  const patientName = latestAnalysis ? ((latestAnalysis.patient_name || "").trim()) : ""
+  const examDate = latestAnalysis ? ((latestAnalysis.exam_date || latestAnalysis.examdate || latestAnalysis.date || "").trim()) : ""
   const subj = patientName ? ("Clinical documents for " + patientName) : "Clinical documents"
   const who = patientName ? (patientName + "'s") : "the patient's"
   const when = examDate ? (" on " + examDate) : ""
-  const body = ("Hi,\n\nPlease find attached the exam notes, referral letter, report etc related to " + who + " exam" + when + ".\n\nFeel free to reach out should you have any questions or concerns.\n\nKind regards,\n" + (providerName || "")).trim()
+  const body = (`Hi,
+
+Please find attached the exam notes, referral letter, report etc related to ${who} exam${when}.
+
+Feel free to reach out should you have any questions or concerns.
+
+Kind regards,
+${providerName || ""}`).trim()
   window.location.href = "mailto:?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(body)
 }
-if(el("emailBtn")){ el("emailBtn").addEventListener("click", emailDraft) }
+
+if(el("emailBtn")){
+  el("emailBtn").addEventListener("click", emailDraft)
+}
 
 function syncLetterRich(){
   const rich = el("letterRich")
   const plain = el("letter")
   if(!rich || !plain){ return }
-  const text = (rich.innerText || "").split("\u00A0").join(" ").replace(/\n{3,}/g, "\n\n").trimEnd()
+  const text = (rich.innerText || "").replace(/\u00A0/g, " ").replace(/\n{3,}/g, "\n\n").trimEnd()
   plain.value = text
   latestLetterHtml = rich.innerHTML || ""
 }
-if(el("letterRich")){ el("letterRich").addEventListener("input", syncLetterRich) }
+
+if(el("letterRich")){
+  el("letterRich").addEventListener("input", syncLetterRich)
+}
 
 document.querySelectorAll(".toolBtn").forEach((btn) => {
   btn.addEventListener("click", () => {

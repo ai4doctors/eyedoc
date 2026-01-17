@@ -1,14 +1,15 @@
 
 :root{
   --bg:#f6f8ff;
-  --bgAccent:#eef3ff;
+  --bgAccent:#eef7f5;
   --panel:#ffffff;
-  --panel2:#f1f4ff;
+  --panel2:#f3f6ff;
   --text:#0b1226;
-  --muted:#3a4a6a;
+  --muted:#51565b;
   --border:#d8def0;
-  --primary:#2b8bd6;
-  --accent:#2b8bd6;
+  --primary:#9cd0c5;
+  --accent:#9cd0c5;
+  --ctrlH:46px;
 }
 *{box-sizing:border-box}
 body{
@@ -119,11 +120,8 @@ body{
   align-items:center;
   gap:14px;
 }
-.brandMark{
-  font-size:28px;
-  font-weight:900;
-  letter-spacing:0.2px;
-}
+.brandMark{display:flex; align-items:center}
+.brandLogo{height:46px; width:auto; display:block}
 .brandName{
   font-weight:900;
 }
@@ -171,55 +169,25 @@ body{
 }
 .commGrid{
   display:grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap:12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap:14px;
   align-items:end;
-  padding:10px 26px 14px 26px;
+  padding:12px 26px 16px 26px;
 }
 .field{display:flex; flex-direction:column; gap:6px}
 .fieldLabel{font-weight:800; font-size:14px; color:var(--muted)}
-.fieldDoc{grid-column: 1 / span 3}
-.fieldTo{grid-column: 4 / span 4}
-.fieldFrom{grid-column: 8 / span 3}
-.fieldAction{grid-column: 11 / span 2}
-.fieldReason{grid-column: 1 / span 6}
-.fieldFocus{grid-column: 7 / span 3}
-.fieldRequests{grid-column: 10 / span 3}
+.fieldDoc{grid-column:1}
+.fieldTo{grid-column:2}
+.fieldFrom{grid-column:3}
+.fieldAction{grid-column:4}
+.fieldReason{grid-column:1}
+.fieldFocus{grid-column:2}
+.fieldRequests{grid-column:3 / span 2}
 
 @media (max-width: 1100px){
-  .commGrid{grid-template-columns: repeat(6, 1fr)}
-  .fieldDoc{grid-column: 1 / span 6}
-  .fieldTo{grid-column: 1 / span 3}
-  .fieldFrom{grid-column: 4 / span 3}
-  .fieldAction{grid-column: 1 / span 6}
-  .fieldReason{grid-column: 1 / span 6}
-  .fieldFocus{grid-column: 1 / span 3}
-  .fieldRequests{grid-column: 4 / span 3}
+  .commGrid{grid-template-columns: 1fr}
+  .fieldDoc,.fieldTo,.fieldFrom,.fieldAction,.fieldReason,.fieldFocus,.fieldRequests{grid-column:1}
 }
-.fileInput{display:none}
-.stepStatus{
-  color:var(--muted);
-  font-size:14px;
-}
-
-.sectionTitle{
-  font-size:22px;
-  margin:12px 16px 8px 16px;
-}
-
-.panel{
-  margin:0 16px 14px 16px;
-  border:1px solid var(--border);
-  border-radius:18px;
-  padding:16px;
-  background: var(--panel);
-  box-shadow: 0 10px 28px rgba(10, 20, 60, 0.08);
-  line-height:1.65;
-  font-size:18px;
-  min-height:120px;
-}
-.summary .panel{min-height:180px}
-
 .triCols{
   display:grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -267,17 +235,41 @@ body{
 }
 .bullets li{margin:6px 0}
 
+
 .ctrl{
-  padding:12px 12px;
+  width:100%;
+  height:var(--ctrlH);
+  padding:10px 12px;
   border-radius:14px;
   border:1px solid var(--border);
-  background: var(--panel2);
+  background: rgba(243,246,255,0.95);
   color: var(--text);
-  min-width:180px;
   font-size:16px;
+  outline:none;
 }
-.ctrl.wide{min-width:220px}
-.ctrl.xwide{min-width:320px}
+.ctrl:focus{
+  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
+  border-color: rgba(156,208,197,0.75);
+}
+.hidden{display:none}
+}
+.ctrl:focus{
+  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
+  border-color: rgba(156,208,197,0.75);
+}
+.hidden{display:none}
+}
+.ctrl:focus{
+  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
+  border-color: rgba(156,208,197,0.75);
+}
+.hidden{display:none}
+}
+.ctrl:focus{
+  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
+  border-color: rgba(156,208,197,0.75);
+}
+.hidden{display:none}
 .hidden{display:none}
 
 .btnPrimary{
@@ -433,3 +425,112 @@ body{
 .faqItem{margin-bottom:14px}
 .faqQ{font-weight:900; margin-bottom:4px}
 .faqA{color:var(--muted); font-size:14px; line-height:1.45}
+
+/* Maneiro theme refinements */
+.ctrl{
+  width:100%;
+  height:var(--ctrlH);
+  min-width:0;
+  padding:10px 12px;
+  background: rgba(243,246,255,0.95);
+}
+.ctrl:focus{
+  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
+  border-color: rgba(156,208,197,0.75);
+}
+.commGrid .btnPrimary{
+  width:100%;
+  height:var(--ctrlH);
+  padding:10px 14px;
+}
+.btnPrimary{
+  background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
+  box-shadow: 0 10px 22px rgba(156,208,197,0.28);
+}
+.btnPrimary:hover{box-shadow: 0 14px 26px rgba(156,208,197,0.32)}
+.spinner{
+  border:2px solid rgba(156,208,197,0.25);
+  border-top-color: rgba(118,185,173,0.95);
+}
+.letterToolbar{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-bottom:10px;
+}
+.toolBtn{
+  height:36px;
+  padding:0 12px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background: var(--panel2);
+  cursor:pointer;
+  font-weight:800;
+  font-size:14px;
+  color: var(--text);
+}
+.toolBtn:hover{filter:brightness(1.03)}
+.letterRich{
+  width:100%;
+  min-height:420px;
+  border-radius:18px;
+  border:1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  padding:18px;
+  font-size:18px;
+  line-height:1.75;
+  overflow:auto;
+}
+.letterRich:focus{outline:none; box-shadow:0 0 0 3px rgba(156,208,197,0.22); border-color: rgba(156,208,197,0.75)}
+.letterRich:empty:before{content:attr(data-placeholder); color:rgba(81,86,91,0.7)}
+.letterToolbar{
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-bottom:10px;
+}
+.toolBtn{
+  height:36px;
+  padding:0 12px;
+  border-radius:12px;
+  border:1px solid var(--border);
+  background: var(--panel2);
+  cursor:pointer;
+  font-weight:800;
+  font-size:14px;
+  color: var(--text);
+}
+.toolBtn:hover{filter:brightness(1.03)}
+.letterRich{
+  width:100%;
+  min-height:420px;
+  border-radius:18px;
+  border:1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  padding:18px;
+  font-size:18px;
+  line-height:1.75;
+  overflow:auto;
+}
+.letterRich:empty:before{
+  content:attr(data-placeholder);
+  color:var(--muted);
+}
+.letterRich:focus{
+  outline:none;
+  box-shadow:0 0 0 3px rgba(156,208,197,0.22);
+  border-color: rgba(156,208,197,0.75);
+}
+.stepBar{
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(243,246,255,0.92));
+}
+.stepTitle{
+  font-weight:900;
+  letter-spacing:0.6px;
+  color: var(--text);
+}
+.sectionTitle b{
+  font-weight:900;
+}
