@@ -162,6 +162,20 @@ function saveCases(cases){
   }
 }
 
+function clearCaseCache(){
+  const ok = window.confirm("Clear all saved cases from this browser")
+  if(!ok){
+    return
+  }
+  try{
+    localStorage.removeItem(CASES_KEY)
+    localStorage.removeItem(CASE_COUNTER_KEY)
+  }catch(e){
+  }
+  renderCaseList()
+  toast("Cases cleared")
+}
+
 function upsertCase(analysis){
   if(!analysis){
     return
@@ -1108,6 +1122,10 @@ if(el("runOcrBtn")){
 
 el("resetBtn").addEventListener("click", clearAll)
 el("newCaseBtn").addEventListener("click", clearAll)
+
+if(el("clearCasesBtn")){
+  el("clearCasesBtn").addEventListener("click", clearCaseCache)
+}
 
 el("caseList").addEventListener("click", (e) => {
   const card = e.target.closest(".caseCard")

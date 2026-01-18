@@ -74,6 +74,16 @@ body{
   font-weight:900;
 }
 
+.sideBtnClear{
+  width:100%;
+  margin-top:12px;
+  background:transparent;
+}
+
+.sideBtnClear:hover{
+  background:var(--panel2);
+}
+
 .caseList{
   display:flex;
   flex-direction:column;
@@ -432,6 +442,11 @@ body{
 }
 .modalBody{
   padding:26px 26px 30px 26px;
+}
+
+#faqModal .modalBody{
+  max-height:calc(100vh - 220px);
+  overflow-y:auto;
 }
 .faqItem{margin-bottom:20px}
 .faqQ{font-weight:900; margin-bottom:6px; font-size:15px}
