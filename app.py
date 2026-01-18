@@ -15,6 +15,11 @@ import requests
 from flask import Flask, jsonify, render_template, request, send_file
 
 try:
+    import boto3
+except Exception:
+    boto3 = None
+
+try:
     import fitz  # PyMuPDF
 except Exception:
     fitz = None
@@ -54,6 +59,86 @@ app = Flask(__name__, template_folder="templates", static_folder="static", stati
 # In memory job store
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+
+def aws_ready() -> Tuple[bool, str]:
+    if boto3 is None:
+        return False, "boto3 not installed"
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    region = os.getenv("AWS_REGION", "").strip()
+    if not bucket:
+        return False, "AWS_S3_BUCKET not set"
+    if not region:
+        return False, "AWS_REGION not set"
+    return True, ""
+
+def aws_clients():
+    region = os.getenv("AWS_REGION", "").strip() or None
+    s3 = boto3.client("s3", region_name=region)
+    transcribe = boto3.client("transcribe", region_name=region)
+    return s3, transcribe
+
+def s3_uri(bucket: str, key: str) -> str:
+    return f"s3://{bucket}/{key}"
+
+def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
+    ok, msg = aws_ready()
+    if not ok:
+        return False, msg
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    s3, transcribe = aws_clients()
+    media_uri = s3_uri(bucket, media_key)
+    args: Dict[str, Any] = {
+        "TranscriptionJobName": job_name,
+        "Media": {"MediaFileUri": media_uri},
+        "OutputBucketName": bucket,
+    }
+    if language and language != "auto":
+        args["LanguageCode"] = language
+    else:
+        args["IdentifyLanguage"] = True
+        args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
+    try:
+        transcribe.start_transcription_job(**args)
+    except Exception as e:
+        return False, str(e)
+    return True, ""
+
+def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
+    ok, msg = aws_ready()
+    if not ok:
+        return "", "", msg
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    s3, transcribe = aws_clients()
+    try:
+        r = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+    except Exception as e:
+        return "", "", str(e)
+    job = (r or {}).get("TranscriptionJob") or {}
+    status = (job.get("TranscriptionJobStatus") or "").lower()
+    if status not in ("completed", "failed"):
+        return "", status, ""
+    if status == "failed":
+        return "", status, str(job.get("FailureReason") or "Transcription failed")
+
+    out_uri = (((job.get("Transcript") or {}).get("TranscriptFileUri")) or "").strip()
+    if not out_uri:
+        return "", status, "Missing transcript uri"
+
+    # If output is in the bucket, pull it from S3 for private buckets
+    key = ""
+    if ".amazonaws.com/" in out_uri:
+        key = out_uri.split(".amazonaws.com/", 1)[1]
+        key = key.split("?", 1)[0]
+    if not key:
+        return "", status, "Unable to parse transcript key"
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        body = obj["Body"].read()
+        data = json.loads(body.decode("utf-8", errors="ignore"))
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        return txt, status, ""
+    except Exception as e:
+        return "", status, str(e)
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -752,15 +837,29 @@ def index():
 
 @app.post("/analyze_start")
 def analyze_start():
-    file = request.files.get("pdf")
+    file = request.files.get("file") or request.files.get("pdf")
     if not file:
-        return jsonify({"ok": False, "error": "No PDF uploaded"}), 400
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
 
     handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
 
-    pdf_bytes = file.read()
-    file.stream = io.BytesIO(pdf_bytes)
-    note_text = extract_pdf_text(file.stream)
+    filename = (getattr(file, "filename", "") or "").lower()
+    data = file.read()
+    file.stream = io.BytesIO(data)
+
+    note_text = ""
+    if filename.endswith(".pdf"):
+        note_text = extract_pdf_text(file.stream)
+    elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        if Image is None or pytesseract is None:
+            return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
+        try:
+            img = Image.open(io.BytesIO(data))
+            note_text = (pytesseract.image_to_string(img) or "").strip()
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
+    else:
+        return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
 
     if not handwritten and not text_is_meaningful(note_text):
         return jsonify({
@@ -769,8 +868,8 @@ def analyze_start():
             "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
         }), 200
 
-    if handwritten:
-        ocr_text, ocr_err = ocr_pdf_bytes(pdf_bytes)
+    if handwritten and filename.endswith(".pdf"):
+        ocr_text, ocr_err = ocr_pdf_bytes(data)
         if ocr_text:
             note_text = ocr_text
         else:
@@ -796,6 +895,72 @@ def analyze_status():
     if not job:
         return jsonify({"ok": False, "error": "Unknown job_id"}), 404
     return jsonify({"ok": True, **job}), 200
+
+
+@app.post("/analyze_text_start")
+def analyze_text_start():
+    payload = request.get_json(silent=True) or {}
+    note_text = (payload.get("text") or "").strip()
+    if not note_text:
+        return jsonify({"ok": False, "error": "Missing text"}), 400
+    job_id = new_job_id()
+    set_job(job_id, status="waiting", updated_at=now_utc_iso())
+    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "job_id": job_id}), 200
+
+
+@app.post("/transcribe_start")
+def transcribe_start():
+    audio = request.files.get("audio")
+    if not audio:
+        return jsonify({"ok": False, "error": "No audio uploaded"}), 400
+    language = (request.form.get("language") or "auto").strip()
+    ok, msg = aws_ready()
+    if not ok:
+        return jsonify({"ok": False, "error": msg}), 200
+
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    ext = os.path.splitext((getattr(audio, "filename", "") or ""))[1].lower()
+    if not ext:
+        ext = ".webm"
+    key = f"uploads/{uuid.uuid4().hex}{ext}"
+    s3, _ = aws_clients()
+    try:
+        s3.upload_fileobj(audio.stream, bucket, key)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+    job_name = new_job_id()
+    started, err = start_transcribe_job(job_name, key, language)
+    if not started:
+        return jsonify({"ok": False, "error": err}), 200
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
+    return jsonify({"ok": True, "job_id": job_name}), 200
+
+
+@app.get("/transcribe_status")
+def transcribe_status():
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "Missing job_id"}), 400
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
+
+    if (job.get("status") or "") in ("complete", "error"):
+        return jsonify({"ok": True, **job}), 200
+
+    txt, status, err = fetch_transcribe_result(job_id)
+    if err and status == "failed":
+        set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
+        return jsonify({"ok": True, **get_job(job_id)}), 200
+    if status == "completed" and txt:
+        set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
+        return jsonify({"ok": True, **get_job(job_id)}), 200
+    # still transcribing
+    set_job(job_id, status="transcribing", updated_at=now_utc_iso())
+    return jsonify({"ok": True, **get_job(job_id)}), 200
 
 @app.post("/generate_report")
 def generate_report():

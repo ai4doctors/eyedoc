@@ -345,6 +345,7 @@ if(el("faqModal")){
 document.addEventListener("keydown", (e) => {
   if(e.key === "Escape"){
     closeFaq()
+    closeRecord()
   }
 })
 
@@ -369,9 +370,17 @@ if(el("faqModal")){
     }
   })
 }
+if(el("recordModal")){
+  el("recordModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeRecord()
+    }
+  })
+}
 document.addEventListener("keydown", (e) => {
   if(e.key === "Escape"){
     closeFaq()
+    closeRecord()
   }
 })
 
@@ -624,13 +633,13 @@ function highlightRef(refNum){
 
 async function startAnalyze(){
   if(!uploadedFile){
-    toast("Select a PDF first")
+    toast("Select a file first")
     return
   }
   setAnalyzeStatus("processing")
   el("ocrPrompt").classList.add("hidden")
   const fd = new FormData()
-  fd.append("pdf", uploadedFile)
+  fd.append("file", uploadedFile)
 
   const handwritten = el("handwrittenCheck") && el("handwrittenCheck").checked
   if(handwritten){
@@ -852,13 +861,208 @@ async function exportPdf(){
   toast("Downloaded")
 }
 
+
+let mediaRecorder = null
+let recChunks = []
+let recTimerInt = null
+let recStartMs = 0
+let transcribeJobId = ""
+
+function openRecord(){
+  const m = el("recordModal")
+  if(m){ m.classList.remove("hidden") }
+  el("recordState").textContent = "Ready"
+  el("recordTimer").textContent = "00:00"
+  el("recordTranscript").value = ""
+  el("recStart").disabled = false
+  el("recPause").disabled = true
+  el("recStop").disabled = true
+  el("recSave").disabled = true
+  transcribeJobId = ""
+}
+
+function closeRecord(){
+  const m = el("recordModal")
+  if(m){ m.classList.add("hidden") }
+  if(recTimerInt){ clearInterval(recTimerInt); recTimerInt = null }
+  try{ if(mediaRecorder && mediaRecorder.state !== "inactive"){ mediaRecorder.stop() } }catch(e){}
+  mediaRecorder = null
+  recChunks = []
+}
+
+function fmtTime(ms){
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  const mm = String(m).padStart(2,"0")
+  const rr = String(r).padStart(2,"0")
+  return mm + ":" + rr
+}
+
+async function startRec(){
+  recChunks = []
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ audio:true })
+    mediaRecorder = new MediaRecorder(stream)
+    mediaRecorder.ondataavailable = (e) => {
+      if(e.data && e.data.size > 0){ recChunks.push(e.data) }
+    }
+    mediaRecorder.onstop = () => {
+      try{ stream.getTracks().forEach(t => t.stop()) }catch(e){}
+    }
+    mediaRecorder.start(1000)
+    recStartMs = Date.now()
+    el("recordState").textContent = "Recording"
+    el("recStart").disabled = true
+    el("recPause").disabled = false
+    el("recStop").disabled = false
+    el("recSave").disabled = true
+    if(recTimerInt){ clearInterval(recTimerInt) }
+    recTimerInt = setInterval(() => {
+      el("recordTimer").textContent = fmtTime(Date.now() - recStartMs)
+    }, 500)
+  }catch(e){
+    toast("Microphone permission denied")
+  }
+}
+
+function pauseRec(){
+  if(!mediaRecorder){ return }
+  if(mediaRecorder.state === "recording"){
+    mediaRecorder.pause()
+    el("recordState").textContent = "Paused"
+    el("recPause").textContent = "Resume"
+  }else if(mediaRecorder.state === "paused"){
+    mediaRecorder.resume()
+    el("recordState").textContent = "Recording"
+    el("recPause").textContent = "Pause"
+  }
+}
+
+async function stopRec(){
+  if(!mediaRecorder){ return }
+  el("recordState").textContent = "Preparing audio"
+  el("recPause").disabled = true
+  el("recStop").disabled = true
+  try{ mediaRecorder.stop() }catch(e){}
+  if(recTimerInt){ clearInterval(recTimerInt); recTimerInt = null }
+  setTimeout(async () => {
+    const blob = new Blob(recChunks, { type: "audio/webm" })
+    await startTranscribeBlob(blob)
+  }, 250)
+}
+
+async function startTranscribeBlob(blob){
+  el("recordState").textContent = "Transcribing"
+  const fd = new FormData()
+  const lang = el("recordLang") ? el("recordLang").value : "auto"
+  fd.append("language", lang)
+  fd.append("audio", blob, "recording.webm")
+  const res = await fetch("/transcribe_start", { method:"POST", body: fd })
+  const json = await res.json()
+  if(!json.ok){
+    el("recordState").textContent = "Ready"
+    toast(json.error || "Transcription failed")
+    el("recStart").disabled = false
+    return
+  }
+  transcribeJobId = json.job_id
+  pollTranscribe()
+}
+
+async function pollTranscribe(){
+  if(!transcribeJobId){ return }
+  try{
+    const res = await fetch(`/transcribe_status?job_id=${encodeURIComponent(transcribeJobId)}`)
+    const json = await res.json()
+    if(!json.ok){
+      toast(json.error || "Transcription status error")
+      el("recordState").textContent = "Ready"
+      el("recStart").disabled = false
+      return
+    }
+    const st = json.status || "transcribing"
+    if(st === "transcribing"){
+      el("recordState").textContent = "Transcribing"
+      setTimeout(pollTranscribe, 1500)
+      return
+    }
+    if(st === "error"){
+      el("recordState").textContent = "Ready"
+      toast(json.error || "Transcription failed")
+      el("recStart").disabled = false
+      return
+    }
+    if(st === "complete"){
+      const txt = (json.transcript || "").trim()
+      el("recordTranscript").value = txt
+      el("recordState").textContent = "Transcript ready"
+      el("recSave").disabled = !txt
+      return
+    }
+  }catch(e){
+    setTimeout(pollTranscribe, 2000)
+  }
+}
+
+async function saveTranscriptToAnalyze(){
+  const txt = (el("recordTranscript").value || "").trim()
+  if(!txt){ toast("Transcript is empty"); return }
+  el("recordState").textContent = "Analyzing"
+  const res = await fetch("/analyze_text_start", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ text: txt })
+  })
+  const json = await res.json()
+  if(!json.ok){
+    el("recordState").textContent = "Transcript ready"
+    toast(json.error || "Analyze failed")
+    return
+  }
+  jobId = json.job_id
+  closeRecord()
+  setAnalyzeStatus("processing")
+  pollAnalyze()
+}
+
 el("uploadBtn").addEventListener("click", openPicker)
+if(el("recordBtn")){
+  el("recordBtn").addEventListener("click", openRecord)
+}
+if(el("recordClose")){
+  el("recordClose").addEventListener("click", closeRecord)
+}
+if(el("recStart")){
+  el("recStart").addEventListener("click", startRec)
+}
+if(el("recPause")){
+  el("recPause").addEventListener("click", pauseRec)
+}
+if(el("recStop")){
+  el("recStop").addEventListener("click", stopRec)
+}
+if(el("recSave")){
+  el("recSave").addEventListener("click", saveTranscriptToAnalyze)
+}
 el("file").addEventListener("change", async (e) => {
   const f = e.target.files && e.target.files[0]
   if(!f){
     return
   }
   uploadedFile = f
+  const type = (f.type || "").toLowerCase()
+  if(type.startsWith("audio/")){
+    openRecord()
+    el("recStart").disabled = true
+    el("recPause").disabled = true
+    el("recStop").disabled = true
+    el("recSave").disabled = true
+    el("recordTranscript").value = ""
+    el("recordState").textContent = "Transcribing"
+    await startTranscribeBlob(f)
+    return
+  }
   setAnalyzeStatus("waiting")
   toast("Upload successful")
   await startAnalyze()

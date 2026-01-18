@@ -37,10 +37,12 @@
       <section class="stepBar">
         <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
         <div class="stepControls">
-          <input id="file" type="file" accept="application/pdf" class="fileInput" />
-          <button id="uploadBtn" class="btnPrimary" type="button">Upload exam notes</button>
-          <div id="analyzeStatus" class="stepStatus">Wait for analysis to complete (waiting)</div>
+          <input id="file" type="file" accept="application/pdf,image/*,audio/*" class="fileInput hidden" />
+          <button id="recordBtn" class="btnPrimary" type="button">Record exam</button>
+          <button id="uploadBtn" class="btnSecondary" type="button">Upload file</button>
+          <div id="analyzeStatus" class="stepStatus">Ready</div>
         </div>
+        <div class="stepHint">Process audio, images, or PDFs. Works in multiple languages.</div>
         <div id="ocrPrompt" class="ocrPrompt hidden">
           <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
           <div class="ocrControls">
@@ -147,6 +149,45 @@
         <div class="footerLegal">Do not include unnecessary patient identifiers. Use within your clinic privacy requirements and applicable laws. No warranties are provided. To the fullest extent permitted by law, liability is limited for any indirect, incidental, special, or consequential damages.</div>
         <div class="footerSmall">v{{ version }}</div>
       </footer>
+    </div>
+  </div>
+
+  <div id="recordModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="recordTitle">
+    <div class="modalBackdrop" data-close="1"></div>
+    <div class="modalCard modalWide">
+      <div class="modalHeader">
+        <div id="recordTitle" class="modalTitle">Record exam</div>
+        <button id="recordClose" class="iconBtn" type="button" title="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="recordTop">
+          <div class="recordStatus" id="recordState">Ready</div>
+          <div class="recordTimer" id="recordTimer">00:00</div>
+          <div class="recordLang">
+            <label class="fieldLabel" for="recordLang">Language</label>
+            <select id="recordLang" class="ctrl">
+              <option value="auto">Auto detect</option>
+              <option value="en-US">English</option>
+              <option value="pt-BR">Portuguese</option>
+              <option value="es-US">Spanish</option>
+              <option value="fr-CA">French</option>
+            </select>
+          </div>
+        </div>
+        <div class="recordControls">
+          <button id="recStart" class="btnPrimary" type="button">Start</button>
+          <button id="recPause" class="btnSecondary" type="button" disabled>Pause</button>
+          <button id="recStop" class="btnSecondary" type="button" disabled>Stop</button>
+          <button id="recSave" class="btnPrimary" type="button" disabled>Save and analyze</button>
+        </div>
+        <div class="recordGrid">
+          <div>
+            <div class="sectionTitle"><b>Transcript</b></div>
+            <textarea id="recordTranscript" class="transcriptBox" placeholder="Transcript will appear here"></textarea>
+            <div class="recordNote">Review and edit the transcript before saving. Export PDF after generation on the main screen.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div id="faqModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="faqTitle">

@@ -437,6 +437,52 @@ body{
 .faqQ{font-weight:900; margin-bottom:6px; font-size:15px}
 .faqA{color:var(--muted); font-size:14px; line-height:1.55}
 
+.stepHint{
+  padding:0 26px 10px 26px;
+  color:var(--muted);
+  font-size:14px;
+}
+
+.modalCard.modalWide{
+  width:min(980px, calc(100vw - 32px));
+}
+
+.recordTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  flex-wrap:wrap;
+}
+.recordStatus{
+  font-weight:900;
+}
+.recordTimer{
+  color:var(--muted);
+  font-weight:800;
+}
+.recordLang{min-width:220px}
+.recordControls{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  margin-top:14px;
+  flex-wrap:wrap;
+}
+.recordGrid{margin-top:18px}
+.transcriptBox{
+  width:100%;
+  min-height:260px;
+  padding:12px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: rgba(243,246,255,0.95);
+  font-family: "Source Sans 3", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size:15px;
+  line-height:1.45;
+}
+.recordNote{color:var(--muted); font-size:13px; margin-top:8px}
+
 .actionRow{
   display:flex;
   align-items:center;
