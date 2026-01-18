@@ -387,7 +387,13 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
             authors = item.get("authors") or []
             first_author = (authors[0].get("name") if authors else "") or ""
             citation = " ".join([x for x in [first_author, title, source, pubdate] if x]).strip()
-            out.append({"number": str(i), "pmid": pid, "citation": citation})
+            out.append({
+                "number": str(i),
+                "pmid": pid,
+                "citation": citation,
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pid}/",
+                "source": "PubMed",
+            })
         return out
     except Exception:
         return []
@@ -398,40 +404,50 @@ def canonical_reference_pool(labels):
     blob = " ".join([str(x or "") for x in (labels or [])]).lower()
     pool = []
 
-    def add(pmid, citation):
-        pool.append({"pmid": (pmid or ""), "citation": (citation or "")})
+    def add(pmid, citation, url="", source=""):
+        pool.append({
+            "pmid": (pmid or ""),
+            "citation": (citation or ""),
+            "url": (url or ""),
+            "source": (source or ""),
+        })
 
     if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-        add("41005521", "TFOS DEWS III Executive Summary. The Ocular Surface. 2025.")
-        add("", "TFOS DEWS III Management and Therapy. The Ocular Surface. 2025.")
-        add("28736327", "TFOS DEWS II Executive Summary. The Ocular Surface. 2017.")
+        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
+        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
+        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
+        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
 
     if "myopia" in blob:
-        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.")
+        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
 
     if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Primary Open Angle Glaucoma. Latest edition.")
-        add("", "European Glaucoma Society. Terminology and Guidelines. Latest edition.")
+        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
+        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
+        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
+        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
 
     if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
-        add("", "American Diabetes Association. Standards of Care in Diabetes. Latest edition.")
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Diabetic Retinopathy. Latest edition.")
+        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
+        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
 
     if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
-        add("", "AREDS trial publications. National Eye Institute.")
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Age Related Macular Degeneration. Latest edition.")
+        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
+        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
+        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
 
     if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
-        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.")
+        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
 
     if "uveitis" in blob:
-        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.")
+        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
 
     if "cataract" in blob:
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Cataract in the Adult Eye. Latest edition.")
+        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
+        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
 
     if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add("", "American Academy of Ophthalmology. Preferred Practice Pattern: Rhegmatogenous Retinal Detachment. Latest edition.")
+        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
 
     return pool[:10]
 
@@ -456,7 +472,12 @@ def merge_references(pubmed_refs, canonical_refs, max_total=18):
         if k in seen:
             continue
         seen.add(k)
-        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+        merged.append({
+            "pmid": (r.get("pmid") or ""),
+            "citation": (r.get("citation") or ""),
+            "url": (r.get("url") or ""),
+            "source": (r.get("source") or ""),
+        })
 
     for r in (canonical_refs or []):
         if not isinstance(r, dict):
@@ -465,11 +486,26 @@ def merge_references(pubmed_refs, canonical_refs, max_total=18):
         if k in seen:
             continue
         seen.add(k)
-        merged.append({"pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+        merged.append({
+            "pmid": (r.get("pmid") or ""),
+            "citation": (r.get("citation") or ""),
+            "url": (r.get("url") or ""),
+            "source": (r.get("source") or ""),
+        })
 
     numbered = []
     for i, r in enumerate(merged[:max_total], start=1):
-        numbered.append({"number": str(i), "pmid": (r.get("pmid") or ""), "citation": (r.get("citation") or "")})
+        pmid = (r.get("pmid") or "").strip()
+        url = (r.get("url") or "").strip()
+        if (not url) and pmid:
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        numbered.append({
+            "number": str(i),
+            "pmid": pmid,
+            "citation": (r.get("citation") or ""),
+            "url": url,
+            "source": (r.get("source") or ("PubMed" if pmid else "")),
+        })
     return numbered
 
 

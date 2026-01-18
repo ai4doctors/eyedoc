@@ -96,8 +96,10 @@
 
           <div class="field fieldAction">
             <label class="fieldLabel">&nbsp;</label>
-            <button id="generateBtn" class="btnPrimary" type="button">Generate report</button>
-            <div id="generateStatus" class="stepStatus">Ready</div>
+            <div class="actionRow">
+              <button id="generateBtn" class="btnPrimary" type="button">Generate report</button>
+              <div id="generateStatus" class="stepStatus inline">Ready</div>
+            </div>
           </div>
 
           <div class="field fieldReason">
@@ -156,20 +158,118 @@
       </div>
       <div class="modalBody">
         <div class="faqItem">
-          <div class="faqQ">What does Maneiro.ai do</div>
-          <div class="faqA">It turns clinical notes into a structured referral or report letter you can edit and export as a PDF.</div>
+          <div class="faqQ">What is Maneiro.ai</div>
+          <div class="faqA">Maneiro.ai is a documentation assistant for clinicians. It converts clinical notes into structured outputs such as referral letters, consult letters, and reports. The goal is to reduce administrative workload while keeping the clinician fully in control of the final content.</div>
         </div>
+
         <div class="faqItem">
-          <div class="faqQ">Does it replace my clinical judgement</div>
-          <div class="faqA">No. You remain responsible for review, edits, and the final clinical content before sending.</div>
+          <div class="faqQ">How do I use it from start to finish</div>
+          <div class="faqA">Step 1 is Analyze. Upload a PDF of exam notes and wait for the Summary, Diagnosis, Plan, and References panels to populate. Step 2 is Communicate. Choose document type, fill To and From, then select a Reason and Referral focus. Add Special requests if needed. Click Generate report. Edit the output directly in the rich editor, then Export PDF. Use Email to open your default email app with a ready to send message, then attach the PDF you exported.</div>
         </div>
+
         <div class="faqItem">
-          <div class="faqQ">How are references selected</div>
-          <div class="faqA">The app pulls relevant PubMed results based on the case and adds canonical consensus or guideline references when a diagnosis has too few citations.</div>
+          <div class="faqQ">What file types are supported</div>
+          <div class="faqA">Upload a PDF. If the PDF contains selectable text, Maneiro.ai will extract it. If the PDF is scanned or handwritten, you can enable Handwritten paper files and run OCR. OCR may take longer and results depend on scan quality.</div>
         </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What does Step 1 Analyze produce</div>
+          <div class="faqA">Summary is a clinician readable overview of the visit. Diagnosis is a structured problem list written in plain language. Plan is a concise management plan aligned to the diagnoses. References are evidence sources tied to the diagnoses and plan where possible.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What does Step 2 Communicate change</div>
+          <div class="faqA">Step 2 controls the audience, intent, and tone of the letter. Document type affects phrasing and what is emphasized. Reason and Referral focus shape the opening narrative and the requested service. Special requests lets you add constraints, questions, or priorities for the receiving clinician.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Can I edit the letter and keep formatting</div>
+          <div class="faqA">Yes. The output area is a rich editor. You can use Bold, Italic, Lists, and Clear formatting. Export PDF renders from the same formatted HTML so what you see on screen matches what is exported.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What do Copy Rich Text and Copy Plain Text do</div>
+          <div class="faqA">Copy Rich Text copies formatted content for email clients and editors that support rich text. Copy Plain Text copies a clean text only version for systems that strip formatting. Use whichever matches the destination system.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">How does Email work</div>
+          <div class="faqA">Email opens your default email application with a subject and message prefilled. For privacy and security, Maneiro.ai does not send email from the server and it does not attach files automatically. Export the PDF first, then attach it in your email app.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">How are references chosen and why do I see guideline links</div>
+          <div class="faqA">References start with PubMed results selected using diagnosis and intent. If a diagnosis has too few citations, Maneiro.ai adds cornerstone guidance and consensus sources for that condition. Some cornerstone sources are guidelines hosted by professional societies or journals, so they may open outside PubMed.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Are the references medical advice</div>
+          <div class="faqA">No. References provide context and support for clinical reasoning. They do not replace clinical judgement, local protocols, or specialist recommendations.</div>
+        </div>
+
         <div class="faqItem">
           <div class="faqQ">Where are cases stored</div>
-          <div class="faqA">Cases are saved locally in your browser. Clearing browser storage removes them.</div>
+          <div class="faqA">Cases are stored locally in your browser only. They are not synced across devices. Clearing site data in your browser removes them. Use Export PDF if you need a permanent record for your workflow.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What should I avoid putting into the system</div>
+          <div class="faqA">Avoid unnecessary identifiers. Include only what you need to create the document. Confirm your clinic privacy requirements and local regulations before use, especially when handling sensitive information.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Troubleshooting: Why is the output empty or missing data</div>
+          <div class="faqA">If the PDF is scanned, run OCR. If the note format is unusual, some fields may not extract cleanly. You can still use the generated structure and edit the letter manually. If you notice consistent misses, adjust your note template or provide a cleaner export from your EMR.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Best results: how to export notes from your EMR</div>
+          <div class="faqA">Use an EMR export that includes the full exam, not just the assessment. If possible, export in a clean text based PDF, not a scanned image. Include key objective findings, imaging impressions, and medication lists. If your EMR offers both a compact and detailed printout, start with detailed for best extraction.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What should always be checked before sending</div>
+          <div class="faqA">Confirm patient identifiers, dates, medication names and doses, allergies, objective findings, and the requested service. Make sure urgency is communicated appropriately. Verify that the letter reflects what you actually did and what you want the receiving clinician to do. Maneiro.ai is designed to save time, not remove responsibility.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What do the Case cards show</div>
+          <div class="faqA">Each case card stores a timestamp, the provider name you entered, and a short diagnosis summary when available. Click a card to reopen that case and continue editing. Use New to start fresh. Reset clears the current working case and returns the UI to the initial state.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What does the status text mean</div>
+          <div class="faqA">In Step 1, the status reflects whether your PDF is waiting, processing, or complete. In Step 2, the status reflects whether the app is ready to generate, generating, or done. If you see repeated failures, try a different PDF export, run OCR, or refresh the page and upload again.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">How do I tailor the letter tone and requested service</div>
+          <div class="faqA">Use Document type to set audience and tone. Use Reason to anchor the primary diagnosis or problem. Use Referral focus to specify the exact service you want, for example phaco assessment, glaucoma consult, retina evaluation, dry eye comanagement, or contact lens fitting. Use Special requests to add targeted questions, constraints, or clinical priorities.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Can I include attachments like imaging or test results</div>
+          <div class="faqA">Export PDF for the letter. If you need to send imaging, OCT, topography, or field reports, attach them separately from your EMR or imaging system. Email creates a draft only. Your email application controls attachments and recipients.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Privacy and data handling</div>
+          <div class="faqA">Maneiro.ai does not send email from the server. Cases are stored locally in your browser. Exported PDFs are saved wherever your browser downloads go. Follow your clinic policies for device security, browser access, and retention. Do not use shared devices without appropriate controls.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Why do some guideline links open outside PubMed</div>
+          <div class="faqA">Some cornerstone references live on professional society or journal websites, such as AAO Preferred Practice Patterns, TFOS reports, or EGS guidelines. These are included to strengthen evidence context when a diagnosis is broad or PubMed results are sparse.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">What if the diagnosis or plan is wrong</div>
+          <div class="faqA">Edit it. The tool is designed for fast drafting. If the extracted diagnosis list misses a key condition, add it in the letter and adjust the requested service. If you see a pattern of consistent misses for a specific note style, that is usually solved by improving the source PDF export or adjusting the extraction prompt.</div>
+        </div>
+
+        <div class="faqItem">
+          <div class="faqQ">Supported browsers</div>
+          <div class="faqA">Modern Chromium and Safari versions work best. If Copy Rich Text does not behave as expected, try another browser or use Export PDF as the stable output.</div>
         </div>
       </div>
     </div>

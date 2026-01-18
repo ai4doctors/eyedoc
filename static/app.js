@@ -575,8 +575,21 @@ function renderRefs(){
     p.style.marginBottom = "10px"
     const cite = r.citation || ""
     const pmid = r.pmid ? ` PMID ${r.pmid}` : ""
-    p.textContent = `${cite}${pmid}`.trim()
+    const source = r.source ? `  ${String(r.source)}` : ""
+    p.textContent = `${cite}${pmid}${source}`.trim()
     wrap.appendChild(p)
+
+    const url = r.url || ""
+    if(url){
+      const a = document.createElement("a")
+      a.href = url
+      a.target = "_blank"
+      a.rel = "noopener"
+      a.className = "refLink"
+      a.textContent = "Open source"
+      a.addEventListener("click", (ev) => ev.stopPropagation())
+      wrap.appendChild(a)
+    }
 
     frag.appendChild(wrap)
   })
