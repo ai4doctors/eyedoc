@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import io
+import base64
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -391,6 +392,7 @@ warnings: array of short strings
 
 Rules:
 1 Use only facts supported by the note. If unknown, leave empty.
+1a provider_name must be the authoring clinician only. Never include the patient name inside provider_name.
 2 patient_block must contain patient demographics only. Include PHN if present. Exclude provider address and clinic address. Use <br> line breaks.
 3 summary_html should be a clean summary section with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
 4 diagnoses must be problem list style, include laterality and severity when present.
@@ -401,6 +403,36 @@ Rules:
 Encounter note:
 {excerpt}
 """.strip()
+
+def extract_patient_name_from_block(pb_html: str) -> str:
+    if not pb_html:
+        return ""
+    txt = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
+    txt = re.sub(r"<[^>]+>", "", txt)
+    txt = txt.strip()
+    if not txt:
+        return ""
+    first = txt.split("\n", 1)[0].strip()
+    if ":" in first:
+        k, v = first.split(":", 1)
+        if k.strip().lower() in {"patient", "name", "patient name"}:
+            return v.strip()
+    return first
+
+def normalize_provider_name(provider_name: str, patient_name: str) -> str:
+    pn = (provider_name or "").strip()
+    pat = (patient_name or "").strip()
+    if not pn:
+        return ""
+    if not pat:
+        return pn
+    low_pn = pn.lower()
+    low_pat = pat.lower()
+    if low_pat in low_pn:
+        cleaned = re.sub(re.escape(pat), " ", pn, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+    return pn
 
 def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
     # NCBI E utilities. Keep it lightweight, avoid rate limits
@@ -704,6 +736,9 @@ Analysis:
 """.strip()
 
 def letter_prompt(form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
+    reason_label = (form.get("reason_label") or "Reason for Report").strip() or "Reason for Report"
+    out_lang = (form.get("output_language") or "").strip()
+    out_lang_line = f"Write the letter in {out_lang}." if out_lang and out_lang.lower() not in {"auto", "match", "match input"} else ""
     return f"""
 You are a clinician assistant. Create an Output Communication report.
 
@@ -717,6 +752,9 @@ Otherwise write in technical physician style that is precise and concise.
 
 Special requests:
 special_requests is an intent signal. Never quote it verbatim. Never paste it. Use it indirectly and naturally.
+
+Language:
+{out_lang_line}
 
 Clinic context:
 clinic_name: {os.getenv("CLINIC_NAME","")}
@@ -740,7 +778,7 @@ Phone: <phone>
 Email: <email>
 Address: <address or leave blank>
 <blank line>
-Reason for Referral: <diagnosis chosen plus reason_detail if provided>
+{reason_label}: <diagnosis chosen plus reason_detail if provided>
 <blank line>
 Then the salutation line.
 
@@ -752,7 +790,7 @@ Body rules:
 3 Then use headings for Exam findings, Assessment, and Plan. Do not write a Clinical summary heading.
 4 Include exam findings with granularity when available in the note. Prefer objective measurements, key negatives, imaging summaries, and relevant test results.
 5 Do not include Evidence or Disclaimer sections in the letter. Do not include citations or bracket numbers in the letter body.
-6 End with a closing paragraph that includes: appreciation for seeing the patient, a subtle comanagement collaboration signal, and a request for their impressions and recommendations. Then finish with Kind regards and the authoring doctor name. Do not add a section heading for this sign off.
+6 End with a closing paragraph that includes: appreciation for seeing the patient, a subtle comanagement collaboration signal, and a request for their impressions and recommendations. Then finish with Kind regards only. Do not add the authoring doctor name.
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
@@ -760,6 +798,30 @@ Form:
 Analysis:
 {json.dumps(analysis, ensure_ascii=False)}
 """.strip()
+
+def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool) -> str:
+    txt = (letter_plain or "").rstrip()
+    if not txt:
+        return ""
+    lines = txt.splitlines()
+    # remove trailing provider name if present
+    if lines:
+        last = lines[-1].strip()
+        prov = (provider_name or "").strip()
+        if prov and last.lower() == prov.lower():
+            lines = lines[:-1]
+    txt = "\n".join(lines).rstrip()
+    if has_signature:
+        return txt
+    prov = (provider_name or "").strip()
+    if not prov:
+        return txt
+    if txt.lower().endswith("kind regards,"):
+        return txt + "\n" + prov
+    # if Kind regards appears near end, still append provider on a new line
+    if re.search(r"\bkind regards\b", txt, flags=re.IGNORECASE):
+        return txt + "\n" + prov
+    return txt + "\n\nKind regards,\n" + prov
 
 def new_job_id() -> str:
     return f"job_{int(time.time() * 1000)}_{os.urandom(4).hex()}"
@@ -783,6 +845,32 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
 
     analysis = dict(ANALYZE_SCHEMA)
     analysis.update(obj)
+
+    # Derive patient_name from patient_block for UI convenience and for provider name cleanup
+    pb = (analysis.get("patient_block") or "")
+    pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
+    pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
+    pb_lines = [ln.strip() for ln in pb_plain.splitlines() if ln.strip()]
+    patient_name = ""
+    if pb_lines:
+        first = pb_lines[0]
+        if ":" in first:
+            k, v = first.split(":", 1)
+            if k.strip().lower() in {"patient", "name"}:
+                patient_name = v.strip()
+        if not patient_name:
+            patient_name = first.strip()
+    analysis["patient_name"] = patient_name
+
+    # If provider_name accidentally contains the patient name, strip it out
+    prov = (analysis.get("provider_name") or "").strip()
+    if prov and patient_name:
+        low_prov = prov.lower()
+        low_px = patient_name.lower()
+        if low_px in low_prov:
+            prov2 = re.sub(re.escape(patient_name), "", prov, flags=re.IGNORECASE).strip()
+            prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
+            analysis["provider_name"] = prov2
 
     # Fetch PubMed references based on diagnoses
     terms = []
@@ -977,6 +1065,8 @@ def generate_report():
 
     # Helper fields used by the prompt
     form = dict(form) if isinstance(form, dict) else {}
+    doc_type = (form.get("document_type") or "").strip()
+    form["reason_label"] = "Reason for Referral" if doc_type.lower() == "specialist" else "Reason for Report"
     form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
     rf = (form.get("reason_for_referral") or "").strip()
     rd = (form.get("reason_detail") or "").strip()
@@ -999,6 +1089,20 @@ def generate_report():
         letter_plain = re.sub(r"\n{3,}", "\n\n", letter_plain).strip()
     if not letter_plain:
         return jsonify({"ok": False, "error": "Empty output"}), 200
+
+    provider_name = (form.get("from_doctor") or form.get("provider_name") or "").strip()
+    sig_client = bool(form.get("signature_present"))
+    sig_file = True if signature_image_for_provider(provider_name) else False
+    has_signature = sig_client or sig_file
+    letter_plain = finalize_signoff(letter_plain, provider_name, has_signature)
+
+    # Normalize reason label in the top section when models drift
+    want_label = (form.get("reason_label") or "Reason for Report").strip()
+    if want_label:
+        if want_label.lower() == "reason for report":
+            letter_plain = re.sub(r"^Reason\s+for\s+Referral\s*:", "Reason for Report:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
+        else:
+            letter_plain = re.sub(r"^Reason\s+for\s+Report\s*:", "Reason for Referral:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
 
     return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
@@ -1035,6 +1139,8 @@ def export_pdf():
     provider_name = (payload.get("provider_name") or "").strip() or "Provider"
     patient_token = (payload.get("patient_token") or "").strip()
     recipient_type = (payload.get("recipient_type") or "").strip()
+    letterhead_data_url = (payload.get("letterhead_data_url") or "").strip()
+    signature_data_url = (payload.get("signature_data_url") or "").strip()
     if not text_in:
         return jsonify({"error": "No content"}), 400
 
@@ -1066,14 +1172,39 @@ def export_pdf():
 
     out_path = os.path.join(tempfile.gettempdir(), f"maneiro_{uuid.uuid4().hex}.pdf")
 
+    def data_url_to_tempfile(data_url: str, prefix: str) -> Optional[str]:
+        if not data_url or not data_url.startswith("data:"):
+            return None
+        try:
+            header, b64 = data_url.split(",", 1)
+            mime = header.split(";", 1)[0].split(":", 1)[1].strip().lower()
+            ext = ".png"
+            if "jpeg" in mime or "jpg" in mime:
+                ext = ".jpg"
+            raw = base64.b64decode(b64)
+            path = os.path.join(tempfile.gettempdir(), f"maneiro_{prefix}_{uuid.uuid4().hex}{ext}")
+            with open(path, "wb") as f:
+                f.write(raw)
+            return path
+        except Exception:
+            return None
+
+    lh_override = data_url_to_tempfile(letterhead_data_url, "letterhead")
+    sig_override = data_url_to_tempfile(signature_data_url, "signature")
+    sig_path_effective = sig_override or signature_image_for_provider(provider_name)
+    if sig_path_effective and os.path.exists(sig_path_effective):
+        text_in = finalize_signoff(text_in, provider_name, True)
+    if sig_path_effective:
+        text_in = finalize_signoff(text_in, provider_name, True)
+
     styles = getSampleStyleSheet()
     base = ParagraphStyle(
         "base",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=11,
-        leading=14.5,
-        spaceAfter=5,
+        fontSize=10,
+        leading=13.5,
+        spaceAfter=4,
         alignment=TA_JUSTIFY,
     )
     head = ParagraphStyle(
@@ -1088,8 +1219,8 @@ def export_pdf():
         "mono",
         parent=base,
         fontName="Helvetica",
-        fontSize=11,
-        leading=13.5,
+        fontSize=10,
+        leading=12.8,
         alignment=TA_LEFT,
         spaceAfter=0,
     )
@@ -1131,8 +1262,8 @@ def export_pdf():
 
     story = []
 
-    lh_path = os.path.join(app.static_folder, "letterhead.png")
-    if os.path.exists(lh_path):
+    lh_path = lh_override or os.path.join(app.static_folder, "letterhead.png")
+    if lh_path and os.path.exists(lh_path):
         try:
             img = RLImage(lh_path)
             img.drawHeight = 50
@@ -1174,10 +1305,11 @@ def export_pdf():
 
         if lower in {"clinical summary", "clinical summary:"}:
             continue
-        if lower.startswith("reason for referral"):
+        if lower.startswith("reason for referral") or lower.startswith("reason for report"):
+            label = "Reason for Referral" if lower.startswith("reason for referral") else "Reason for Report"
             value = line.split(":", 1)[1].strip() if ":" in line else ""
             story.append(Spacer(1, 10))
-            story.append(Paragraph(f"<b>Reason for Referral:</b> {esc(value)}", base))
+            story.append(Paragraph(f"<b>{label}:</b> {esc(value)}", base))
             story.append(Spacer(1, 10))
             continue
 
@@ -1203,7 +1335,7 @@ def export_pdf():
         if lower.startswith("kind regards"):
             story.append(Spacer(1, 12))
             story.append(Paragraph("Kind regards,", base))
-            sig_path = signature_image_for_provider(provider_name)
+            sig_path = sig_path_effective
             if sig_path and os.path.exists(sig_path):
                 try:
                     sig = RLImage(sig_path)

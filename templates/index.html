@@ -17,8 +17,9 @@
 
     
     <div class="topActions">
-      <button id="faqBtn" class="iconBtn" type="button" title="FAQ">FAQ</button>
       <a class="iconBtn linkBtn" href="https://pubmed.ncbi.nlm.nih.gov/" target="_blank" rel="noreferrer" title="PubMed">PubMed</a>
+      <button id="faqBtn" class="iconBtn" type="button" title="FAQ">FAQ</button>
+      <button id="settingsBtn" class="iconBtn" type="button" title="Settings">Settings</button>
       <button id="resetBtn" class="iconBtn" type="button" title="Reset">Reset</button>
     </div>
   </header>
@@ -312,6 +313,54 @@
         <div class="faqItem">
           <div class="faqQ">Supported browsers</div>
           <div class="faqA">Modern Chromium and Safari versions work best. If Copy Rich Text does not behave as expected, try another browser or use Export PDF as the stable output.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modalBackdrop" data-close="1"></div>
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div id="settingsTitle" class="modalTitle">Settings</div>
+        <button id="settingsClose" class="iconBtn" type="button" title="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="settingsGrid">
+          <div class="field">
+            <label class="fieldLabel" for="settingInputLang">Input language</label>
+            <select id="settingInputLang" class="ctrl">
+              <option value="auto">Auto detect</option>
+              <option value="en-US">English</option>
+              <option value="pt-BR">Portuguese</option>
+              <option value="es-US">Spanish</option>
+              <option value="fr-CA">French</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="fieldLabel" for="settingOutputLang">Output language</label>
+            <select id="settingOutputLang" class="ctrl">
+              <option value="auto">Match input</option>
+              <option value="en">English</option>
+              <option value="pt">Portuguese</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="fieldLabel" for="settingLetterhead">Upload letterhead</label>
+            <input id="settingLetterhead" class="ctrl" type="file" accept="image/*" />
+            <div id="letterheadHint" class="smallHint"></div>
+          </div>
+          <div class="field">
+            <label class="fieldLabel" for="settingSignature">Upload signature</label>
+            <input id="settingSignature" class="ctrl" type="file" accept="image/*" />
+            <div id="signatureHint" class="smallHint"></div>
+          </div>
+        </div>
+        <div class="settingsActions">
+          <button id="settingsSave" class="btnPrimary" type="button">Save</button>
+          <button id="settingsClear" class="btnSecondary" type="button">Clear uploads</button>
         </div>
       </div>
     </div>

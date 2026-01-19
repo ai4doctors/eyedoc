@@ -6,6 +6,31 @@ let latestLetterHtml = ""
 // Single theme for consistency
 let theme = "light"
 
+const SETTINGS_KEY = "maneiro_settings_v1"
+const DEFAULT_SETTINGS = {
+  input_language: "auto",
+  output_language: "auto",
+  letterhead_data_url: "",
+  signature_data_url: ""
+}
+
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    if(!raw){ return { ...DEFAULT_SETTINGS } }
+    const parsed = JSON.parse(raw)
+    return { ...DEFAULT_SETTINGS, ...(parsed || {}) }
+  }catch(e){
+    return { ...DEFAULT_SETTINGS }
+  }
+}
+
+function saveSettings(next){
+  const merged = { ...DEFAULT_SETTINGS, ...(next || {}) }
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged)) }catch(e){}
+  return merged
+}
+
 function cleanNameToken(s){
   return (s || "")
     .toString()
@@ -737,13 +762,18 @@ function buildForm(){
 
   const mappedRecipient = (recipientType === "Family physician" || recipientType === "Specialist") ? "Physician" : recipientType
 
+  const settings = loadSettings()
+
   return {
+    document_type: recipientType,
     recipient_type: mappedRecipient,
     to_whom: toWhom,
     from_doctor: fromDoctor,
     reason_for_referral: reason,
     reason_detail: reasonDetail,
     special_requests: special,
+    output_language: settings.output_language || "auto",
+    signature_present: !!settings.signature_data_url,
     letter_type: "Report"
   }
 }
@@ -757,7 +787,6 @@ async function generateReport(){
   btn.disabled = true
   setGenerateStatus("processing")
   const originalLabel = btn.textContent
-  btn.textContent = "Generating report"
   const payload = { form: buildForm(), analysis: latestAnalysis }
   try{
     const res = await fetch("/generate_report", {
@@ -836,6 +865,7 @@ async function exportPdf(){
   const patientBlock = latestAnalysis ? (latestAnalysis.patient_block || "") : ""
   const patientToken = patientTokenFromBlock(patientBlock)
   const recipientType = (el("recipientType").value || "").trim()
+  const settings = loadSettings()
   const res = await fetch("/export_pdf", {
     method:"POST",
     headers: {"Content-Type":"application/json"},
@@ -843,7 +873,9 @@ async function exportPdf(){
       text,
       provider_name: providerName,
       patient_token: patientToken,
-      recipient_type: recipientType
+      recipient_type: recipientType,
+      letterhead_data_url: settings.letterhead_data_url || "",
+      signature_data_url: settings.signature_data_url || ""
     })
   })
   if(!res.ok){
@@ -885,6 +917,16 @@ let transcribeJobId = ""
 function openRecord(){
   const m = el("recordModal")
   if(m){ m.classList.remove("hidden") }
+  const settings = loadSettings()
+  const sel = el("recordLang")
+  if(sel){
+    const v = (settings.input_language || "auto").trim()
+    if([...sel.options].some(o => o.value === v)){
+      sel.value = v
+    }else{
+      sel.value = "auto"
+    }
+  }
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
@@ -1187,6 +1229,82 @@ document.addEventListener("keydown", (e) => {
     closeFaq()
   }
 })
+
+function openSettings(){
+  const m = el("settingsModal")
+  if(!m){ return }
+  const s = loadSettings()
+  if(el("settingsInputLang")){ el("settingsInputLang").value = s.input_language || "auto" }
+  if(el("settingsOutputLang")){ el("settingsOutputLang").value = s.output_language || "auto" }
+  if(el("settingsLetterheadHint")){ el("settingsLetterheadHint").textContent = s.letterhead_data_url ? "Custom letterhead loaded" : "Using default letterhead" }
+  if(el("settingsSignatureHint")){ el("settingsSignatureHint").textContent = s.signature_data_url ? "Custom signature loaded" : "Using server signature" }
+  m.classList.remove("hidden")
+}
+
+function closeSettings(){
+  const m = el("settingsModal")
+  if(m){ m.classList.add("hidden") }
+}
+
+async function fileToDataUrl(file){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result || ""))
+    r.onerror = () => reject(new Error("read"))
+    r.readAsDataURL(file)
+  })
+}
+
+async function saveSettingsFromModal(){
+  const s = loadSettings()
+  const next = { ...s }
+  if(el("settingsInputLang")){ next.input_language = el("settingsInputLang").value || "auto" }
+  if(el("settingsOutputLang")){ next.output_language = el("settingsOutputLang").value || "auto" }
+
+  try{
+    const lh = el("settingsLetterhead")
+    if(lh && lh.files && lh.files[0]){
+      next.letterhead_data_url = await fileToDataUrl(lh.files[0])
+    }
+  }catch(e){}
+  try{
+    const sig = el("settingsSignature")
+    if(sig && sig.files && sig.files[0]){
+      next.signature_data_url = await fileToDataUrl(sig.files[0])
+    }
+  }catch(e){}
+
+  saveSettings(next)
+  toast("Settings saved")
+  closeSettings()
+}
+
+function clearUploads(){
+  const s = loadSettings()
+  saveSettings({ ...s, letterhead_data_url: "", signature_data_url: "" })
+  toast("Uploads cleared")
+  closeSettings()
+}
+
+if(el("settingsBtn")){
+  el("settingsBtn").addEventListener("click", openSettings)
+}
+if(el("settingsClose")){
+  el("settingsClose").addEventListener("click", closeSettings)
+}
+if(el("settingsSave")){
+  el("settingsSave").addEventListener("click", saveSettingsFromModal)
+}
+if(el("settingsClearUploads")){
+  el("settingsClearUploads").addEventListener("click", clearUploads)
+}
+if(el("settingsModal")){
+  el("settingsModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeSettings()
+    }
+  })
+}
 
 
 function emailDraft(){
