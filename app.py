@@ -1032,23 +1032,64 @@ def transcribe_status():
     job_id = (request.args.get("job_id") or "").strip()
     if not job_id:
         return jsonify({"ok": False, "error": "Missing job_id"}), 400
+
     job = get_job(job_id)
     if not job:
         return jsonify({"ok": False, "error": "Unknown job_id"}), 404
 
-    if (job.get("status") or "") in ("complete", "error"):
+    def load_saved_transcript_from_s3(jid: str) -> str:
+        try:
+            import json
+            bucket = (os.getenv("AWS_S3_BUCKET") or "").strip()
+            if not bucket:
+                return ""
+
+            s3, _ = aws_clients()
+
+            keys_to_try = []
+            if jid.endswith(".json"):
+                keys_to_try.append(jid)
+                keys_to_try.append(jid[:-5])
+            else:
+                keys_to_try.append(jid)
+                keys_to_try.append(jid + ".json")
+
+            for key in keys_to_try:
+                try:
+                    raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+                    data = json.loads(raw)
+                    txt = ((data.get("results") or {}).get("transcript") or "").strip()
+                    if txt:
+                        return txt
+                except Exception:
+                    continue
+        except Exception:
+            return ""
+        return ""
+
+    st = (job.get("status") or "").strip()
+
+    if st in ("complete", "error"):
+        if st == "complete" and not (job.get("transcript") or "").strip():
+            txt = load_saved_transcript_from_s3(job_id)
+            if txt:
+                set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
+                job = get_job(job_id) or job
         return jsonify({"ok": True, **job}), 200
 
     txt, status, err = fetch_transcribe_result(job_id)
+
     if err and status == "failed":
         set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
+
     if status == "completed" and txt:
         set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
-    # still transcribing
+
     set_job(job_id, status="transcribing", updated_at=now_utc_iso())
     return jsonify({"ok": True, **get_job(job_id)}), 200
+
 
 @app.post("/generate_report")
 def generate_report():
