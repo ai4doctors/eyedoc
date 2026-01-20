@@ -11,7 +11,8 @@ const DEFAULT_SETTINGS = {
   input_language: "auto",
   output_language: "auto",
   letterhead_data_url: "",
-  signature_data_url: ""
+  signature_data_url: "",
+  record_mode: "dictation"
 }
 
 function loadSettings(){
@@ -913,6 +914,10 @@ let recChunks = []
 let recTimerInt = null
 let recStartMs = 0
 let transcribeJobId = ""
+let transcribeMode = "dictation"
+let transcribeSegments = []
+let doctorSpeaker = ""
+let cleanedTranscript = ""
 
 function openRecord(){
   const m = el("recordModal")
@@ -927,6 +932,16 @@ function openRecord(){
       sel.value = "auto"
     }
   }
+  const modeSel = el("recordMode")
+  if(modeSel){
+    const mv = (settings.record_mode || "dictation").trim()
+    if([...modeSel.options].some(o => o.value === mv)){
+      modeSel.value = mv
+    }else{
+      modeSel.value = "dictation"
+    }
+    transcribeMode = modeSel.value
+  }
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
@@ -935,6 +950,11 @@ function openRecord(){
   el("recStop").disabled = true
   el("recSave").disabled = true
   transcribeJobId = ""
+  transcribeSegments = []
+  doctorSpeaker = ""
+  cleanedTranscript = ""
+  if(el("recSwap")){ el("recSwap").disabled = true }
+
 }
 
 function closeRecord(){
@@ -1012,6 +1032,10 @@ async function startTranscribeBlob(blob){
   el("recordState").textContent = "Transcribing"
   const fd = new FormData()
   const lang = el("recordLang") ? el("recordLang").value : "auto"
+  const mode = el("recordMode") ? el("recordMode").value : (transcribeMode || "dictation")
+  transcribeMode = mode
+  fd.append("mode", mode)
+
   fd.append("language", lang)
   fd.append("audio", blob, "recording.webm")
   const res = await fetch("/transcribe_start", { method:"POST", body: fd })
@@ -1051,9 +1075,14 @@ async function pollTranscribe(){
     }
     if(st === "complete"){
       const txt = (json.transcript || "").trim()
+      transcribeSegments = Array.isArray(json.speaker_segments) ? json.speaker_segments : []
+      doctorSpeaker = (json.doctor_speaker || "").toString()
+      cleanedTranscript = (json.cleaned_text || "").toString().trim()
       el("recordTranscript").value = txt
       el("recordState").textContent = "Transcript ready"
       el("recSave").disabled = !txt
+      const canSwap = transcribeMode === "live" && transcribeSegments.length >= 2
+      if(el("recSwap")){ el("recSwap").disabled = !canSwap }
       return
     }
   }catch(e){
@@ -1061,8 +1090,48 @@ async function pollTranscribe(){
   }
 }
 
+function normalizeTextForMatch(t){
+  return (t || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim()
+}
+
+function buildCleanedFromSegments(segments, speaker){
+  if(!Array.isArray(segments) || !segments.length || !speaker){ return "" }
+  const parts = []
+  segments.forEach(seg => {
+    if(!seg){ return }
+    if((seg.speaker || "") !== speaker){ return }
+    const t = (seg.text || "").toString().trim()
+    if(t){ parts.push(t) }
+  })
+  let out = parts.join("\n")
+  const marker = "lets begin the exam"
+  const n = normalizeTextForMatch(out)
+  if(n.includes(marker)){
+    const idx = n.indexOf(marker)
+    if(idx >= 0){
+      const rawLower = out.toLowerCase()
+      const rawIdx = rawLower.indexOf("let's begin the exam")
+      if(rawIdx >= 0){ out = out.slice(rawIdx + "let's begin the exam".length).trim() }
+    }
+  }
+  return out.trim()
+}
+
+function swapSpeakers(){
+  if(!transcribeSegments || !transcribeSegments.length){ return }
+  const speakers = [...new Set(transcribeSegments.map(s => s.speaker).filter(Boolean))]
+  if(speakers.length < 2){ return }
+  if(!doctorSpeaker){ doctorSpeaker = speakers[0] }
+  const i = speakers.indexOf(doctorSpeaker)
+  doctorSpeaker = speakers[(i + 1) % speakers.length]
+  cleanedTranscript = buildCleanedFromSegments(transcribeSegments, doctorSpeaker)
+  toast("Doctor voice switched")
+}
+
 async function saveTranscriptToAnalyze(){
-  const txt = (el("recordTranscript").value || "").trim()
+  const raw = (el("recordTranscript").value || "").trim()
+  const useClean = transcribeMode === "live"
+  const txt = (useClean ? (cleanedTranscript || "") : raw).trim()
   if(!txt){ toast("Transcript is empty"); return }
   el("recordState").textContent = "Analyzing"
   const res = await fetch("/analyze_text_start", {
@@ -1100,6 +1169,24 @@ if(el("recStop")){
 }
 if(el("recSave")){
   el("recSave").addEventListener("click", saveTranscriptToAnalyze)
+}
+if(el("recSwap")){
+  el("recSwap").addEventListener("click", () => {
+    swapSpeakers()
+  })
+}
+if(el("recordMode")){
+  el("recordMode").addEventListener("change", () => {
+    const settings = loadSettings()
+    saveSettings({ ...settings, record_mode: el("recordMode").value })
+    transcribeMode = el("recordMode").value
+  })
+}
+if(el("recordLang")){
+  el("recordLang").addEventListener("change", () => {
+    const settings = loadSettings()
+    saveSettings({ ...settings, input_language: el("recordLang").value })
+  })
 }
 el("file").addEventListener("change", async (e) => {
   const f = e.target.files && e.target.files[0]
