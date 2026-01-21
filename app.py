@@ -41,11 +41,6 @@ except Exception:
     OpenAI = None
 
 try:
-    from guidelines.enhance import enhance_case
-except Exception:
-    enhance_case = None
-
-try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
@@ -182,7 +177,63 @@ def text_is_meaningful(text: str) -> bool:
     ratio = alpha / max(len(s), 1)
     return ratio >= 0.25
 
+
+def textract_ocr_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, str]:
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    if not bucket:
+        return "", "AWS_S3_BUCKET is not set"
+    ok, msg = aws_ready()
+    if not ok:
+        return "", msg
+    region = (os.getenv("AWS_REGION") or "us-east-1").strip()
+    timeout_sec = int(os.getenv("TEXTRACT_TIMEOUT_SEC", "90") or "90")
+    tmp_key = f"ocr_tmp/{uuid.uuid4().hex}.pdf"
+    s3, _ = aws_clients()
+    textract = boto3.client("textract", region_name=region)
+    try:
+        s3.put_object(Bucket=bucket, Key=tmp_key, Body=pdf_bytes)
+        resp = textract.start_document_text_detection(DocumentLocation={"S3Object": {"Bucket": bucket, "Name": tmp_key}})
+        job_id = resp.get("JobId")
+        if not job_id:
+            return "", "Textract did not return a JobId"
+        deadline = time.time() + timeout_sec
+        lines: list[str] = []
+        next_token: Optional[str] = None
+        while True:
+            if time.time() > deadline:
+                return "", "Textract timed out"
+            kwargs: dict = {"JobId": job_id}
+            if next_token:
+                kwargs["NextToken"] = next_token
+            out = textract.get_document_text_detection(**kwargs)
+            status = out.get("JobStatus")
+            if status == "IN_PROGRESS":
+                time.sleep(1.0)
+                continue
+            if status != "SUCCEEDED":
+                return "", f"Textract failed: {status}"
+            for b in (out.get("Blocks") or []):
+                if b.get("BlockType") == "LINE" and b.get("Text"):
+                    lines.append(b["Text"])
+            next_token = out.get("NextToken")
+            if not next_token:
+                break
+        return "\n".join(lines).strip(), ""
+    except Exception as e:
+        return "", f"Textract error: {e}"
+    finally:
+        try:
+            s3.delete_object(Bucket=bucket, Key=tmp_key)
+        except Exception:
+            pass
+
 def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+
+use_textract = (os.getenv("USE_TEXTRACT_OCR", "1") or "1").strip().lower() in ("1","true","yes","on")
+if use_textract:
+    txt, err = textract_ocr_pdf_bytes(pdf_bytes)
+    if txt and not err:
+        return txt, ""
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
     try:
@@ -256,7 +307,7 @@ def ocr_ready() -> Tuple[bool, str]:
         return False, "pytesseract not available"
     return True, ""
 
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
+def ocr_pdf_text_only(pdf_bytes: bytes, max_pages: int = 12) -> str:
     ok, _ = ocr_ready()
     if not ok:
         return ""
@@ -857,286 +908,278 @@ def get_job(job_id: str) -> Dict[str, Any]:
         return dict(JOBS.get(job_id) or {})
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso())
-    obj, err = llm_json(analyze_prompt(note_text))
-    if err or not obj:
-        set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
-        return
-
-    analysis = dict(ANALYZE_SCHEMA)
-    analysis.update(obj)
-
-    # Derive patient_name from patient_block for UI convenience and for provider name cleanup
-    pb = (analysis.get("patient_block") or "")
-    pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
-    pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
-    pb_lines = [ln.strip() for ln in pb_plain.splitlines() if ln.strip()]
-    patient_name = ""
-    if pb_lines:
-        first = pb_lines[0]
-        if ":" in first:
-            k, v = first.split(":", 1)
-            if k.strip().lower() in {"patient", "name"}:
-                patient_name = v.strip()
-        if not patient_name:
-            patient_name = first.strip()
-    analysis["patient_name"] = patient_name
-
-    # If provider_name accidentally contains the patient name, strip it out
-    prov = (analysis.get("provider_name") or "").strip()
-    if prov and patient_name:
-        low_prov = prov.lower()
-        low_px = patient_name.lower()
-        if low_px in low_prov:
-            prov2 = re.sub(re.escape(patient_name), "", prov, flags=re.IGNORECASE).strip()
-            prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
-            analysis["provider_name"] = prov2
-
-    # Fetch PubMed references based on diagnoses
-    terms = []
-    for dx in analysis.get("diagnoses") or []:
-        if isinstance(dx, dict):
-            label = (dx.get("label") or "").strip()
-            if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
-    analysis['references'] = merge_references(references, canonical)
-
-    # Assign citation numbers
-    if references:
-        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
-        if not cites_err and cites_obj:
-            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            for dx in analysis.get("diagnoses") or []:
-                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
-                    dx["refs"] = dx_map.get(dx["number"], [])
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
-                    pl["refs"] = pl_map.get(pl["number"], [])
-
-    # Guarantee at least one reference number is used somewhere when references exist
-    if analysis.get("references"):
-        used = False
+    try:
+        set_job(job_id, status="processing", updated_at=now_utc_iso())
+        obj, err = llm_json(analyze_prompt(note_text))
+        if err or not obj:
+            set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
+            return
+        
+        analysis = dict(ANALYZE_SCHEMA)
+        analysis.update(obj)
+        
+        # Derive patient_name from patient_block for UI convenience and for provider name cleanup
+        pb = (analysis.get("patient_block") or "")
+        pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
+        pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
+        pb_lines = [ln.strip() for ln in pb_plain.splitlines() if ln.strip()]
+        patient_name = ""
+        if pb_lines:
+            first = pb_lines[0]
+            if ":" in first:
+                k, v = first.split(":", 1)
+                if k.strip().lower() in {"patient", "name"}:
+                    patient_name = v.strip()
+            if not patient_name:
+                patient_name = first.strip()
+        analysis["patient_name"] = patient_name
+        
+        # If provider_name accidentally contains the patient name, strip it out
+        prov = (analysis.get("provider_name") or "").strip()
+        if prov and patient_name:
+            low_prov = prov.lower()
+            low_px = patient_name.lower()
+            if low_px in low_prov:
+                prov2 = re.sub(re.escape(patient_name), "", prov, flags=re.IGNORECASE).strip()
+                prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
+                analysis["provider_name"] = prov2
+        
+        # Fetch PubMed references based on diagnoses
+        terms = []
         for dx in analysis.get("diagnoses") or []:
-            if isinstance(dx, dict) and dx.get("refs"):
-                used = True
-                break
-        if not used:
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and pl.get("refs"):
+            if isinstance(dx, dict):
+                label = (dx.get("label") or "").strip()
+                if label:
+                    terms.append(label)
+        references = pubmed_fetch_for_terms(terms)
+        canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
+        analysis['references'] = merge_references(references, canonical)
+        
+        # Assign citation numbers
+        if references:
+            cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
+            if not cites_err and cites_obj:
+                dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+                pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
+                for dx in analysis.get("diagnoses") or []:
+                    if isinstance(dx, dict) and isinstance(dx.get("number"), int):
+                        dx["refs"] = dx_map.get(dx["number"], [])
+                for pl in analysis.get("plan") or []:
+                    if isinstance(pl, dict) and isinstance(pl.get("number"), int):
+                        pl["refs"] = pl_map.get(pl["number"], [])
+        
+        # Guarantee at least one reference number is used somewhere when references exist
+        if analysis.get("references"):
+            used = False
+            for dx in analysis.get("diagnoses") or []:
+                if isinstance(dx, dict) and dx.get("refs"):
                     used = True
                     break
-        if not used:
-            # Attach reference 1 as a general evidence context anchor
-            if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
-                if isinstance(analysis["diagnoses"][0], dict):
-                    analysis["diagnoses"][0]["refs"] = [1]
-            if isinstance(analysis.get("plan"), list) and analysis["plan"]:
-                if isinstance(analysis["plan"][0], dict):
-                    analysis["plan"][0]["refs"] = [1]
-
-    # Optional guideline based enhancement (suggestions with citations)
-    if os.getenv("ENABLE_GUIDELINE_ENHANCE", "0").strip() == "1" and enhance_case:
-        def _llm_for_guidelines(prompt: str, schema: dict):
-            obj, err = llm_json(prompt, temperature=0.1)
-            return obj if (not err and isinstance(obj, dict)) else None
-        try:
-            enh = enhance_case(_llm_for_guidelines, note_text=note_text, analysis=analysis)
-            if enh:
-                analysis["guideline_enhancement"] = enh
-        except Exception as _e:
-            pass
-
-    set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
-
-@app.get("/")
-def index():
-    return render_template("index.html", version=APP_VERSION)
-
-@app.post("/analyze_start")
-def analyze_start():
-    file = request.files.get("file") or request.files.get("pdf")
-    if not file:
-        return jsonify({"ok": False, "error": "No file uploaded"}), 400
-
-    handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
-
-    filename = (getattr(file, "filename", "") or "").lower()
-    data = file.read()
-    file.stream = io.BytesIO(data)
-
-    note_text = ""
-    if filename.endswith(".pdf"):
-        note_text = extract_pdf_text(file.stream)
-    elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
-        if Image is None or pytesseract is None:
-            return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
-        try:
-            img = Image.open(io.BytesIO(data))
-            note_text = (pytesseract.image_to_string(img) or "").strip()
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
-    else:
-        return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
-
-    if not handwritten and not text_is_meaningful(note_text):
-        return jsonify({
-            "ok": False,
-            "needs_ocr": True,
-            "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
-        }), 200
-
-    if handwritten and filename.endswith(".pdf"):
-        ocr_text, ocr_err = ocr_pdf_bytes(data)
-        if ocr_text:
-            note_text = ocr_text
+            if not used:
+                for pl in analysis.get("plan") or []:
+                    if isinstance(pl, dict) and pl.get("refs"):
+                        used = True
+                        break
+            if not used:
+                # Attach reference 1 as a general evidence context anchor
+                if isinstance(analysis.get("diagnoses"), list) and analysis["diagnoses"]:
+                    if isinstance(analysis["diagnoses"][0], dict):
+                        analysis["diagnoses"][0]["refs"] = [1]
+                if isinstance(analysis.get("plan"), list) and analysis["plan"]:
+                    if isinstance(analysis["plan"][0], dict):
+                        analysis["plan"][0]["refs"] = [1]
+        
+        set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
+        
+    @app.get("/")
+    def index():
+        return render_template("index.html", version=APP_VERSION)
+        
+    @app.post("/analyze_start")
+    def analyze_start():
+        file = request.files.get("file") or request.files.get("pdf")
+        if not file:
+            return jsonify({"ok": False, "error": "No file uploaded"}), 400
+        
+        handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
+        
+        filename = (getattr(file, "filename", "") or "").lower()
+        data = file.read()
+        file.stream = io.BytesIO(data)
+        
+        note_text = ""
+        if filename.endswith(".pdf"):
+            note_text = extract_pdf_text(file.stream)
+        elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            if Image is None or pytesseract is None:
+                return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
+            try:
+                img = Image.open(io.BytesIO(data))
+                note_text = (pytesseract.image_to_string(img) or "").strip()
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
         else:
-            return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
-
-    if not note_text:
-        return jsonify({"ok": False, "error": "No text extracted"}), 200
-
-    job_id = new_job_id()
-    set_job(job_id, status="waiting", updated_at=now_utc_iso())
-
-    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
-    t.start()
-
-    return jsonify({"ok": True, "job_id": job_id}), 200
-
-@app.get("/analyze_status")
-def analyze_status():
-    job_id = (request.args.get("job_id") or "").strip()
-    if not job_id:
-        return jsonify({"ok": False, "error": "Missing job_id"}), 400
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
-    return jsonify({"ok": True, **job}), 200
-
-
-@app.post("/analyze_text_start")
-def analyze_text_start():
-    payload = request.get_json(silent=True) or {}
-    note_text = (payload.get("text") or "").strip()
-    if not note_text:
-        return jsonify({"ok": False, "error": "Missing text"}), 400
-    job_id = new_job_id()
-    set_job(job_id, status="waiting", updated_at=now_utc_iso())
-    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
-    t.start()
-    return jsonify({"ok": True, "job_id": job_id}), 200
-
-
-@app.post("/transcribe_start")
-def transcribe_start():
-    audio = request.files.get("audio")
-    if not audio:
-        return jsonify({"ok": False, "error": "No audio uploaded"}), 400
-    language = (request.form.get("language") or "auto").strip()
-    ok, msg = aws_ready()
-    if not ok:
-        return jsonify({"ok": False, "error": msg}), 200
-
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    ext = os.path.splitext((getattr(audio, "filename", "") or ""))[1].lower()
-    if not ext:
-        ext = ".webm"
-    key = f"uploads/{uuid.uuid4().hex}{ext}"
-    s3, _ = aws_clients()
-    try:
-        s3.upload_fileobj(audio.stream, bucket, key)
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 200
-
-    job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language)
-    if not started:
-        return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
-    return jsonify({"ok": True, "job_id": job_name}), 200
-
-
-@app.get("/transcribe_status")
-def transcribe_status():
-    job_id = (request.args.get("job_id") or "").strip()
-    if not job_id:
-        return jsonify({"ok": False, "error": "Missing job_id"}), 400
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
-
-    if (job.get("status") or "") in ("complete", "error"):
+            return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
+        
+        if not handwritten and not text_is_meaningful(note_text):
+            return jsonify({
+                "ok": False,
+                "needs_ocr": True,
+                "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
+            }), 200
+        
+        if handwritten and filename.endswith(".pdf"):
+            ocr_text, ocr_err = ocr_pdf_bytes(data)
+            if ocr_text:
+                note_text = ocr_text
+            else:
+                return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
+        
+        if not note_text:
+            return jsonify({"ok": False, "error": "No text extracted"}), 200
+        
+        job_id = new_job_id()
+        set_job(job_id, status="waiting", updated_at=now_utc_iso())
+        
+        t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
+        t.start()
+        
+        return jsonify({"ok": True, "job_id": job_id}), 200
+        
+    @app.get("/analyze_status")
+    def analyze_status():
+        job_id = (request.args.get("job_id") or "").strip()
+        if not job_id:
+            return jsonify({"ok": False, "error": "Missing job_id"}), 400
+        job = get_job(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "Unknown job_id"}), 404
         return jsonify({"ok": True, **job}), 200
-
-    txt, status, err = fetch_transcribe_result(job_id)
-    if err and status == "failed":
-        set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
+        
+        
+    @app.post("/analyze_text_start")
+    def analyze_text_start():
+        payload = request.get_json(silent=True) or {}
+        note_text = (payload.get("text") or "").strip()
+        if not note_text:
+            return jsonify({"ok": False, "error": "Missing text"}), 400
+        job_id = new_job_id()
+        set_job(job_id, status="waiting", updated_at=now_utc_iso())
+        t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
+        t.start()
+        return jsonify({"ok": True, "job_id": job_id}), 200
+        
+        
+    @app.post("/transcribe_start")
+    def transcribe_start():
+        audio = request.files.get("audio")
+        if not audio:
+            return jsonify({"ok": False, "error": "No audio uploaded"}), 400
+        language = (request.form.get("language") or "auto").strip()
+        ok, msg = aws_ready()
+        if not ok:
+            return jsonify({"ok": False, "error": msg}), 200
+        
+        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+        ext = os.path.splitext((getattr(audio, "filename", "") or ""))[1].lower()
+        if not ext:
+            ext = ".webm"
+        key = f"uploads/{uuid.uuid4().hex}{ext}"
+        s3, _ = aws_clients()
+        try:
+            s3.upload_fileobj(audio.stream, bucket, key)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 200
+        
+        job_name = new_job_id()
+        started, err = start_transcribe_job(job_name, key, language)
+        if not started:
+            return jsonify({"ok": False, "error": err}), 200
+        set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
+        return jsonify({"ok": True, "job_id": job_name}), 200
+        
+        
+    @app.get("/transcribe_status")
+    def transcribe_status():
+        job_id = (request.args.get("job_id") or "").strip()
+        if not job_id:
+            return jsonify({"ok": False, "error": "Missing job_id"}), 400
+        job = get_job(job_id)
+        if not job:
+            return jsonify({"ok": False, "error": "Unknown job_id"}), 404
+        
+        if (job.get("status") or "") in ("complete", "error"):
+            return jsonify({"ok": True, **job}), 200
+        
+        txt, status, err = fetch_transcribe_result(job_id)
+        if err and status == "failed":
+            set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
+            return jsonify({"ok": True, **get_job(job_id)}), 200
+        if status == "completed" and txt:
+            set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
+            return jsonify({"ok": True, **get_job(job_id)}), 200
+        # still transcribing
+        set_job(job_id, status="transcribing", updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
-    if status == "completed" and txt:
-        set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
-        return jsonify({"ok": True, **get_job(job_id)}), 200
-    # still transcribing
-    set_job(job_id, status="transcribing", updated_at=now_utc_iso())
-    return jsonify({"ok": True, **get_job(job_id)}), 200
-
-@app.post("/generate_report")
-def generate_report():
-    payload = request.get_json(silent=True) or {}
-    form = payload.get("form") or {}
-    analysis = payload.get("analysis") or {}
-
-    # Normalize patient block to avoid html line breaks leaking into the letter
-    pb_html = (analysis.get("patient_block") or "")
-    pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
-    pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
-    pb_plain = re.sub(r"\n{3,}", "\n\n", pb_plain).strip()
-    analysis["patient_block_plain"] = pb_plain
-
-    # Helper fields used by the prompt
-    form = dict(form) if isinstance(form, dict) else {}
-    doc_type = (form.get("document_type") or "").strip()
-    form["reason_label"] = "Reason for Referral" if doc_type.lower() == "specialist" else "Reason for Report"
-    form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
-    rf = (form.get("reason_for_referral") or "").strip()
-    rd = (form.get("reason_detail") or "").strip()
-    if rf and rd:
-        form["reason_for_referral_combined"] = f"{rf}, {rd}"
-    else:
-        form["reason_for_referral_combined"] = rf or rd
-
-    obj, err = llm_json(letter_prompt(form, analysis))
-    if err or not obj:
-        return jsonify({"ok": False, "error": err or "Generation failed"}), 200
-
-    letter_plain = (obj.get("letter_plain") or "").strip()
-    letter_html = (obj.get("letter_html") or "").strip()
-    # Some model outputs may leak html breaks into the plain text. Normalize.
-    if letter_plain:
-        letter_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", letter_plain, flags=re.IGNORECASE)
-        letter_plain = re.sub(r"<\s*/?p\s*>", "\n", letter_plain, flags=re.IGNORECASE)
-        letter_plain = re.sub(r"<[^>]+>", "", letter_plain)
-        letter_plain = re.sub(r"\n{3,}", "\n\n", letter_plain).strip()
-    if not letter_plain:
-        return jsonify({"ok": False, "error": "Empty output"}), 200
-
-    provider_name = (form.get("from_doctor") or form.get("provider_name") or "").strip()
-    sig_client = bool(form.get("signature_present"))
-    sig_file = True if signature_image_for_provider(provider_name) else False
-    has_signature = sig_client or sig_file
-    letter_plain = finalize_signoff(letter_plain, provider_name, has_signature)
-
-    # Normalize reason label in the top section when models drift
-    want_label = (form.get("reason_label") or "Reason for Report").strip()
-    if want_label:
-        if want_label.lower() == "reason for report":
-            letter_plain = re.sub(r"^Reason\s+for\s+Referral\s*:", "Reason for Report:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
+        
+    @app.post("/generate_report")
+    def generate_report():
+        payload = request.get_json(silent=True) or {}
+        form = payload.get("form") or {}
+        analysis = payload.get("analysis") or {}
+        
+        # Normalize patient block to avoid html line breaks leaking into the letter
+        pb_html = (analysis.get("patient_block") or "")
+        pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
+        pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
+        pb_plain = re.sub(r"\n{3,}", "\n\n", pb_plain).strip()
+        analysis["patient_block_plain"] = pb_plain
+        
+        # Helper fields used by the prompt
+        form = dict(form) if isinstance(form, dict) else {}
+        doc_type = (form.get("document_type") or "").strip()
+        form["reason_label"] = "Reason for Referral" if doc_type.lower() == "specialist" else "Reason for Report"
+        form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
+        rf = (form.get("reason_for_referral") or "").strip()
+        rd = (form.get("reason_detail") or "").strip()
+        if rf and rd:
+            form["reason_for_referral_combined"] = f"{rf}, {rd}"
         else:
-            letter_plain = re.sub(r"^Reason\s+for\s+Report\s*:", "Reason for Referral:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
+            form["reason_for_referral_combined"] = rf or rd
+        
+        obj, err = llm_json(letter_prompt(form, analysis))
+        if err or not obj:
+            return jsonify({"ok": False, "error": err or "Generation failed"}), 200
+        
+        letter_plain = (obj.get("letter_plain") or "").strip()
+        letter_html = (obj.get("letter_html") or "").strip()
+        # Some model outputs may leak html breaks into the plain text. Normalize.
+        if letter_plain:
+            letter_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", letter_plain, flags=re.IGNORECASE)
+            letter_plain = re.sub(r"<\s*/?p\s*>", "\n", letter_plain, flags=re.IGNORECASE)
+            letter_plain = re.sub(r"<[^>]+>", "", letter_plain)
+            letter_plain = re.sub(r"\n{3,}", "\n\n", letter_plain).strip()
+        if not letter_plain:
+            return jsonify({"ok": False, "error": "Empty output"}), 200
+        
+        provider_name = (form.get("from_doctor") or form.get("provider_name") or "").strip()
+        sig_client = bool(form.get("signature_present"))
+        sig_file = True if signature_image_for_provider(provider_name) else False
+        has_signature = sig_client or sig_file
+        letter_plain = finalize_signoff(letter_plain, provider_name, has_signature)
+        
+        # Normalize reason label in the top section when models drift
+        want_label = (form.get("reason_label") or "Reason for Report").strip()
+        if want_label:
+            if want_label.lower() == "reason for report":
+                letter_plain = re.sub(r"^Reason\s+for\s+Referral\s*:", "Reason for Report:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
+            else:
+                letter_plain = re.sub(r"^Reason\s+for\s+Report\s*:", "Reason for Referral:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
+        
+        return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
+    except Exception as e:
+        set_job(job_id, status="error", error=f"Analysis crashed: {e}", updated_at=now_utc_iso())
 
-    return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
 
 def signature_slug(provider_name: str) -> str:
     s = (provider_name or "").strip().lower()
