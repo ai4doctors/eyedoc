@@ -41,6 +41,11 @@ except Exception:
     OpenAI = None
 
 try:
+    from guidelines.enhance import enhance_case
+except Exception:
+    enhance_case = None
+
+try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
@@ -81,178 +86,80 @@ def aws_clients():
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
-def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "dictation") -> Tuple[bool, str]:
-    """Start an AWS Transcribe job.
-
-    mode:
-      dictation: single voice (no diarization)
-      live: multiple voices (speaker diarization)
-    """
+def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
     ok, msg = aws_ready()
     if not ok:
         return False, msg
     bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    _s3, transcribe = aws_clients()
+    s3, transcribe = aws_clients()
     media_uri = s3_uri(bucket, media_key)
-
     args: Dict[str, Any] = {
         "TranscriptionJobName": job_name,
         "Media": {"MediaFileUri": media_uri},
         "OutputBucketName": bucket,
     }
-
-    # Language
     if language and language != "auto":
         args["LanguageCode"] = language
     else:
         args["IdentifyLanguage"] = True
         args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
-
-    # Speaker diarization for live exams
-    m = (mode or "dictation").strip().lower()
-    if m in ("live", "live_exam", "exam"):
-        args["Settings"] = {
-            "ShowSpeakerLabels": True,
-            "MaxSpeakerLabels": 2,
-        }
-
     try:
         transcribe.start_transcription_job(**args)
     except Exception as e:
         return False, str(e)
     return True, ""
 
-def _normalize_marker(s: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", (s or "").lower())).strip()
-
-
-def _build_speaker_segments(data: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Return coarse diarized segments: [{speaker, text}, ...]."""
-    results = data.get("results") or {}
-    speaker_labels = results.get("speaker_labels") or {}
-    segs = speaker_labels.get("segments") or []
-    items = results.get("items") or []
-
-    # Map (start,end) -> content for pronunciations
-    word_map: Dict[Tuple[str, str], str] = {}
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        if it.get("type") != "pronunciation":
-            continue
-        st = it.get("start_time")
-        en = it.get("end_time")
-        alts = it.get("alternatives") or []
-        content = (alts[0].get("content") if alts and isinstance(alts[0], dict) else "")
-        if st and en and content:
-            word_map[(str(st), str(en))] = str(content)
-
-    out: List[Dict[str, str]] = []
-    for seg in segs:
-        if not isinstance(seg, dict):
-            continue
-        spk = seg.get("speaker_label") or ""
-        words: List[str] = []
-        for ref in (seg.get("items") or []):
-            if not isinstance(ref, dict):
-                continue
-            st = str(ref.get("start_time") or "")
-            en = str(ref.get("end_time") or "")
-            w = word_map.get((st, en))
-            if w:
-                words.append(w)
-        if words:
-            out.append({"speaker": str(spk), "text": " ".join(words)})
-
-    return out
-
-
-def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str, Dict[str, Any]]:
-    """Return (transcript_text, status, error, details)."""
+def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
     ok, msg = aws_ready()
     if not ok:
-        return "", "", msg, {}
+        return "", "", msg
     bucket = os.getenv("AWS_S3_BUCKET", "").strip()
     s3, transcribe = aws_clients()
 
-    details: Dict[str, Any] = {}
-
-    def parse_data(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
-        segs = _build_speaker_segments(data)
-        marker = "let's begin the exam"
-        norm_marker = _normalize_marker(marker)
-        doctor_spk = ""
-        for seg in segs:
-            if _normalize_marker(seg.get("text") or "").find(norm_marker) >= 0:
-                doctor_spk = seg.get("speaker") or ""
-                break
-        if not doctor_spk and segs:
-            doctor_spk = segs[0].get("speaker") or ""
-
-        cleaned = ""
-        if doctor_spk:
-            cleaned_parts = [seg.get("text", "").strip() for seg in segs if seg.get("speaker") == doctor_spk and seg.get("text")]
-            cleaned = "\n".join([p for p in cleaned_parts if p]).strip()
-            # Drop everything up to the marker if present
-            low = cleaned.lower()
-            if "let's begin the exam" in low:
-                i = low.index("let's begin the exam") + len("let's begin the exam")
-                cleaned = cleaned[i:].strip()
-
-        meta = {
-            "speaker_segments": segs,
-            "doctor_speaker": doctor_spk,
-            "cleaned_text": cleaned,
-        }
-        return txt, meta
-
-    # Fast path: S3 output json
+    # Fast path: if the output JSON is already in S3, read it directly.
+    # This avoids a common failure mode where GetTranscriptionJob fails
+    # (permissions or wrong region) which otherwise leaves the UI stuck.
     try:
         guess_key = f"{job_name}.json"
         obj = s3.get_object(Bucket=bucket, Key=guess_key)
         body = obj["Body"].read()
         data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt, meta = parse_data(data)
-        details.update(meta)
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
         if txt:
-            return txt, "completed", "", details
+            return txt, "completed", ""
     except Exception:
         pass
-
-    # Fallback: query job then fetch output json from S3
     try:
         r = transcribe.get_transcription_job(TranscriptionJobName=job_name)
     except Exception as e:
-        return "", "failed", str(e), details
-
+        # Make this a real failure so we do not loop forever on errors.
+        return "", "failed", str(e)
     job = (r or {}).get("TranscriptionJob") or {}
     status = (job.get("TranscriptionJobStatus") or "").lower()
     if status not in ("completed", "failed"):
-        return "", status, "", details
+        return "", status, ""
     if status == "failed":
-        return "", status, str(job.get("FailureReason") or "Transcription failed"), details
+        return "", status, str(job.get("FailureReason") or "Transcription failed")
 
     out_uri = (((job.get("Transcript") or {}).get("TranscriptFileUri")) or "").strip()
     if not out_uri:
-        return "", status, "Missing transcript uri", details
+        return "", status, "Missing transcript uri"
 
+    # If output is in the bucket, pull it from S3 for private buckets
     key = ""
     if ".amazonaws.com/" in out_uri:
         key = out_uri.split(".amazonaws.com/", 1)[1]
         key = key.split("?", 1)[0]
     if not key:
-        return "", status, "Unable to parse transcript key", details
-
+        return "", status, "Unable to parse transcript key"
     try:
         obj = s3.get_object(Bucket=bucket, Key=key)
         body = obj["Body"].read()
         data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt, meta = parse_data(data)
-        details.update(meta)
-        return txt, status, "", details
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        return txt, status, ""
     except Exception as e:
-        return "", status, str(e), details
+        return "", status, str(e)
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1030,6 +937,18 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(analysis["plan"][0], dict):
                     analysis["plan"][0]["refs"] = [1]
 
+    # Optional guideline based enhancement (suggestions with citations)
+    if os.getenv("ENABLE_GUIDELINE_ENHANCE", "0").strip() == "1" and enhance_case:
+        def _llm_for_guidelines(prompt: str, schema: dict):
+            obj, err = llm_json(prompt, temperature=0.1)
+            return obj if (not err and isinstance(obj, dict)) else None
+        try:
+            enh = enhance_case(_llm_for_guidelines, note_text=note_text, analysis=analysis)
+            if enh:
+                analysis["guideline_enhancement"] = enh
+        except Exception as _e:
+            pass
+
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 @app.get("/")
@@ -1117,7 +1036,6 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
-    mode = (request.form.get("mode") or "dictation").strip().lower()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1134,10 +1052,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language, mode=mode)
+    started, err = start_transcribe_job(job_name, key, language)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 
@@ -1153,12 +1071,12 @@ def transcribe_status():
     if (job.get("status") or "") in ("complete", "error"):
         return jsonify({"ok": True, **job}), 200
 
-    txt, status, err, details = fetch_transcribe_result(job_id)
+    txt, status, err = fetch_transcribe_result(job_id)
     if err and status == "failed":
         set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
     if status == "completed" and txt:
-        set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso(), **details)
+        set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
     # still transcribing
     set_job(job_id, status="transcribing", updated_at=now_utc_iso())
