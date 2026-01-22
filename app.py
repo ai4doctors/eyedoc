@@ -252,7 +252,7 @@ def text_is_meaningful(text: str) -> bool:
     ratio = alpha / max(len(s), 1)
     return ratio >= 0.25
 
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 10) -> Tuple[str, str]:
     """Return OCR text and an error string."""
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
@@ -260,14 +260,34 @@ def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
         return "", f"Could not open PDF for OCR: {e}"
-    parts: List[str] = []
+    def render_ocr(zoom: float, pages: int) -> List[str]:
+        out: List[str] = []
+        mat = fitz.Matrix(zoom, zoom)
+        for i in range(pages):
+            try:
+                page = doc.load_page(i)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                try:
+                    img = img.convert("RGB")
+                except Exception:
+                    pass
+                out.append(pytesseract.image_to_string(img) or "")
+            except Exception:
+                out.append("")
+        return out
+
     try:
         pages = min(len(doc), max_pages)
-        for i in range(pages):
-            page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=220)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            parts.append(pytesseract.image_to_string(img) or "")
+        # First pass keeps memory use modest.
+        parts = render_ocr(zoom=2.0, pages=pages)
+
+        # If OCR yields almost nothing, do a small higher resolution retry on the first pages.
+        joined = "\n".join(parts).strip()
+        if (not joined) or (len(joined) < 200):
+            retry_pages = min(pages, 3)
+            retry = render_ocr(zoom=3.0, pages=retry_pages)
+            parts = retry + parts[retry_pages:]
     except Exception as e:
         return "", f"OCR failed: {e}"
     finally:
@@ -1112,7 +1132,7 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 
-def run_analysis_upload_job(job_id: str, filename: str, data: bytes) -> None:
+def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False) -> None:
     """Extract text (with OCR when needed) then run analysis."""
     set_job(job_id, status="processing", updated_at=now_utc_iso())
 
@@ -1126,7 +1146,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes) -> None:
             except Exception:
                 note_text = ""
 
-            if not text_is_meaningful(note_text):
+            if force_ocr or (not text_is_meaningful(note_text)):
                 ocr_text, ocr_err = ocr_pdf_bytes(data)
                 if ocr_err:
                     set_job(job_id, status="error", error=ocr_err, updated_at=now_utc_iso())
@@ -1174,7 +1194,8 @@ def analyze_start():
     job_id = new_job_id()
     set_job(job_id, status="waiting", updated_at=now_utc_iso())
 
-    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data), daemon=True)
+    force_ocr = (request.form.get("handwritten") or "").strip() in {"1", "true", "yes", "on"}
+    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr), daemon=True)
     t.start()
 
     return jsonify({"ok": True, "job_id": job_id}), 200
