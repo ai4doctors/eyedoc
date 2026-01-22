@@ -484,6 +484,10 @@ body{
   margin-top:14px;
   flex-wrap:wrap;
 }
+.recordControls .recBtn{
+  flex: 1 1 120px;
+  min-width: 120px;
+}
 .recordGrid{margin-top:18px}
 .transcriptBox{
   width:100%;
