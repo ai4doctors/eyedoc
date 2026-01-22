@@ -1,0 +1,20 @@
+{
+  "specialty": "dry_eye",
+  "version": "v1",
+  "fields": [
+    {"key": "symptoms", "label": "Symptoms", "type": "list", "required": true},
+    {"key": "duration", "label": "Duration", "type": "string", "required": false},
+    {"key": "triggers", "label": "Triggers", "type": "list", "required": false},
+    {"key": "medications", "label": "Medications", "type": "list", "required": false},
+    {"key": "contact_lens", "label": "Contact lens", "type": "string", "required": false},
+    {"key": "systemic_risk_factors", "label": "Systemic risk factors", "type": "list", "required": false},
+    {"key": "ocular_surface_signs", "label": "Ocular surface signs", "type": "list", "required": true},
+    {"key": "lid_margin_findings", "label": "Lid margin findings", "type": "list", "required": true},
+    {"key": "meibomian_assessment", "label": "Meibomian assessment", "type": "string", "required": true},
+    {"key": "tear_film_tests", "label": "Tear film tests", "type": "list", "required": false},
+    {"key": "staining", "label": "Staining", "type": "string", "required": false},
+    {"key": "severity_inputs", "label": "Severity staging inputs", "type": "list", "required": false},
+    {"key": "red_flags", "label": "Red flags", "type": "list", "required": false},
+    {"key": "current_treatment", "label": "Current treatment", "type": "list", "required": false}
+  ]
+}

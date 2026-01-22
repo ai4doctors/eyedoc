@@ -41,6 +41,11 @@ except Exception:
     OpenAI = None
 
 try:
+    from guidelines.engine import run_guideline_engine
+except Exception:
+    run_guideline_engine = None
+
+try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
@@ -81,7 +86,7 @@ def aws_clients():
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
-def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "live") -> Tuple[bool, str]:
+def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
     ok, msg = aws_ready()
     if not ok:
         return False, msg
@@ -98,11 +103,6 @@ def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str
     else:
         args["IdentifyLanguage"] = True
         args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
-
-    mode_val = (mode or "live").strip().lower()
-    if mode_val == "live":
-        args["Settings"] = {"ShowSpeakerLabels": True, "MaxSpeakerLabels": 2}
-
     try:
         transcribe.start_transcription_job(**args)
     except Exception as e:
@@ -588,113 +588,114 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
 
 
 
-def canonical_reference_pool(labels):
-    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
-    pool = []
 
-    def add(pmid, citation, url="", source=""):
-        pool.append({
-            "pmid": (pmid or ""),
-            "citation": (citation or ""),
-            "url": (url or ""),
-            "source": (source or ""),
-        })
+def canonical_reference_pool(dx_labels: List[str], specialty: str = "ophthalmology") -> List[Dict[str, Any]]:
+    """
+    Returns a list of canonical references grounded in the local guideline store when available.
 
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
-        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
-        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
-        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
+    Important
+    This avoids guessing citations. If the canonical store is empty, this returns an empty list.
+    """
+    try:
+        from guidelines.store import VectorStore
+    except Exception:
+        return []
 
-    if "myopia" in blob:
-        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
+    dbp = (os.getenv("GUIDELINE_DB_PATH") or "guidelines/guidelines.sqlite").strip()
+    if not os.path.exists(dbp):
+        return []
 
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
-        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
-        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
-        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return []
 
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
-        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
-        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
+    try:
+        from openai import OpenAI
+    except Exception:
+        return []
 
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
-        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
-        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
-        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
+    embed_model = (os.getenv("OPENAI_EMBED_MODEL") or "text-embedding-3-small").strip()
+    client = OpenAI(api_key=api_key)
 
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
-        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+    try:
+        store = VectorStore.load(dbp)
+    except Exception:
+        return []
 
-    if "uveitis" in blob:
-        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
+    labels = [x for x in (dx_labels or []) if isinstance(x, str) and x.strip()]
+    if not labels:
+        return []
 
-    if "cataract" in blob:
-        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
-        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
+    refs_by_citation: Dict[str, Dict[str, Any]] = {}
+    for term in labels[:10]:
+        q = term.strip()
+        try:
+            emb = client.embeddings.create(model=embed_model, input=[q]).data[0].embedding
+        except Exception:
+            continue
+        try:
+            hits = store.search(emb, specialty=specialty, k=6)
+        except Exception:
+            continue
+        for h in hits:
+            cid = (h.get("citation_id") or "").strip()
+            if not cid:
+                continue
+            if cid in refs_by_citation:
+                continue
+            refs_by_citation[cid] = {
+                "stable_id": cid,
+                "title": h.get("title") or "",
+                "year": h.get("year") or "",
+                "source": h.get("title") or "",
+                "version": h.get("version") or "",
+                "section": h.get("section") or "",
+                "page": h.get("page") or "",
+                "url": "",
+            }
 
-    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+    refs = list(refs_by_citation.values())
+    refs.sort(key=lambda r: (str(r.get("title") or ""), str(r.get("stable_id") or "")))
+    return refs
 
-    return pool[:10]
 
 
-def merge_references(pubmed_refs, canonical_refs, max_total=18):
-    seen = set()
-    merged = []
+def merge_references(canonical: List[Dict[str, Any]], pubmed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Canonical first, PubMed second.
+    De dupes using stable_id when present, otherwise by normalized title.
+    """
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
 
-    def norm_cit(s):
-        return re.sub(r"\s+", " ", (s or "").strip().lower())
+    def key_for(r: Dict[str, Any]) -> str:
+        sid = (r.get("stable_id") or r.get("citation_id") or "").strip()
+        if sid:
+            return "sid:" + sid.lower()
+        t = (r.get("title") or "").strip().lower()
+        t = re.sub(r"\s+", " ", t)
+        return "t:" + t
 
-    def key_for(r):
-        pmid = (r.get("pmid") or "").strip()
-        if pmid:
-            return "pmid:" + pmid
-        return "cit:" + norm_cit(r.get("citation"))
-
-    for r in (pubmed_refs or []):
+    for r in (canonical or []):
         if not isinstance(r, dict):
             continue
         k = key_for(r)
         if k in seen:
             continue
         seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
+        out.append(r)
 
-    for r in (canonical_refs or []):
+    for r in (pubmed or []):
         if not isinstance(r, dict):
             continue
         k = key_for(r)
         if k in seen:
             continue
         seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
+        out.append(r)
 
-    numbered = []
-    for i, r in enumerate(merged[:max_total], start=1):
-        pmid = (r.get("pmid") or "").strip()
-        url = (r.get("url") or "").strip()
-        if (not url) and pmid:
-            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-        numbered.append({
-            "number": str(i),
-            "pmid": pmid,
-            "citation": (r.get("citation") or ""),
-            "url": url,
-            "source": (r.get("source") or ("PubMed" if pmid else "")),
-        })
-    return numbered
+    return out
+
 
 
 def preferred_ref_numbers(label, references):
@@ -943,19 +944,29 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
-    # Fetch PubMed references based on diagnoses
-    terms = []
+    
+    # Canonical references are primary
+    dx_labels = []
     for dx in analysis.get("diagnoses") or []:
         if isinstance(dx, dict):
             label = (dx.get("label") or "").strip()
             if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
-    analysis['references'] = merge_references(references, canonical)
+                dx_labels.append(label)
 
-    # Assign citation numbers
-    if references:
+    specialty = (os.getenv("CANONICAL_SPECIALTY") or "ophthalmology").strip()
+    canonical = canonical_reference_pool(dx_labels, specialty=specialty)
+
+    # PubMed references are optional supporting evidence
+    use_pubmed = (os.getenv("USE_PUBMED_REFERENCES") or "0").strip().lower() in ("1","true","yes","on")
+    pubmed_refs: List[Dict[str, Any]] = []
+    if use_pubmed:
+        terms = [x for x in dx_labels if x]
+        pubmed_refs = pubmed_fetch_for_terms(terms)
+
+    analysis["references"] = merge_references(canonical, pubmed_refs)
+
+# Assign citation numbers
+    if analysis.get("references"):
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
         if not cites_err and cites_obj:
             dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
@@ -987,6 +998,148 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             if isinstance(analysis.get("plan"), list) and analysis["plan"]:
                 if isinstance(analysis["plan"][0], dict):
                     analysis["plan"][0]["refs"] = [1]
+
+    # Canonical guideline engine (dry eye flagship)
+    if run_guideline_engine:
+        try:
+            lanes, audit = run_guideline_engine(llm_json, note_text=note_text, analysis=analysis)
+            if lanes:
+                refs = list(analysis.get("references") or [])
+                max_n = 0
+                for r in refs:
+                    try:
+                        max_n = max(max_n, int(r.get("number") or 0))
+                    except Exception:
+                        pass
+                id_to_num = {}
+                for r in refs:
+                    sid = r.get("stable_id")
+                    if sid:
+                        try:
+                            id_to_num[sid] = int(r.get("number") or 0)
+                        except Exception:
+                            pass
+                citations = lanes.get("citations") or []
+                for c in citations:
+                    sid = (c.get("citation_id") or "").strip()
+                    if not sid:
+                        continue
+                    if sid in id_to_num and id_to_num[sid]:
+                        continue
+                    max_n += 1
+                    id_to_num[sid] = max_n
+                    title = (c.get("title") or "").strip()
+                    year = str(c.get("year") or "").strip()
+                    version = (c.get("version") or "").strip()
+                    section = (c.get("section") or "").strip()
+                    page = str(c.get("page") or "").strip()
+                    parts = [p for p in [title, version, year, section] if p]
+                    cite = " ".join(parts)
+                    if page:
+                        cite = (cite + " p" + page).strip()
+                    refs.append({"number": max_n, "citation": cite, "pmid": "", "source": "Canonical", "url": "", "stable_id": sid})
+                analysis["references"] = refs
+
+                def _map_items(items):
+                    out = []
+                    for x in (items or []):
+                        if not isinstance(x, dict):
+                            out.append(x)
+                            continue
+                        rids = x.get("citation_ids") or x.get("refs") or []
+                        mapped = []
+                        for rid in rids:
+                            n = id_to_num.get(rid)
+                            if n:
+                                mapped.append(int(n))
+                        y = dict(x)
+                        y.pop("citation_ids", None)
+                        y["refs"] = mapped
+                        out.append(y)
+                    return out
+
+                lanes2 = dict(lanes)
+                lanes2["documented"] = _map_items(lanes.get("documented"))
+                lanes2["suggested_plan"] = _map_items(lanes.get("suggested_plan"))
+                lanes2.pop("citations", None)
+                analysis["guideline_lanes"] = lanes2
+                analysis["guideline_audit"] = audit
+        except Exception:
+            pass
+
+    
+    # Canonical guideline engine (dry eye flagship)
+        if run_guideline_engine:
+            try:
+                lanes, audit = run_guideline_engine(llm_json, note_text=note_text, analysis=analysis)
+                if lanes:
+                    refs = list(analysis.get("references") or [])
+                    max_n = 0
+                    for r in refs:
+                        try:
+                            max_n = max(max_n, int(r.get("number") or 0))
+                        except Exception:
+                            pass
+                    id_to_num = {}
+                    for r in refs:
+                        sid = (r.get("stable_id") or "").strip()
+                        if sid:
+                            try:
+                                id_to_num[sid] = int(r.get("number") or 0)
+                            except Exception:
+                                pass
+
+                    citations = lanes.get("citations") or []
+                    for c in citations:
+                        sid = (c.get("citation_id") or "").strip()
+                        if not sid:
+                            continue
+                        if sid in id_to_num and id_to_num[sid]:
+                            continue
+                        max_n += 1
+                        id_to_num[sid] = max_n
+                        title = (c.get("title") or "").strip()
+                        version = (c.get("version") or "").strip()
+                        year = str(c.get("year") or "").strip()
+                        section = (c.get("section") or "").strip()
+                        page = str(c.get("page") or "").strip()
+                        cite = " ".join([x for x in [title, version, year, section, ("p"+page if page else "")] if x]).strip()
+                        refs.append({
+                            "number": max_n,
+                            "citation": cite,
+                            "pmid": "",
+                            "source": "Canonical",
+                            "url": "",
+                            "stable_id": sid
+                        })
+                    analysis["references"] = refs
+
+                    def _map_list(items):
+                        out = []
+                        for x in (items or []):
+                            if not isinstance(x, dict):
+                                out.append(x)
+                                continue
+                            rids = x.get("citation_ids") or x.get("refs") or []
+                            mapped = []
+                            for rid in rids:
+                                n = id_to_num.get(rid)
+                                if n:
+                                    mapped.append(int(n))
+                            y = dict(x)
+                            y.pop("citation_ids", None)
+                            y["refs"] = mapped
+                            out.append(y)
+                        return out
+
+                    lanes2 = dict(lanes)
+                    lanes2["documented"] = _map_list(lanes.get("documented"))
+                    lanes2["suggested_plan"] = _map_list(lanes.get("suggested_plan"))
+                    lanes2.pop("citations", None)
+                    analysis["guideline_lanes"] = lanes2
+                    analysis["guideline_audit"] = audit
+            except Exception:
+                pass
 
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
@@ -1075,7 +1228,6 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
-    mode = (request.form.get("mode") or "live").strip()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1092,10 +1244,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language, mode)
+    started, err = start_transcribe_job(job_name, key, language)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 

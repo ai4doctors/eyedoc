@@ -1,0 +1,113 @@
+{
+  "specialty": "ophthalmology",
+  "sources": [
+    {
+      "id": "aao_ppp_retina",
+      "title": "AAO Preferred Practice Pattern Retina and Vitreous",
+      "organization": "American Academy of Ophthalmology",
+      "edition": "PPP",
+      "year": null,
+      "license": "copyrighted",
+      "notes": "Typically not freely redistributable. Store metadata and require licensed access or user provided copy for full text indexing."
+    },
+    {
+      "id": "aao_ppp_glaucoma",
+      "title": "AAO Preferred Practice Pattern Primary Open Angle Glaucoma",
+      "organization": "American Academy of Ophthalmology",
+      "edition": "PPP",
+      "year": null,
+      "license": "copyrighted",
+      "notes": "See license note."
+    },
+    {
+      "id": "tfos_dews_iii",
+      "title": "TFOS DEWS III Report",
+      "organization": "Tear Film and Ocular Surface Society",
+      "edition": "DEWS III",
+      "year": null,
+      "license": "mixed",
+      "notes": "If open access, can be indexed from PDF. Otherwise store metadata only."
+    },
+    {
+      "id": "are_ds2",
+      "title": "Age Related Eye Disease Study 2 (AREDS2)",
+      "organization": "National Eye Institute",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index primary publication and key subgroup papers."
+    },
+    {
+      "id": "etdrs",
+      "title": "Early Treatment Diabetic Retinopathy Study (ETDRS)",
+      "organization": "ETDRS Research Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main results and recommendations."
+    },
+    {
+      "id": "drcr_protocol_i",
+      "title": "DRCR Network Protocol I",
+      "organization": "DRCR Retina Network",
+      "edition": "trial_protocol",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index landmark protocol papers for DME."
+    },
+    {
+      "id": "catt",
+      "title": "CATT trial neovascular AMD anti VEGF comparison",
+      "organization": "CATT Research Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main results paper."
+    },
+    {
+      "id": "marina",
+      "title": "MARINA trial ranibizumab for neovascular AMD",
+      "organization": "MARINA Study Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main results paper."
+    },
+    {
+      "id": "anchor",
+      "title": "ANCHOR trial ranibizumab vs PDT for neovascular AMD",
+      "organization": "ANCHOR Study Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main results paper."
+    },
+    {
+      "id": "ohts",
+      "title": "Ocular Hypertension Treatment Study (OHTS)",
+      "organization": "OHTS Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main risk model paper and key follow ups."
+    },
+    {
+      "id": "emgt",
+      "title": "Early Manifest Glaucoma Trial (EMGT)",
+      "organization": "EMGT Group",
+      "edition": "trial",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index main results paper."
+    },
+    {
+      "id": "aaao_uveitis_nomenclature",
+      "title": "Standardization of Uveitis Nomenclature (SUN)",
+      "organization": "SUN Working Group",
+      "edition": "consensus",
+      "year": null,
+      "license": "open_access",
+      "notes": "Index consensus definitions and grading."
+    }
+  ]
+}

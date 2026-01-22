@@ -1348,3 +1348,66 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
+
+function renderGuidelines(){
+  const box = el("guidelineBox")
+  if(!box){ return }
+  const lanes = latestAnalysis ? latestAnalysis.guideline_lanes : null
+  if(!lanes){
+    box.textContent = "No guideline suggestions yet."
+    return
+  }
+  const documented = lanes.documented || []
+  const missing = lanes.missing_but_important || []
+  const suggested = lanes.suggested_plan || []
+
+  let html = ""
+
+  function fmtRefs(refs){
+    if(!refs || !refs.length){ return "" }
+    const s = refs.join(", ")
+    return ` <span class="muted">[${s}]</span>`
+  }
+
+  html += "<div class=\"panelInner\">"
+
+  html += "<div class=\"sectionTitle\"><b>Documented</b> <span class=\"muted\">what is clearly present</span></div>"
+  if(!documented.length){
+    html += "<div class=\"muted\">No documented checklist items were extracted.</div>"
+  }else{
+    documented.forEach(it => {
+      const label = (it.label || it.key || "").toString()
+      const val = Array.isArray(it.value) ? it.value.join(", ") : (it.value || "")
+      const refs = it.refs || []
+      html += `<div><b>${escapeHtml(label)}:</b> ${escapeHtml(val)}${fmtRefs(refs)}</div>`
+    })
+  }
+
+  html += "<div style=\"height:10px\"></div>"
+
+  html += "<div class=\"sectionTitle\"><b>Missing but important</b> <span class=\"muted\">what to ask or measure next</span></div>"
+  if(!missing.length){
+    html += "<div class=\"muted\">No gaps detected.</div>"
+  }else{
+    missing.forEach(it => {
+      html += `<div>• ${escapeHtml(it)}</div>`
+    })
+  }
+
+  html += "<div style=\"height:10px\"></div>"
+
+  html += "<div class=\"sectionTitle\"><b>Suggested plan</b> <span class=\"muted\">evidence aligned options</span></div>"
+  if(!suggested.length){
+    html += "<div class=\"muted\">No guideline based plan suggestions yet.</div>"
+  }else{
+    suggested.forEach(it => {
+      const txt = (it.text || "").toString()
+      const refs = it.refs || []
+      const conf = it.confidence ? ` <span class="muted">(${escapeHtml(it.confidence)})</span>` : ""
+      html += `<div>• ${escapeHtml(txt)}${fmtRefs(refs)}${conf}</div>`
+    })
+  }
+
+  html += "</div>"
+  box.innerHTML = html
+}
