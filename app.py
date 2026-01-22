@@ -81,141 +81,246 @@ def aws_clients():
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
-def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "live") -> Tuple[bool, str]:
+def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
     ok, msg = aws_ready()
     if not ok:
         return False, msg
-
     bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    region = (os.getenv("AWS_REGION") or "us-east-1").strip()
-    media_format = os.path.splitext(media_key)[1].lstrip(".") or "webm"
-
+    s3, transcribe = aws_clients()
+    media_uri = s3_uri(bucket, media_key)
     args: Dict[str, Any] = {
         "TranscriptionJobName": job_name,
-        "Media": {"MediaFileUri": f"s3://{bucket}/{media_key}"},
-        "MediaFormat": media_format,
+        "Media": {"MediaFileUri": media_uri},
         "OutputBucketName": bucket,
-        "OutputKey": f"transcripts/{job_name}.json",
     }
-
-    if language != "auto":
+    if language and language != "auto":
         args["LanguageCode"] = language
     else:
         args["IdentifyLanguage"] = True
-        args["LanguageOptions"] = ["en-US", "es-US", "pt-BR", "fr-CA"]
-        args["PreferredLanguage"] = "en-US"
-
-    mode_norm = (mode or "live").strip().lower()
-    if mode_norm in {"live", "live_exam", "exam"}:
-        args["Settings"] = {"ShowSpeakerLabels": True, "MaxSpeakerLabels": 2}
-
-    transcribe = boto3.client("transcribe", region_name=region)
+        args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
     try:
         transcribe.start_transcription_job(**args)
-        return True, ""
     except Exception as e:
         return False, str(e)
+    return True, ""
 
-
-def _build_speaker_transcript(transcribe_json: dict) -> str:
-    results = transcribe_json.get("results") or {}
-    items = results.get("items") or []
-    speaker = (results.get("speaker_labels") or {})
-    segments = speaker.get("segments") or []
-    if not items or not segments:
-        return ""
-
-    start_to_speaker: Dict[str, str] = {}
-    for seg in segments:
-        sp = seg.get("speaker_label")
-        for it in (seg.get("items") or []):
-            st = it.get("start_time")
-            if st and sp:
-                start_to_speaker[st] = sp
-
-    current = None
-    out_parts: list[str] = []
-    for it in items:
-        it_type = it.get("type")
-        alts = it.get("alternatives") or []
-        content = (alts[0].get("content") if alts else "") or ""
-        if it_type == "pronunciation":
-            st = it.get("start_time")
-            sp = start_to_speaker.get(st) or current
-            if sp and sp != current:
-                label = sp.replace("speaker_", "Speaker ")
-                if out_parts:
-                    out_parts.append("\n\n")
-                out_parts.append(f"{label}: ")
-                current = sp
-            out_parts.append(content)
-            out_parts.append(" ")
-        elif it_type == "punctuation":
-            if out_parts:
-                out_parts[-1] = out_parts[-1].rstrip() + content + " "
-
-    return "".join(out_parts).strip()
-
-
-def fetch_transcribe_result(job_name: str, mode: str = "live") -> Tuple[str, str, str]:
+def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
     ok, msg = aws_ready()
     if not ok:
-        return "", "failed", msg
-
+        return "", "", msg
     bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    region = (os.getenv("AWS_REGION") or "us-east-1").strip()
-    s3, _ = aws_clients()
-    key_guess = f"transcripts/{job_name}.json"
+    s3, transcribe = aws_clients()
 
-    def _extract_plain(d: dict) -> str:
-        return (((d.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
-
-    mode_norm = (mode or "live").strip().lower()
-
+    # Fast path: if the output JSON is already in S3, read it directly.
+    # This avoids a common failure mode where GetTranscriptionJob fails
+    # (permissions or wrong region) which otherwise leaves the UI stuck.
     try:
-        obj = s3.get_object(Bucket=bucket, Key=key_guess)
-        raw = obj["Body"].read()
-        data = json.loads(raw.decode("utf-8", errors="ignore"))
-        if mode_norm in {"live", "live_exam", "exam"}:
-            speaker_txt = _build_speaker_transcript(data)
-            if speaker_txt:
-                return speaker_txt, "completed", ""
-        return _extract_plain(data), "completed", ""
+        guess_key = f"{job_name}.json"
+        obj = s3.get_object(Bucket=bucket, Key=guess_key)
+        body = obj["Body"].read()
+        data = json.loads(body.decode("utf-8", errors="ignore"))
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        if txt:
+            return txt, "completed", ""
+    except Exception:
+        pass
+    try:
+        r = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+    except Exception as e:
+        # Make this a real failure so we do not loop forever on errors.
+        return "", "failed", str(e)
+    job = (r or {}).get("TranscriptionJob") or {}
+    status = (job.get("TranscriptionJobStatus") or "").lower()
+    if status not in ("completed", "failed"):
+        return "", status, ""
+    if status == "failed":
+        return "", status, str(job.get("FailureReason") or "Transcription failed")
+
+    out_uri = (((job.get("Transcript") or {}).get("TranscriptFileUri")) or "").strip()
+    if not out_uri:
+        return "", status, "Missing transcript uri"
+
+    # If output is in the bucket, pull it from S3 for private buckets
+    key = ""
+    if ".amazonaws.com/" in out_uri:
+        key = out_uri.split(".amazonaws.com/", 1)[1]
+        key = key.split("?", 1)[0]
+    if not key:
+        return "", status, "Unable to parse transcript key"
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        body = obj["Body"].read()
+        data = json.loads(body.decode("utf-8", errors="ignore"))
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        return txt, status, ""
+    except Exception as e:
+        return "", status, str(e)
+
+def now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+def clamp_text(s: str, limit: int) -> str:
+    return (s or "")[:limit]
+
+def extract_pdf_text(file_storage) -> str:
+    reader = PyPDF2.PdfReader(file_storage)
+    parts: List[str] = []
+    for page in reader.pages:
+        parts.append(page.extract_text() or "")
+    return "\n".join(parts).strip()
+
+def text_is_meaningful(text: str) -> bool:
+    s = (text or "").strip()
+    if len(s) < 250:
+        return False
+    alpha = sum(1 for ch in s if ch.isalpha())
+    ratio = alpha / max(len(s), 1)
+    return ratio >= 0.25
+
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+    if fitz is None or Image is None or pytesseract is None:
+        return "", "OCR dependencies missing"
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        return "", f"Could not open PDF for OCR: {e}"
+    parts: List[str] = []
+    try:
+        pages = min(len(doc), max_pages)
+        for i in range(pages):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(dpi=220)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            parts.append(pytesseract.image_to_string(img) or "")
+    except Exception as e:
+        return "", f"OCR failed: {e}"
+    return "\n".join(parts).strip(), ""
+
+def extract_text_from_upload(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
+    """Returns text, used_ocr, needs_ocr, error"""
+    filename = (getattr(file_storage, "filename", "") or "").lower()
+    data = file_storage.read()
+    file_storage.stream.seek(0)
+
+    extracted = ""
+    if filename.endswith(".pdf"):
+        try:
+            extracted = extract_pdf_text(io.BytesIO(data))
+        except Exception:
+            extracted = ""
+
+        if text_is_meaningful(extracted) and not force_ocr:
+            return extracted, False, False, ""
+
+        if not force_ocr:
+            return extracted, False, True, ""
+
+        ocr_text, err = ocr_pdf_bytes(data)
+        if err:
+            return extracted, False, True, err
+        best = ocr_text if text_is_meaningful(ocr_text) or len(ocr_text) > len(extracted) else extracted
+        return best, True, False, ""
+
+    # Image uploads
+    if force_ocr:
+        if Image is None or pytesseract is None:
+            return "", False, True, "OCR dependencies missing"
+        try:
+            img = Image.open(io.BytesIO(data))
+            text = pytesseract.image_to_string(img) or ""
+            return text.strip(), True, False, ""
+        except Exception as e:
+            return "", False, True, f"OCR failed: {e}"
+
+    return "", False, True, "Unsupported file type"
+
+def is_meaningful_text(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) < 250:
+        return False
+    letters = sum(1 for c in t if c.isalpha())
+    ratio = letters / max(1, len(t))
+    return ratio >= 0.25
+
+def ocr_ready() -> Tuple[bool, str]:
+    if fitz is None:
+        return False, "PyMuPDF not available"
+    if Image is None:
+        return False, "Pillow not available"
+    if pytesseract is None:
+        return False, "pytesseract not available"
+    return True, ""
+
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
+    ok, _ = ocr_ready()
+    if not ok:
+        return ""
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception:
+        return ""
+    parts: List[str] = []
+    try:
+        pages = min(len(doc), max_pages)
+        for i in range(pages):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(dpi=220)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            txt = pytesseract.image_to_string(img) or ""
+            parts.append(txt)
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
+    return "\n".join(parts).strip()
+
+def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
+    """
+    Returns: text, used_ocr, needs_ocr, error
+    """
+    try:
+        pdf_bytes = file_storage.read()
+    except Exception:
+        return "", False, False, "Unable to read uploaded file"
+    # Reset stream for any later reads
+    try:
+        file_storage.stream.seek(0)
     except Exception:
         pass
 
-    transcribe = boto3.client("transcribe", region_name=region)
+    extracted = ""
     try:
-        job = transcribe.get_transcription_job(TranscriptionJobName=job_name)
-        status = job.get("TranscriptionJob", {}).get("TranscriptionJobStatus")
-        if status in ("IN_PROGRESS", "QUEUED"):
-            return "", "in_progress", ""
-        if status != "COMPLETED":
-            reason = job.get("TranscriptionJob", {}).get("FailureReason") or "Transcription failed"
-            return "", "failed", reason
+        extracted = extract_pdf_text(io.BytesIO(pdf_bytes))
+    except Exception:
+        extracted = ""
 
-        uri = job.get("TranscriptionJob", {}).get("Transcript", {}).get("TranscriptFileUri")
-        if not uri:
-            return "", "failed", "Missing transcript URI"
+    if is_meaningful_text(extracted) and not force_ocr:
+        return extracted, False, False, ""
 
-        m = re.match(r"https?://([^/]+)/(.+)", uri)
-        if not m:
-            return "", "failed", "Unexpected transcript URI"
-        transcript_key = m.group(2)
+    # If not meaningful and OCR not requested, ask for OCR
+    if (not is_meaningful_text(extracted)) and (not force_ocr):
+        return "", False, True, "No readable text extracted"
 
-        obj = s3.get_object(Bucket=bucket, Key=transcript_key)
-        raw = obj["Body"].read()
-        data = json.loads(raw.decode("utf-8", errors="ignore"))
+    # OCR path
+    ok, msg = ocr_ready()
+    if not ok:
+        return "", False, False, f"OCR not available: {msg}"
+    ocr_text = ocr_pdf_bytes(pdf_bytes)
+    if is_meaningful_text(ocr_text):
+        return ocr_text, True, False, ""
+    # Fall back to whatever we extracted
+    if extracted.strip():
+        return extracted, True, False, ""
+    return "", True, False, "OCR produced no readable text"
 
-        if mode_norm in {"live", "live_exam", "exam"}:
-            speaker_txt = _build_speaker_transcript(data)
-            if speaker_txt:
-                return speaker_txt, "completed", ""
-
-        return _extract_plain(data), "completed", ""
-    except Exception as e:
-        return "", "failed", str(e)
-
+def client_ready() -> Tuple[bool, str]:
+    if OpenAI is None:
+        return False, "OpenAI SDK not installed"
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        return False, "OPENAI_API_KEY is missing"
+    return True, ""
 
 def model_name() -> str:
     return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4.1")
@@ -839,23 +944,15 @@ def analyze_start():
     if not file:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
 
+    handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
+
     filename = (getattr(file, "filename", "") or "").lower()
     data = file.read()
     file.stream = io.BytesIO(data)
 
     note_text = ""
     if filename.endswith(".pdf"):
-        try:
-            note_text = extract_pdf_text(io.BytesIO(data))
-        except Exception:
-            note_text = ""
-        if not text_is_meaningful(note_text):
-            ocr_text, ocr_err = ocr_pdf_bytes(data)
-            if ocr_text:
-                note_text = ocr_text
-            else:
-                return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
-
+        note_text = extract_pdf_text(file.stream)
     elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
         if Image is None or pytesseract is None:
             return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
@@ -867,6 +964,20 @@ def analyze_start():
     else:
         return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
 
+    if not handwritten and not text_is_meaningful(note_text):
+        return jsonify({
+            "ok": False,
+            "needs_ocr": True,
+            "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
+        }), 200
+
+    if handwritten and filename.endswith(".pdf"):
+        ocr_text, ocr_err = ocr_pdf_bytes(data)
+        if ocr_text:
+            note_text = ocr_text
+        else:
+            return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
+
     if not note_text:
         return jsonify({"ok": False, "error": "No text extracted"}), 200
 
@@ -877,7 +988,6 @@ def analyze_start():
     t.start()
 
     return jsonify({"ok": True, "job_id": job_id}), 200
-
 
 @app.get("/analyze_status")
 def analyze_status():
@@ -909,7 +1019,6 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
-    mode = (request.form.get("mode") or "live").strip().lower()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -926,10 +1035,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language, mode)
+    started, err = start_transcribe_job(job_name, key, language)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 
@@ -945,7 +1054,7 @@ def transcribe_status():
     if (job.get("status") or "") in ("complete", "error"):
         return jsonify({"ok": True, **job}), 200
 
-    txt, status, err = fetch_transcribe_result(job_id, (job.get("mode") or "live"))
+    txt, status, err = fetch_transcribe_result(job_id)
     if err and status == "failed":
         set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200

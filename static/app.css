@@ -622,28 +622,3 @@ body{
 .sectionTitle b{
   font-weight:900;
 }
-.recordMode label{
-  display:block;
-  font-size:12px;
-  opacity:0.85;
-  margin-bottom:6px;
-}
-.recordMode select{
-  width:100%;
-}
-.recordSwapRow{
-  display:flex;
-  justify-content:flex-end;
-  margin-top:8px;
-}
-.btnSecondary{
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-}
-.btnSecondary:hover{
-  border-color: rgba(255,255,255,0.22);
-}
-.smallBtn{
-  padding:10px 14px;
-  min-width:160px;
-}
