@@ -1,7 +1,8 @@
 services:
   - type: web
-    name: ai4health
-    env: python
+    name: maneiro
+    env: docker
     plan: starter
-    buildCommand: apt-get update && apt-get install -y tesseract-ocr && pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: gunicorn app:app --timeout 180
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /healthz
