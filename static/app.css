@@ -207,6 +207,15 @@ body{
   min-height:360px;
 }
 
+
+
+/* Cap tall output panels so STEP 2 stays visible */
+#dxBox, #planBox, #refBox{
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
 .itemTitle{
   font-weight:900;
   margin-top:12px;
@@ -621,12 +630,4 @@ body{
 }
 .sectionTitle b{
   font-weight:900;
-}
-
-/* References scroll cap */
-.references-container,
-.references,
-.references-column {
-  max-height: 35vh;
-  overflow-y: auto;
 }
