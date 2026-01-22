@@ -913,6 +913,29 @@ let recChunks = []
 let recTimerInt = null
 let recStartMs = 0
 let transcribeJobId = ""
+let recordModeValue = "live"
+let recordModeInitDone = false
+function setRecordMode(mode){
+  recordModeValue = (mode === "dictation") ? "dictation" : "live"
+  const liveBtn = el("modeLive")
+  const dictBtn = el("modeDictation")
+  if(liveBtn){ liveBtn.classList.toggle("active", recordModeValue === "live"); liveBtn.setAttribute("aria-pressed", recordModeValue === "live" ? "true" : "false") }
+  if(dictBtn){ dictBtn.classList.toggle("active", recordModeValue === "dictation"); dictBtn.setAttribute("aria-pressed", recordModeValue === "dictation" ? "true" : "false") }
+  const sel = el("recordMode")
+  if(sel){ sel.value = recordModeValue }
+}
+function initRecordModeUI(){
+  if(recordModeInitDone){ return }
+  recordModeInitDone = true
+  const liveBtn = el("modeLive")
+  const dictBtn = el("modeDictation")
+  if(liveBtn){ liveBtn.addEventListener("click", () => setRecordMode("live")) }
+  if(dictBtn){ dictBtn.addEventListener("click", () => setRecordMode("dictation")) }
+  const sel = el("recordMode")
+  if(sel){ sel.addEventListener("change", () => setRecordMode(sel.value || "live")) }
+  setRecordMode(recordModeValue)
+}
+
 
 function openRecord(){
   const m = el("recordModal")
@@ -930,6 +953,10 @@ function openRecord(){
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
+  const modeSel = el("recordMode")
+  if(modeSel){ modeSel.value = modeSel.value || "live" }
+  const swapBtn = el("swapSpeakers")
+  if(swapBtn){ swapBtn.disabled = true }
   el("recStart").disabled = false
   el("recPause").disabled = true
   el("recStop").disabled = true
@@ -1013,6 +1040,8 @@ async function startTranscribeBlob(blob){
   const fd = new FormData()
   const lang = el("recordLang") ? el("recordLang").value : "auto"
   fd.append("language", lang)
+  const mode = el("recordMode") ? (el("recordMode").value || recordModeValue) : recordModeValue
+  fd.append("mode", mode)
   fd.append("audio", blob, "recording.webm")
   const res = await fetch("/transcribe_start", { method:"POST", body: fd })
   const json = await res.json()
@@ -1054,6 +1083,8 @@ async function pollTranscribe(){
       el("recordTranscript").value = txt
       el("recordState").textContent = "Transcript ready"
       el("recSave").disabled = !txt
+    const swapBtn = el("swapSpeakers")
+    if(swapBtn){ swapBtn.disabled = !(txt && txt.includes("Speaker")) }
       return
     }
   }catch(e){
@@ -1101,6 +1132,20 @@ if(el("recStop")){
 if(el("recSave")){
   el("recSave").addEventListener("click", saveTranscriptToAnalyze)
 }
+if(el("swapSpeakers")){
+  el("swapSpeakers").addEventListener("click", () => {
+    const box = el("recordTranscript")
+    if(!box){ return }
+    const t = box.value || ""
+    if(!t.includes("Speaker")){ return }
+    const tmp = "__SPEAKER_TMP__"
+    let out = t
+    out = out.replace(/Speaker\s*0/gi, tmp)
+    out = out.replace(/Speaker\s*1/gi, "Speaker 0")
+    out = out.replace(new RegExp(tmp, "g"), "Speaker 1")
+    box.value = out
+  })
+}
 el("file").addEventListener("change", async (e) => {
   const f = e.target.files && e.target.files[0]
   if(!f){
@@ -1115,6 +1160,10 @@ el("file").addEventListener("change", async (e) => {
     el("recStop").disabled = true
     el("recSave").disabled = true
     el("recordTranscript").value = ""
+  const modeSel = el("recordMode")
+  if(modeSel){ modeSel.value = modeSel.value || "live" }
+  const swapBtn = el("swapSpeakers")
+  if(swapBtn){ swapBtn.disabled = true }
     el("recordState").textContent = "Transcribing"
     await startTranscribeBlob(f)
     return
@@ -1339,6 +1388,7 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
   })
 })
 
+initRecordModeUI()
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()

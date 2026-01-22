@@ -531,57 +531,89 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         return []
 
 
+def pubmed_fetch_for_query(query: str, max_items: int = 6) -> List[Dict[str, str]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    return pubmed_fetch_for_terms([q], max_items=max_items)
+
+
 
 def canonical_reference_pool(labels):
     blob = " ".join([str(x or "") for x in (labels or [])]).lower()
-    pool = []
 
-    def add(pmid, citation, url="", source=""):
-        pool.append({
-            "pmid": (pmid or ""),
-            "citation": (citation or ""),
-            "url": (url or ""),
-            "source": (source or ""),
-        })
+    def has_any(keys):
+        return any(k in blob for k in keys)
 
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
-        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
-        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
-        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
+    queries = []
 
-    if "myopia" in blob:
-        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
+    # Dry eye and ocular surface
+    if has_any(["dry eye", "meibom", "mgd", "blephar", "ocular surface", "tear film"]):
+        queries += [
+            ('"TFOS" AND "DEWS" AND dry eye', "Dry eye"),
+            ('"dry eye" AND "Preferred Practice Pattern"', "Dry eye"),
+        ]
 
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
-        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
-        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
-        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
+    # Cornea
+    if has_any(["cornea", "corneal", "keratitis", "ulcer", "herpes", "keratoconus", "ectasia", "crosslink", "cxl"]):
+        queries += [
+            ("bacterial keratitis guideline", "Cornea"),
+            ("herpes simplex keratitis guideline", "Cornea"),
+        ]
 
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
-        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
-        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
+    # Cataract
+    if has_any(["cataract", "phaco", "pseudophak", "iol"]):
+        queries += [
+            ("cataract surgery guideline", "Cataract"),
+            ('"Preferred Practice Pattern" cataract', "Cataract"),
+        ]
 
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
-        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
-        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
-        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
+    # Glaucoma
+    if has_any(["glaucoma", "ocular hypertension", "iop", "poag", "angle closure", "ntg"]):
+        queries += [
+            ('"European Glaucoma Society" guidelines', "Glaucoma"),
+            ('"Preferred Practice Pattern" primary open angle glaucoma', "Glaucoma"),
+        ]
 
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
-        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+    # Retina
+    if has_any(["retina", "macula", "amd", "diabetic retinopathy", "dme", "rvo", "vein occlusion", "retinal detachment", "rd"]):
+        queries += [
+            ("diabetic retinopathy guideline", "Retina"),
+            ('"age related macular degeneration" guideline', "Retina"),
+        ]
 
-    if "uveitis" in blob:
-        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
+    # Pediatric and strabismus
+    if has_any(["pediatric", "paediatric", "amblyopia", "strabismus", "esotropia", "exotropia"]):
+        queries += [
+            ("amblyopia guideline ophthalmology", "Pediatric"),
+            ("strabismus guideline ophthalmology", "Pediatric"),
+        ]
 
-    if "cataract" in blob:
-        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
-        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
+    # Neuro ophthalmology
+    if has_any(["neuro", "optic neuritis", "papilledema", "iih", "myasthenia", "cranial nerve", "diplopia"]):
+        queries += [
+            ("idiopathic intracranial hypertension guideline", "Neuro"),
+            ("optic neuritis guideline", "Neuro"),
+        ]
 
-    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+    if not queries:
+        queries = [("ophthalmology guideline consensus statement", "Ophthalmology")]
 
-    return pool[:10]
+    out = []
+    seen = set()
+    for q, tag in queries:
+        refs = pubmed_fetch_for_query(q, max_items=4)
+        for r in refs:
+            pmid = (r.get("pmid") or "").strip()
+            if not pmid or pmid in seen:
+                continue
+            seen.add(pmid)
+            r["source"] = "canonical"
+            r["tag"] = tag
+            out.append(r)
+            if len(out) >= 10:
+                return out
+    return out
 
 
 def merge_references(pubmed_refs, canonical_refs, max_total=18):
@@ -964,12 +996,16 @@ def analyze_start():
     else:
         return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
 
-    if not handwritten and not text_is_meaningful(note_text):
-        return jsonify({
-            "ok": False,
-            "needs_ocr": True,
-            "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
-        }), 200
+    if not text_is_meaningful(note_text):
+        # Automatically run OCR for scanned or image based PDFs
+        if filename.endswith(".pdf"):
+            ocr_text, ocr_err = ocr_pdf_bytes(data)
+            if ocr_text:
+                note_text = ocr_text
+            else:
+                return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
+        else:
+            return jsonify({"ok": False, "error": "No readable text extracted"}), 200
 
     if handwritten and filename.endswith(".pdf"):
         ocr_text, ocr_err = ocr_pdf_bytes(data)
@@ -1019,6 +1055,7 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
+    mode = (request.form.get("mode") or "live").strip().lower()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1035,10 +1072,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language)
+    started, err = start_transcribe_job(job_name, key, language, mode)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 
