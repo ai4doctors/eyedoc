@@ -224,6 +224,7 @@ def text_is_meaningful(text: str) -> bool:
     return ratio >= 0.25
 
 def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+    """Return OCR text and an error string."""
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
     try:
@@ -240,6 +241,11 @@ def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
             parts.append(pytesseract.image_to_string(img) or "")
     except Exception as e:
         return "", f"OCR failed: {e}"
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
     return "\n".join(parts).strip(), ""
 
 def extract_text_from_upload(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
@@ -297,30 +303,6 @@ def ocr_ready() -> Tuple[bool, str]:
         return False, "pytesseract not available"
     return True, ""
 
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
-    ok, _ = ocr_ready()
-    if not ok:
-        return ""
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception:
-        return ""
-    parts: List[str] = []
-    try:
-        pages = min(len(doc), max_pages)
-        for i in range(pages):
-            page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=220)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            txt = pytesseract.image_to_string(img) or ""
-            parts.append(txt)
-    finally:
-        try:
-            doc.close()
-        except Exception:
-            pass
-    return "\n".join(parts).strip()
-
 def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
     """
     Returns: text, used_ocr, needs_ocr, error
@@ -352,7 +334,9 @@ def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool
     ok, msg = ocr_ready()
     if not ok:
         return "", False, False, f"OCR not available: {msg}"
-    ocr_text = ocr_pdf_bytes(pdf_bytes)
+    ocr_text, ocr_err = ocr_pdf_bytes(pdf_bytes)
+    if ocr_err:
+        return "", False, False, ocr_err
     if is_meaningful_text(ocr_text):
         return ocr_text, True, False, ""
     # Fall back to whatever we extracted
@@ -1084,15 +1068,22 @@ def analyze_start():
     if not file:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
 
-    handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
-
     filename = (getattr(file, "filename", "") or "").lower()
     data = file.read()
     file.stream = io.BytesIO(data)
 
     note_text = ""
     if filename.endswith(".pdf"):
-        note_text = extract_pdf_text(file.stream)
+        try:
+            note_text = extract_pdf_text(file.stream)
+        except Exception:
+            note_text = ""
+        if not text_is_meaningful(note_text):
+            ocr_text, ocr_err = ocr_pdf_bytes(data)
+            if ocr_err:
+                return jsonify({"ok": False, "error": ocr_err}), 200
+            if ocr_text:
+                note_text = ocr_text
     elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
         if Image is None or pytesseract is None:
             return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
@@ -1103,20 +1094,6 @@ def analyze_start():
             return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
     else:
         return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
-
-    if not handwritten and not text_is_meaningful(note_text):
-        return jsonify({
-            "ok": False,
-            "needs_ocr": True,
-            "error": "No readable text extracted. OCR is required for scanned or handwritten notes."
-        }), 200
-
-    if handwritten and filename.endswith(".pdf"):
-        ocr_text, ocr_err = ocr_pdf_bytes(data)
-        if ocr_text:
-            note_text = ocr_text
-        else:
-            return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
 
     if not note_text:
         return jsonify({"ok": False, "error": "No text extracted"}), 200
