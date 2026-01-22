@@ -69,9 +69,26 @@ APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
 
-# In memory job store
+# Job storage
+#
+# Render often runs multiple workers. An in memory dict means a job created by one
+# worker may be polled from another, producing "Unknown job_id".
+#
+# Store jobs on disk under /tmp so all workers can read the same state, while
+# keeping an in memory cache for speed.
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+JOB_DIR = os.getenv("JOB_DIR", "/tmp/maneiro_jobs")
+
+def _job_path(job_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
+    return os.path.join(JOB_DIR, f"{safe}.json")
+
+def _ensure_job_dir() -> None:
+    try:
+        os.makedirs(JOB_DIR, exist_ok=True)
+    except Exception:
+        pass
 
 def aws_ready() -> Tuple[bool, str]:
     if boto3 is None:
@@ -982,14 +999,34 @@ def new_job_id() -> str:
     return f"job_{int(time.time() * 1000)}_{os.urandom(4).hex()}"
 
 def set_job(job_id: str, **updates: Any) -> None:
+    _ensure_job_dir()
     with JOBS_LOCK:
         job = JOBS.get(job_id) or {}
         job.update(updates)
         JOBS[job_id] = job
+        path = _job_path(job_id)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(job, f, ensure_ascii=False)
+        except Exception:
+            pass
 
 def get_job(job_id: str) -> Dict[str, Any]:
+    _ensure_job_dir()
     with JOBS_LOCK:
-        return dict(JOBS.get(job_id) or {})
+        if job_id in JOBS:
+            return dict(JOBS.get(job_id) or {})
+    path = _job_path(job_id)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            job = json.load(f) or {}
+        if isinstance(job, dict):
+            with JOBS_LOCK:
+                JOBS[job_id] = job
+            return dict(job)
+    except Exception:
+        pass
+    return {}
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
     set_job(job_id, status="processing", updated_at=now_utc_iso())
@@ -1074,6 +1111,53 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
 
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
+
+def run_analysis_upload_job(job_id: str, filename: str, data: bytes) -> None:
+    """Extract text (with OCR when needed) then run analysis."""
+    set_job(job_id, status="processing", updated_at=now_utc_iso())
+
+    name = (filename or "").lower()
+    note_text = ""
+
+    try:
+        if name.endswith(".pdf"):
+            try:
+                note_text = extract_pdf_text(io.BytesIO(data))
+            except Exception:
+                note_text = ""
+
+            if not text_is_meaningful(note_text):
+                ocr_text, ocr_err = ocr_pdf_bytes(data)
+                if ocr_err:
+                    set_job(job_id, status="error", error=ocr_err, updated_at=now_utc_iso())
+                    return
+                if ocr_text:
+                    note_text = ocr_text
+
+        elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            if Image is None or pytesseract is None:
+                set_job(job_id, status="error", error="Image OCR dependencies missing", updated_at=now_utc_iso())
+                return
+            try:
+                img = Image.open(io.BytesIO(data))
+                note_text = (pytesseract.image_to_string(img) or "").strip()
+            except Exception as e:
+                set_job(job_id, status="error", error=f"Image OCR failed: {e}", updated_at=now_utc_iso())
+                return
+        else:
+            set_job(job_id, status="error", error="Unsupported file type for analysis. Use Record exam or upload a PDF or image.", updated_at=now_utc_iso())
+            return
+    except Exception as e:
+        set_job(job_id, status="error", error=f"Extraction failed: {e}", updated_at=now_utc_iso())
+        return
+
+    if not note_text:
+        set_job(job_id, status="error", error="No text extracted", updated_at=now_utc_iso())
+        return
+
+    # Run the main LLM analysis
+    run_analysis_job(job_id, note_text)
+
 @app.get("/")
 def index():
     return render_template("index.html", version=APP_VERSION)
@@ -1086,38 +1170,11 @@ def analyze_start():
 
     filename = (getattr(file, "filename", "") or "").lower()
     data = file.read()
-    file.stream = io.BytesIO(data)
-
-    note_text = ""
-    if filename.endswith(".pdf"):
-        try:
-            note_text = extract_pdf_text(file.stream)
-        except Exception:
-            note_text = ""
-        if not text_is_meaningful(note_text):
-            ocr_text, ocr_err = ocr_pdf_bytes(data)
-            if ocr_err:
-                return jsonify({"ok": False, "error": ocr_err}), 200
-            if ocr_text:
-                note_text = ocr_text
-    elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
-        if Image is None or pytesseract is None:
-            return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
-        try:
-            img = Image.open(io.BytesIO(data))
-            note_text = (pytesseract.image_to_string(img) or "").strip()
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
-    else:
-        return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
-
-    if not note_text:
-        return jsonify({"ok": False, "error": "No text extracted"}), 200
 
     job_id = new_job_id()
     set_job(job_id, status="waiting", updated_at=now_utc_iso())
 
-    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
+    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data), daemon=True)
     t.start()
 
     return jsonify({"ok": True, "job_id": job_id}), 200
