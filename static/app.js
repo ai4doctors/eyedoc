@@ -449,6 +449,15 @@ function setToPrefix(){
   const t = el("recipientType").value
   const v = el("toWhom").value.trim()
 
+  if(t === "Patient"){
+    const nm = (latestAnalysis && latestAnalysis.patient_name) ? String(latestAnalysis.patient_name).trim() : ""
+    if(nm && (!v || v.toLowerCase().startsWith("dr."))){
+      el("toWhom").value = nm
+    }
+    el("toWhom").placeholder = "TO:"
+    return
+  }
+
   const shouldPrefix = (t === "Specialist" || t === "Family physician")
   if(shouldPrefix){
     if(!v){
@@ -521,6 +530,13 @@ function renderDx(){
           meta.appendChild(document.createTextNode(" "))
         }
       })
+    }else{
+      if(aligned){
+        meta.appendChild(document.createTextNode("   "))
+      }
+      const label = document.createElement("span")
+      label.textContent = "General reasoning"
+      meta.appendChild(label)
     }
     wrap.appendChild(meta)
 
@@ -583,6 +599,13 @@ function renderPlan(){
           meta.appendChild(document.createTextNode(" "))
         }
       })
+    }else{
+      if(aligned){
+        meta.appendChild(document.createTextNode("   "))
+      }
+      const label = document.createElement("span")
+      label.textContent = "General reasoning"
+      meta.appendChild(label)
     }
     wrap.appendChild(meta)
 
@@ -670,7 +693,7 @@ function highlightRef(refNum){
   }
 }
 
-async function startAnalyze(){
+async function startAnalyze(triedOcr){
   if(!uploadedFile){
     toast("Select a file first")
     return
@@ -680,7 +703,7 @@ async function startAnalyze(){
   const fd = new FormData()
   fd.append("file", uploadedFile)
 
-  const handwritten = el("handwrittenCheck") && el("handwrittenCheck").checked
+  const handwritten = (el("handwrittenCheck") && el("handwrittenCheck").checked) || !!triedOcr
   if(handwritten){
     fd.append("handwritten", "1")
   }
@@ -690,8 +713,15 @@ async function startAnalyze(){
   if(!json.ok){
     setAnalyzeStatus("waiting")
     if(json.needs_ocr){
-      el("ocrPrompt").classList.remove("hidden")
-      toast(json.error || "Text extraction failed")
+      if(!triedOcr){
+        if(el("handwrittenCheck")){
+          el("handwrittenCheck").checked = true
+        }
+        toast("Running OCR")
+        await startAnalyze(true)
+        return
+      }
+      toast(json.error || "OCR failed")
       return
     }
     toast(json.error || "Analyze failed")
@@ -734,6 +764,7 @@ async function pollAnalyze(){
       latestAnalysis = json.data || {}
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
       buildReasonOptions()
+      setToPrefix()
       renderSummary()
       renderDx()
       renderPlan()
@@ -763,6 +794,7 @@ function buildForm(){
   const mappedRecipient = (recipientType === "Family physician" || recipientType === "Specialist") ? "Physician" : recipientType
 
   const settings = loadSettings()
+  const outLangSel = el("outputLang") ? (el("outputLang").value || "en") : "en"
 
   return {
     document_type: recipientType,
@@ -772,7 +804,7 @@ function buildForm(){
     reason_for_referral: reason,
     reason_detail: reasonDetail,
     special_requests: special,
-    output_language: settings.output_language || "auto",
+    output_language: outLangSel || settings.output_language || "en",
     signature_present: !!settings.signature_data_url,
     letter_type: "Report"
   }
@@ -913,50 +945,17 @@ let recChunks = []
 let recTimerInt = null
 let recStartMs = 0
 let transcribeJobId = ""
-let recordModeValue = "live"
-let recordModeInitDone = false
-function setRecordMode(mode){
-  recordModeValue = (mode === "dictation") ? "dictation" : "live"
-  const liveBtn = el("modeLive")
-  const dictBtn = el("modeDictation")
-  if(liveBtn){ liveBtn.classList.toggle("active", recordModeValue === "live"); liveBtn.setAttribute("aria-pressed", recordModeValue === "live" ? "true" : "false") }
-  if(dictBtn){ dictBtn.classList.toggle("active", recordModeValue === "dictation"); dictBtn.setAttribute("aria-pressed", recordModeValue === "dictation" ? "true" : "false") }
-  const sel = el("recordMode")
-  if(sel){ sel.value = recordModeValue }
-}
-function initRecordModeUI(){
-  if(recordModeInitDone){ return }
-  recordModeInitDone = true
-  const liveBtn = el("modeLive")
-  const dictBtn = el("modeDictation")
-  if(liveBtn){ liveBtn.addEventListener("click", () => setRecordMode("live")) }
-  if(dictBtn){ dictBtn.addEventListener("click", () => setRecordMode("dictation")) }
-  const sel = el("recordMode")
-  if(sel){ sel.addEventListener("change", () => setRecordMode(sel.value || "live")) }
-  setRecordMode(recordModeValue)
-}
-
 
 function openRecord(){
   const m = el("recordModal")
   if(m){ m.classList.remove("hidden") }
-  const settings = loadSettings()
   const sel = el("recordLang")
-  if(sel){
-    const v = (settings.input_language || "auto").trim()
-    if([...sel.options].some(o => o.value === v)){
-      sel.value = v
-    }else{
-      sel.value = "auto"
-    }
-  }
+  if(sel){ sel.value = "auto" }
+  const modeSel = el("recordMode")
+  if(modeSel){ modeSel.value = "dictation" }
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
-  const modeSel = el("recordMode")
-  if(modeSel){ modeSel.value = modeSel.value || "live" }
-  const swapBtn = el("swapSpeakers")
-  if(swapBtn){ swapBtn.disabled = true }
   el("recStart").disabled = false
   el("recPause").disabled = true
   el("recStop").disabled = true
@@ -1039,8 +1038,8 @@ async function startTranscribeBlob(blob){
   el("recordState").textContent = "Transcribing"
   const fd = new FormData()
   const lang = el("recordLang") ? el("recordLang").value : "auto"
+  const mode = el("recordMode") ? el("recordMode").value : "dictation"
   fd.append("language", lang)
-  const mode = el("recordMode") ? (el("recordMode").value || recordModeValue) : recordModeValue
   fd.append("mode", mode)
   fd.append("audio", blob, "recording.webm")
   const res = await fetch("/transcribe_start", { method:"POST", body: fd })
@@ -1083,8 +1082,6 @@ async function pollTranscribe(){
       el("recordTranscript").value = txt
       el("recordState").textContent = "Transcript ready"
       el("recSave").disabled = !txt
-    const swapBtn = el("swapSpeakers")
-    if(swapBtn){ swapBtn.disabled = !(txt && txt.includes("Speaker")) }
       return
     }
   }catch(e){
@@ -1132,20 +1129,6 @@ if(el("recStop")){
 if(el("recSave")){
   el("recSave").addEventListener("click", saveTranscriptToAnalyze)
 }
-if(el("swapSpeakers")){
-  el("swapSpeakers").addEventListener("click", () => {
-    const box = el("recordTranscript")
-    if(!box){ return }
-    const t = box.value || ""
-    if(!t.includes("Speaker")){ return }
-    const tmp = "__SPEAKER_TMP__"
-    let out = t
-    out = out.replace(/Speaker\s*0/gi, tmp)
-    out = out.replace(/Speaker\s*1/gi, "Speaker 0")
-    out = out.replace(new RegExp(tmp, "g"), "Speaker 1")
-    box.value = out
-  })
-}
 el("file").addEventListener("change", async (e) => {
   const f = e.target.files && e.target.files[0]
   if(!f){
@@ -1160,10 +1143,6 @@ el("file").addEventListener("change", async (e) => {
     el("recStop").disabled = true
     el("recSave").disabled = true
     el("recordTranscript").value = ""
-  const modeSel = el("recordMode")
-  if(modeSel){ modeSel.value = modeSel.value || "live" }
-  const swapBtn = el("swapSpeakers")
-  if(swapBtn){ swapBtn.disabled = true }
     el("recordState").textContent = "Transcribing"
     await startTranscribeBlob(f)
     return
@@ -1388,7 +1367,6 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
   })
 })
 
-initRecordModeUI()
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()

@@ -86,6 +86,14 @@
               <option value="Insurance">Insurance</option>
               <option value="Other">Other</option>
             </select>
+
+            <label class="fieldLabel" for="outputLang" style="margin-top:10px">Output language</label>
+            <select id="outputLang" class="ctrl">
+              <option value="en">English (US or Canada)</option>
+              <option value="pt">Portuguese</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+            </select>
           </div>
 
           <div class="field fieldTo">
@@ -147,9 +155,8 @@
       </section>
 
       <footer class="footer">
-        <div class="footerLegal">Maneiro.ai is a documentation support tool. It does not provide medical advice and is not a substitute for professional judgement. You are responsible for verifying accuracy, completeness, and appropriateness before use or transmission.</div>
-        <div class="footerLegal">Do not include unnecessary patient identifiers. Use within your clinic privacy requirements and applicable laws. No warranties are provided. To the fullest extent permitted by law, liability is limited for any indirect, incidental, special, or consequential damages.</div>
-        <div class="footerSmall">v{{ version }}</div>
+        <div class="footerLegal">Maneiro is a clinical documentation and reference aid. It is not intended to diagnose, treat, cure, or prevent any disease. All outputs are drafts for physician review. The provider remains solely responsible for the final clinical decision.</div>
+        <div class="footerLegal">All rights reserved. v{{ version }}</div>
       </footer>
     </div>
   </div>
@@ -166,6 +173,13 @@
           <div class="recordStatus" id="recordState">Ready</div>
           <div class="recordTimer" id="recordTimer">00:00</div>
           <div class="recordLang">
+            <label class="fieldLabel" for="recordMode">Mode</label>
+            <select id="recordMode" class="ctrl">
+              <option value="dictation">Dictation</option>
+              <option value="live">Live exam</option>
+            </select>
+          </div>
+          <div class="recordLang">
             <label class="fieldLabel" for="recordLang">Language</label>
             <select id="recordLang" class="ctrl">
               <option value="auto">Auto detect</option>
@@ -175,20 +189,11 @@
               <option value="fr-CA">French</option>
             </select>
           </div>
-        <div class="recordMode">
-          <label>Mode</label>
-          <div class="modeToggle" role="group" aria-label="Recording mode">
-            <button type="button" class="modeBtn active" id="modeLive" data-mode="live">Live exam</button>
-            <button type="button" class="modeBtn" id="modeDictation" data-mode="dictation">Dictation</button>
-          </div>
-          <div class="modeHint" id="modeHint">Live exam tries to separate speakers. Dictation is cleaner for straight notes.</div>
-        </div>
-
         </div>
         <div class="recordControls">
           <button id="recStart" class="btnPrimary recBtn" type="button">Start</button>
-          <button id="recPause" class="btnSecondary recBtn" type="button" disabled>Pause</button>
-          <button id="recStop" class="btnSecondary recBtn" type="button" disabled>Stop</button>
+          <button id="recPause" class="btnPrimary recBtn" type="button" disabled>Pause</button>
+          <button id="recStop" class="btnPrimary recBtn" type="button" disabled>Stop</button>
           <button id="recSave" class="btnPrimary recBtn" type="button" disabled>Analyze</button>
         </div>
         <div class="recordGrid">

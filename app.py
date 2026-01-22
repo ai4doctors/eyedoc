@@ -81,7 +81,7 @@ def aws_clients():
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
-def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
+def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "dictation") -> Tuple[bool, str]:
     ok, msg = aws_ready()
     if not ok:
         return False, msg
@@ -98,6 +98,13 @@ def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[
     else:
         args["IdentifyLanguage"] = True
         args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
+
+    # Live exam mode enables speaker labels so downstream analysis can distinguish actors.
+    if (mode or "").strip().lower() == "live":
+        args["Settings"] = {
+            "ShowSpeakerLabels": True,
+            "MaxSpeakerLabels": 4,
+        }
     try:
         transcribe.start_transcription_job(**args)
     except Exception as e:
@@ -119,7 +126,7 @@ def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
         obj = s3.get_object(Bucket=bucket, Key=guess_key)
         body = obj["Body"].read()
         data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        txt = transcribe_json_to_text(data)
         if txt:
             return txt, "completed", ""
     except Exception:
@@ -151,7 +158,7 @@ def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
         obj = s3.get_object(Bucket=bucket, Key=key)
         body = obj["Body"].read()
         data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        txt = transcribe_json_to_text(data)
         return txt, status, ""
     except Exception as e:
         return "", status, str(e)
@@ -161,6 +168,45 @@ def now_utc_iso() -> str:
 
 def clamp_text(s: str, limit: int) -> str:
     return (s or "")[:limit]
+
+
+def transcribe_json_to_text(data: Dict[str, Any]) -> str:
+    try:
+        results = data.get("results") or {}
+        speaker = results.get("speaker_labels") or {}
+        segments = speaker.get("segments") or []
+        items = results.get("items") or []
+        if segments and items:
+            # Map time to words, then rebuild per segment.
+            by_time = {}
+            for it in items:
+                st = it.get("start_time")
+                alts = it.get("alternatives") or []
+                content = (alts[0].get("content") if alts else "") or ""
+                if st and content:
+                    by_time.setdefault(st, []).append(content)
+
+            lines = []
+            for seg in segments:
+                label = (seg.get("speaker_label") or "Speaker").replace("spk_", "Speaker ")
+                seg_items = seg.get("items") or []
+                words = []
+                for sit in seg_items:
+                    st = sit.get("start_time")
+                    if st and st in by_time:
+                        words.extend(by_time.get(st) or [])
+                line = (" ".join(words)).strip()
+                if line:
+                    lines.append(f"{label}: {line}")
+            if lines:
+                return "\n".join(lines).strip()
+    except Exception:
+        pass
+    try:
+        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
+        return txt
+    except Exception:
+        return ""
 
 def extract_pdf_text(file_storage) -> str:
     reader = PyPDF2.PdfReader(file_storage)
@@ -450,24 +496,63 @@ def normalize_provider_name(provider_name: str, patient_name: str) -> str:
     return pn
 
 def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
-    # NCBI E utilities. Keep it lightweight, avoid rate limits
-    uniq_terms = []
-    for t in terms:
+    # NCBI E utilities. Keep it light to avoid rate limits.
+    uniq_terms: List[str] = []
+    for t in (terms or []):
         t = (t or "").strip()
         if t and t.lower() not in [x.lower() for x in uniq_terms]:
             uniq_terms.append(t)
-    if not uniq_terms:
-        # Fallback to a broad ophthalmology evidence search to ensure we can always
-        # return at least one PubMed reference for the case.
-        uniq_terms = ["ophthalmology clinical practice guideline"]
+
+    blob = " ".join(uniq_terms).lower()
+
+    def add_queries_for_subspecialty(b: str) -> List[str]:
+        q: List[str] = []
+        if any(k in b for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
+            q += [
+                "TFOS DEWS" ,
+                "dry eye disease guideline ophthalmology",
+            ]
+        if any(k in b for k in ["cornea", "keratitis", "corneal", "ulcer", "ectasia", "keratoconus"]):
+            q += [
+                "infectious keratitis clinical guideline ophthalmology",
+                "keratoconus global consensus",
+            ]
+        if "cataract" in b:
+            q += ["cataract preferred practice pattern ophthalmology", "cataract guideline ophthalmology"]
+        if any(k in b for k in ["glaucoma", "ocular hypertension", "iop"]):
+            q += ["glaucoma preferred practice pattern", "European Glaucoma Society guidelines"]
+        if any(k in b for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
+            q += ["amblyopia preferred practice pattern", "strabismus clinical practice guideline"]
+        if any(k in b for k in ["pediatric", "paediatric", "child", "infant"]):
+            q += ["pediatric eye evaluations preferred practice pattern", "retinopathy of prematurity guideline"]
+        if any(k in b for k in ["optic neuritis", "papilledema", "neuro", "visual field defect", "sixth nerve", "third nerve", "fourth nerve"]):
+            q += ["optic neuritis guideline", "papilledema evaluation guideline"]
+        if any(k in b for k in ["retina", "macular", "amd", "diabetic retinopathy", "retinal detachment", "uveitis", "vitreous"]):
+            q += [
+                "diabetic retinopathy preferred practice pattern",
+                "age related macular degeneration preferred practice pattern",
+                "retinal detachment guideline",
+            ]
+        return q
+
+    canonical_queries = add_queries_for_subspecialty(blob)
+
+    case_queries: List[str] = []
+    for term in uniq_terms[:8]:
+        case_queries.append(f"({term}) ophthalmology")
+        case_queries.append(f"({term}) (guideline OR consensus OR \"preferred practice pattern\" OR systematic review OR meta analysis)")
+
+    if not canonical_queries and not case_queries:
+        case_queries = ["ophthalmology clinical practice guideline"]
+
+    queries = (canonical_queries[:6] + case_queries[:10])
 
     pmids: List[str] = []
-    for term in uniq_terms[:6]:
-        q = f"{term} ophthalmology"
+    for q in queries:
         try:
             r = requests.get(
                 "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={"db": "pubmed", "term": q, "retmax": 3, "retmode": "json"},
+                params={"db": "pubmed", "term": q, "retmax": 12, "retmode": "json"},
                 timeout=10,
             )
             r.raise_for_status()
@@ -476,31 +561,56 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
             for pid in ids:
                 if pid not in pmids:
                     pmids.append(pid)
-            if len(pmids) >= max_items:
+            if len(pmids) >= 40:
                 break
         except Exception:
             continue
 
     if not pmids:
-        # Final fallback query to guarantee at least one reference.
-        try:
-            r = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={"db": "pubmed", "term": "ophthalmology review", "retmax": 3, "retmode": "json"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            ids = (data.get("esearchresult") or {}).get("idlist") or []
-            for pid in ids:
-                if pid not in pmids:
-                    pmids.append(pid)
-        except Exception:
-            pass
-    if not pmids:
         return []
 
-    pmids = pmids[:max_items]
+    pmids = pmids[:40]
+
+    oph_journals = {
+        "ophthalmology",
+        "american journal of ophthalmology",
+        "jama ophthalmology",
+        "british journal of ophthalmology",
+        "the ocular surface",
+        "cornea",
+        "investigative ophthalmology & visual science",
+        "iovs",
+        "retina",
+        "graefe's archive for clinical and experimental ophthalmology",
+        "clinical ophthalmology",
+        "survey of ophthalmology",
+        "eye",
+        "acta ophthalmologica",
+    }
+
+    def parse_year(pubdate: str) -> int:
+        m = re.search(r"(19\d{2}|20\d{2})", pubdate or "")
+        return int(m.group(1)) if m else 0
+
+    def score_item(title: str, source: str, pubdate: str) -> float:
+        t = (title or "").lower()
+        s = (source or "").lower()
+        y = parse_year(pubdate)
+        score = 0.0
+        if any(k in t for k in ["preferred practice pattern", "guideline", "consensus", "position statement", "recommendation"]):
+            score += 10.0
+        if any(k in t for k in ["systematic review", "meta analysis", "meta-analysis"]):
+            score += 7.0
+        if any(k in t for k in ["review"]):
+            score += 3.0
+        if any(j in s for j in oph_journals):
+            score += 4.0
+        if any(k in t for k in ["tfos", "dews", "european glaucoma society", "egs"]):
+            score += 6.0
+        if y:
+            score += max(0.0, min(5.0, (y - 2010) / 3.0))
+        return score
+
     try:
         r = requests.get(
             "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
@@ -510,9 +620,19 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         r.raise_for_status()
         data = r.json()
         result = data.get("result") or {}
-        out: List[Dict[str, str]] = []
-        for i, pid in enumerate(pmids, start=1):
+
+        scored: List[Tuple[float, str, Dict[str, Any]]] = []
+        for pid in pmids:
             item = result.get(pid) or {}
+            title = (item.get("title") or "").strip().rstrip(".")
+            source = (item.get("source") or "").strip()
+            pubdate = (item.get("pubdate") or "").strip()
+            scored.append((score_item(title, source, pubdate), pid, item))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        out: List[Dict[str, str]] = []
+        for i, (_, pid, item) in enumerate(scored[:max_items], start=1):
             title = (item.get("title") or "").strip().rstrip(".")
             source = (item.get("source") or "").strip()
             pubdate = (item.get("pubdate") or "").strip()
@@ -531,89 +651,77 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         return []
 
 
-def pubmed_fetch_for_query(query: str, max_items: int = 6) -> List[Dict[str, str]]:
-    q = (query or "").strip()
-    if not q:
-        return []
-    return pubmed_fetch_for_terms([q], max_items=max_items)
-
-
 
 def canonical_reference_pool(labels):
     blob = " ".join([str(x or "") for x in (labels or [])]).lower()
+    pool = []
 
-    def has_any(keys):
-        return any(k in blob for k in keys)
+    def add(pmid, citation, url="", source=""):
+        pool.append({
+            "pmid": (pmid or ""),
+            "citation": (citation or ""),
+            "url": (url or ""),
+            "source": (source or ""),
+        })
 
-    queries = []
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
+        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
+        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
+        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
+        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
 
-    # Dry eye and ocular surface
-    if has_any(["dry eye", "meibom", "mgd", "blephar", "ocular surface", "tear film"]):
-        queries += [
-            ('"TFOS" AND "DEWS" AND dry eye', "Dry eye"),
-            ('"dry eye" AND "Preferred Practice Pattern"', "Dry eye"),
-        ]
+    if "myopia" in blob:
+        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
 
-    # Cornea
-    if has_any(["cornea", "corneal", "keratitis", "ulcer", "herpes", "keratoconus", "ectasia", "crosslink", "cxl"]):
-        queries += [
-            ("bacterial keratitis guideline", "Cornea"),
-            ("herpes simplex keratitis guideline", "Cornea"),
-        ]
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
+        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
+        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
+        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
+        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
 
-    # Cataract
-    if has_any(["cataract", "phaco", "pseudophak", "iol"]):
-        queries += [
-            ("cataract surgery guideline", "Cataract"),
-            ('"Preferred Practice Pattern" cataract', "Cataract"),
-        ]
+    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
+        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
+        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
 
-    # Glaucoma
-    if has_any(["glaucoma", "ocular hypertension", "iop", "poag", "angle closure", "ntg"]):
-        queries += [
-            ('"European Glaucoma Society" guidelines', "Glaucoma"),
-            ('"Preferred Practice Pattern" primary open angle glaucoma', "Glaucoma"),
-        ]
+    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
+        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
+        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
+        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
 
-    # Retina
-    if has_any(["retina", "macula", "amd", "diabetic retinopathy", "dme", "rvo", "vein occlusion", "retinal detachment", "rd"]):
-        queries += [
-            ("diabetic retinopathy guideline", "Retina"),
-            ('"age related macular degeneration" guideline', "Retina"),
-        ]
+    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
+        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
 
-    # Pediatric and strabismus
-    if has_any(["pediatric", "paediatric", "amblyopia", "strabismus", "esotropia", "exotropia"]):
-        queries += [
-            ("amblyopia guideline ophthalmology", "Pediatric"),
-            ("strabismus guideline ophthalmology", "Pediatric"),
-        ]
+    if any(k in blob for k in ["cornea", "keratitis", "corneal", "ulcer"]):
+        add("26253489", "Global Consensus on Keratoconus and Ectatic Diseases. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+        add("", "AAO PPP: Bacterial Keratitis. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/bacterial-keratitis-ppp", "AAO")
+        add("", "AAO PPP: Corneal Ectasia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
 
-    # Neuro ophthalmology
-    if has_any(["neuro", "optic neuritis", "papilledema", "iih", "myasthenia", "cranial nerve", "diplopia"]):
-        queries += [
-            ("idiopathic intracranial hypertension guideline", "Neuro"),
-            ("optic neuritis guideline", "Neuro"),
-        ]
+    if "uveitis" in blob:
+        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
 
-    if not queries:
-        queries = [("ophthalmology guideline consensus statement", "Ophthalmology")]
+    if "cataract" in blob:
+        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
+        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
 
-    out = []
-    seen = set()
-    for q, tag in queries:
-        refs = pubmed_fetch_for_query(q, max_items=4)
-        for r in refs:
-            pmid = (r.get("pmid") or "").strip()
-            if not pmid or pmid in seen:
-                continue
-            seen.add(pmid)
-            r["source"] = "canonical"
-            r["tag"] = tag
-            out.append(r)
-            if len(out) >= 10:
-                return out
-    return out
+    if any(k in blob for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
+        add("", "AAO PPP: Amblyopia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO")
+        add("", "AAO PPP: Esotropia and Exotropia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO")
+
+    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant"]):
+        add("", "AAO PPP: Pediatric Eye Evaluations. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/pediatric-eye-evaluations-ppp", "AAO")
+        add("", "AAO PPP: Retinopathy of Prematurity. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/retinopathy-of-prematurity-ppp", "AAO")
+
+    if any(k in blob for k in ["optic neuritis", "papilledema", "neuro", "visual field", "third nerve", "fourth nerve", "sixth nerve"]):
+        add("", "AAO EyeWiki: Optic Neuritis overview and evidence links. American Academy of Ophthalmology.", "https://eyewiki.aao.org/Optic_Neuritis", "EyeWiki")
+        add("", "AAO EyeWiki: Papilledema overview and workup. American Academy of Ophthalmology.", "https://eyewiki.aao.org/Papilledema", "EyeWiki")
+
+    if any(k in blob for k in ["retina", "macular", "amd", "diabetic retinopathy", "retinal detachment"]):
+        add("", "AAO PPP: Retina and Vitreous. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+
+    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
+        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+
+    return pool[:10]
 
 
 def merge_references(pubmed_refs, canonical_refs, max_total=18):
@@ -996,16 +1104,12 @@ def analyze_start():
     else:
         return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
 
-    if not text_is_meaningful(note_text):
-        # Automatically run OCR for scanned or image based PDFs
-        if filename.endswith(".pdf"):
-            ocr_text, ocr_err = ocr_pdf_bytes(data)
-            if ocr_text:
-                note_text = ocr_text
-            else:
-                return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
-        else:
-            return jsonify({"ok": False, "error": "No readable text extracted"}), 200
+    if not handwritten and not text_is_meaningful(note_text):
+        return jsonify({
+            "ok": False,
+            "needs_ocr": True,
+            "error": "No readable text extracted. OCR is required for scanned or handwritten notes."
+        }), 200
 
     if handwritten and filename.endswith(".pdf"):
         ocr_text, ocr_err = ocr_pdf_bytes(data)
@@ -1055,7 +1159,7 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
-    mode = (request.form.get("mode") or "live").strip().lower()
+    mode = (request.form.get("mode") or "dictation").strip()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1072,7 +1176,7 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language, mode)
+    started, err = start_transcribe_job(job_name, key, language, mode=mode)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
     set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
