@@ -4,6 +4,7 @@ import tempfile
 import uuid
 import json
 import re
+import shutil
 import threading
 import time
 import io
@@ -34,6 +35,17 @@ try:
     import pytesseract
 except Exception:
     pytesseract = None
+
+# Ensure pytesseract can find the tesseract binary on common hosts.
+if pytesseract is not None:
+    try:
+        if shutil.which("tesseract") is None:
+            for cand in ("/usr/bin/tesseract", "/usr/local/bin/tesseract"):
+                if os.path.exists(cand):
+                    pytesseract.pytesseract.tesseract_cmd = cand
+                    break
+    except Exception:
+        pass
 
 try:
     from openai import OpenAI
@@ -301,6 +313,10 @@ def ocr_ready() -> Tuple[bool, str]:
         return False, "Pillow not available"
     if pytesseract is None:
         return False, "pytesseract not available"
+    try:
+        _ = pytesseract.get_tesseract_version()
+    except Exception as e:
+        return False, f"tesseract not available: {e}"
     return True, ""
 
 def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
@@ -1526,11 +1542,20 @@ def export_pdf():
 
 def healthz():
     ok, msg = client_ready()
+    ocr_ok, ocr_msg = ocr_ready()
+    tpath = ""
+    try:
+        tpath = shutil.which("tesseract") or ""
+    except Exception:
+        tpath = ""
     return jsonify({
         "ok": True,
         "app_version": APP_VERSION,
         "time_utc": now_utc_iso(),
         "openai_ready": ok,
         "openai_message": msg,
+        "ocr_ready": ocr_ok,
+        "ocr_message": ocr_msg,
+        "tesseract_path": tpath,
         "model": model_name(),
     }), 200

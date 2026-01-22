@@ -708,8 +708,15 @@ async function startAnalyze(triedOcr){
     fd.append("handwritten", "1")
   }
 
-  const res = await fetch("/analyze_start", { method:"POST", body: fd })
-  const json = await res.json()
+  let json = null
+  try{
+    const res = await fetch("/analyze_start", { method:"POST", body: fd })
+    json = await res.json()
+  }catch(e){
+    setAnalyzeStatus("waiting")
+    toast("Analyze failed. Server did not return JSON")
+    return
+  }
   if(!json.ok){
     setAnalyzeStatus("waiting")
     if(json.needs_ocr){
