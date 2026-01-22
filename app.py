@@ -304,6 +304,13 @@ def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
     """
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
+
+    # Hard fail early if the tesseract binary is not available. Without this,
+    # pytesseract exceptions can be swallowed and the UI only sees "No text extracted".
+    try:
+        _ = pytesseract.get_tesseract_version()
+    except Exception as e:
+        return "", f"OCR engine not available: {e}"
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
@@ -1244,6 +1251,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
 
     name = (filename or "").lower()
     note_text = ""
+    ocr_attempted = False
 
     try:
         if name.endswith(".pdf"):
@@ -1253,6 +1261,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
                 note_text = ""
 
             if force_ocr or (not text_is_meaningful(note_text)):
+                ocr_attempted = True
                 ocr_text, ocr_err = ocr_pdf_bytes(data)
                 if ocr_err:
                     set_job(job_id, status="error", error=ocr_err, updated_at=now_utc_iso())
@@ -1261,6 +1270,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
                     note_text = ocr_text
 
         elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            ocr_attempted = True
             if Image is None or pytesseract is None:
                 set_job(job_id, status="error", error="Image OCR dependencies missing", updated_at=now_utc_iso())
                 return
@@ -1278,7 +1288,10 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
         return
 
     if not note_text:
-        set_job(job_id, status="error", error="No text extracted", updated_at=now_utc_iso())
+        msg = "No text extracted"
+        if ocr_attempted:
+            msg = "OCR returned no readable text. If this was a scanned PDF, the most common cause is that the tesseract engine is not installed on the server, or it is missing language data."
+        set_job(job_id, status="error", error=msg, updated_at=now_utc_iso())
         return
 
     # Run the main LLM analysis
