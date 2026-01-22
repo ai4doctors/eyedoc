@@ -1,16 +1,4 @@
 
-
-const modeLiveBtn = document.getElementById('modeLive');
-const modeDictationBtn = document.getElementById('modeDictation');
-function setRecordMode(mode){
-  recordMode = mode;
-  if(modeLiveBtn && modeDictationBtn){
-    modeLiveBtn.classList.toggle('active', mode === 'live');
-    modeDictationBtn.classList.toggle('active', mode === 'dictation');
-  }
-}
-if(modeLiveBtn){ modeLiveBtn.addEventListener('click', () => setRecordMode('live')); }
-if(modeDictationBtn){ modeDictationBtn.addEventListener('click', () => setRecordMode('dictation')); }
 let uploadedFile = null
 let jobId = ""
 let latestAnalysis = null
@@ -1353,5 +1341,4 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
 
 applyTheme()
 setAnalyzeStatus("waiting")
-renderCaseList()let recordMode = 'live';
-
+renderCaseList()
