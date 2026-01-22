@@ -296,41 +296,61 @@ def text_is_meaningful(text: str) -> bool:
     ratio = alpha / max(len(s), 1)
     return ratio >= 0.25
 
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 10) -> Tuple[str, str]:
-    """Return OCR text and an error string."""
+def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+    """Return OCR text and an error string.
+
+    This uses the same rendering approach that worked in the older manual OCR flow
+    (page.get_pixmap with a fixed dpi). We keep it bounded by max_pages.
+    """
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
         return "", f"Could not open PDF for OCR: {e}"
-    def render_ocr(zoom: float, pages: int) -> List[str]:
-        out: List[str] = []
-        mat = fitz.Matrix(zoom, zoom)
+
+    def prep(img):
+        """Lightweight preprocessing to improve OCR on scanned pages."""
+        try:
+            g = img.convert("L")
+        except Exception:
+            g = img
+        try:
+            # Simple contrast stretch
+            g = Image.eval(g, lambda x: 0 if x < 15 else (255 if x > 240 else x))
+        except Exception:
+            pass
+        return g
+
+    parts: List[str] = []
+    try:
+        pages = min(len(doc), max_pages)
         for i in range(pages):
             try:
                 page = doc.load_page(i)
-                pix = page.get_pixmap(matrix=mat, alpha=False)
+                pix = page.get_pixmap(dpi=220, alpha=False)
                 img = Image.open(io.BytesIO(pix.tobytes("png")))
-                try:
-                    img = img.convert("RGB")
-                except Exception:
-                    pass
-                out.append(pytesseract.image_to_string(img) or "")
+                img = prep(img)
+                txt = pytesseract.image_to_string(img, config="--psm 6") or ""
+                parts.append(txt)
             except Exception:
-                out.append("")
-        return out
+                parts.append("")
 
-    try:
-        pages = min(len(doc), max_pages)
-        # First pass keeps memory use modest.
-        parts = render_ocr(zoom=2.0, pages=pages)
-
-        # If OCR yields almost nothing, do a small higher resolution retry on the first pages.
         joined = "\n".join(parts).strip()
         if (not joined) or (len(joined) < 200):
+            # Retry first pages at higher dpi
             retry_pages = min(pages, 3)
-            retry = render_ocr(zoom=3.0, pages=retry_pages)
+            retry: List[str] = []
+            for i in range(retry_pages):
+                try:
+                    page = doc.load_page(i)
+                    pix = page.get_pixmap(dpi=300, alpha=False)
+                    img = Image.open(io.BytesIO(pix.tobytes("png")))
+                    img = prep(img)
+                    txt = pytesseract.image_to_string(img, config="--psm 6") or ""
+                    retry.append(txt)
+                except Exception:
+                    retry.append("")
             parts = retry + parts[retry_pages:]
     except Exception as e:
         return "", f"OCR failed: {e}"
