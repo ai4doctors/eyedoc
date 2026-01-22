@@ -45,67 +45,6 @@
           <div id="analyzeStatus" class="stepStatus">Ready</div>
         </div>
         <div class="stepHint">Process audio, images, or PDFs. Works in multiple languages.</div>
-        <div id="ocrPrompt" class="ocrPrompt hidden">
-          <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
-          <div class="ocrControls">
-            <label class="ocrLabel"><input id="handwrittenCheck" type="checkbox" /> Handwritten paper files</label>
-            <button id="runOcrBtn" class="btnSecondary" type="button">Run OCR</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="summary">
-        <div class="sectionTitle"><b>Summary</b></div>
-        <div id="summaryBox" class="panel">Upload exam notes to begin.</div>
-      </section>
-
-      <main class="triCols">
-        <section class="col">
-          <div class="sectionTitle"><b>Diagnosis</b></div>
-          <div id="dxBox" class="panel">No data yet.</div>
-        </section>
-        <section class="col">
-          <div class="sectionTitle"><b>Plan</b></div>
-          <div id="planBox" class="panel">No data yet.</div>
-        </section>
-        <section class="col">
-          <div class="sectionTitle"><b>References</b></div>
-          <div id="refBox" class="panel">No data yet.</div>
-        </section>
-      </main>
-
-      <section class="stepBar step2">
-        <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
-        <div class="commGrid">
-          <div class="field fieldDoc">
-            <label class="fieldLabel" for="recipientType">Document type</label>
-            <select id="recipientType" class="ctrl">
-              <option value="Specialist">Specialist</option>
-              <option value="Family physician">Family physician</option>
-              <option value="Patient">Patient</option>
-              <option value="Insurance">Insurance</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-
-          <div class="field fieldTo">
-            <label class="fieldLabel" for="toWhom">To</label>
-            <input id="toWhom" class="ctrl" placeholder="Dr Lastname" />
-          </div>
-
-          <div class="field fieldFrom">
-            <label class="fieldLabel" for="fromDoctor">From</label>
-            <input id="fromDoctor" class="ctrl" placeholder="Provider" />
-          </div>
-
-          <div class="field fieldAction">
-            <label class="fieldLabel">&nbsp;</label>
-            <div class="actionRow">
-              <button id="generateBtn" class="btnPrimary" type="button">Generate</button>
-              <div id="generateStatus" class="stepStatus inline">Ready</div>
-            </div>
-          </div>
-
           <div class="field fieldReason">
             <label class="fieldLabel" for="reasonDx">Reason</label>
             <select id="reasonDx" class="ctrl">
@@ -165,7 +104,15 @@
         <div class="recordTop">
           <div class="recordStatus" id="recordState">Ready</div>
           <div class="recordTimer" id="recordTimer">00:00</div>
-          <div class="recordLang">
+          
+          <div class="recordMode">
+            <label class="fieldLabel" for="recordMode">Mode</label>
+            <select id="recordMode" class="ctrl">
+              <option value="live">Live exam</option>
+              <option value="dictation">Dictation</option>
+            </select>
+          </div>
+<div class="recordLang">
             <label class="fieldLabel" for="recordLang">Language</label>
             <select id="recordLang" class="ctrl">
               <option value="auto">Auto detect</option>
@@ -187,6 +134,9 @@
             <div class="sectionTitle"><b>Transcript</b></div>
             <textarea id="recordTranscript" class="transcriptBox" placeholder="Transcription will appear here after you press Stop."></textarea>
             <div class="recordNote">Review and edit the transcript before you press Analyze.</div>
+            <div class="recordSwapRow">
+              <button id="swapSpeakers" class="btnSecondary smallBtn" type="button" disabled>Swap speakers</button>
+            </div>
           </div>
         </div>
       </div>
@@ -212,7 +162,7 @@
 
         <div class="faqItem">
           <div class="faqQ">What file types are supported</div>
-          <div class="faqA">Upload a PDF. If the PDF contains selectable text, Maneiro.ai will extract it. If the PDF is scanned or handwritten, you can enable Handwritten paper files and run OCR. OCR may take longer and results depend on scan quality.</div>
+          <div class="faqA">Upload a PDF. Maneiro.ai will extract text automatically. If the PDF is scanned, Maneiro.ai will run OCR in the background. Results depend on scan quality.</div>
         </div>
 
         <div class="faqItem">
