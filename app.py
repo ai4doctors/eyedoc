@@ -84,7 +84,12 @@ JOB_DIR = os.getenv("JOB_DIR", "/tmp/maneiro_jobs")
 #
 # Render can run multiple instances, and /tmp is not shared across instances.
 # When enabled, jobs are mirrored into S3 so any instance can read status.
-JOB_S3_PREFIX = (os.getenv("JOB_S3_PREFIX", "maneiro_jobs/") or "maneiro_jobs/").strip()
+#
+# Important: many AWS bucket policies allow writes only under specific prefixes
+# (commonly "uploads/"). Using an uploads based default greatly reduces the
+# chance of silent S3 put failures that would otherwise cause "processing" to
+# snap back to "waiting" when a different instance handles status polling.
+JOB_S3_PREFIX = (os.getenv("JOB_S3_PREFIX", "uploads/maneiro_jobs/") or "uploads/maneiro_jobs/").strip()
 if not JOB_S3_PREFIX.endswith("/"):
     JOB_S3_PREFIX += "/"
 
@@ -127,6 +132,24 @@ def job_s3_enabled() -> bool:
 def job_s3_key(job_id: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
     return f"{JOB_S3_PREFIX}{safe}.json"
+
+def job_s3_key_fallbacks(job_id: str) -> List[str]:
+    """Return possible S3 keys for a job, including legacy prefixes."""
+    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
+    keys = [f"{JOB_S3_PREFIX}{safe}.json"]
+    # Legacy default from earlier builds
+    legacy = "maneiro_jobs/"
+    if not legacy.endswith("/"):
+        legacy += "/"
+    keys.append(f"{legacy}{safe}.json")
+    # Also try under uploads in case a stricter policy is in place
+    keys.append(f"uploads/maneiro_jobs/{safe}.json")
+    # Deduplicate while preserving order
+    out: List[str] = []
+    for k in keys:
+        if k not in out:
+            out.append(k)
+    return out
 
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
@@ -1054,17 +1077,20 @@ def set_job(job_id: str, **updates: Any) -> None:
 
     # Mirror to S3 for multi instance deployments.
     if job_s3_enabled():
+        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
-            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
             s3, _ = aws_clients()
-            s3.put_object(
-                Bucket=bucket,
-                Key=job_s3_key(job_id),
-                Body=json.dumps(job, ensure_ascii=False).encode("utf-8"),
-                ContentType="application/json",
-            )
         except Exception:
-            pass
+            s3 = None
+        if s3 is not None:
+            body = json.dumps(job, ensure_ascii=False).encode("utf-8")
+            # Try a small set of keys to accommodate restrictive bucket policies.
+            for key in job_s3_key_fallbacks(job_id):
+                try:
+                    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+                    break
+                except Exception:
+                    continue
 
 def get_job(job_id: str) -> Dict[str, Any]:
     _ensure_job_dir()
@@ -1084,23 +1110,28 @@ def get_job(job_id: str) -> Dict[str, Any]:
 
     # Fallback to S3 shared store.
     if job_s3_enabled():
+        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
-            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
             s3, _ = aws_clients()
-            obj = s3.get_object(Bucket=bucket, Key=job_s3_key(job_id))
-            body = obj["Body"].read()
-            job = json.loads(body.decode("utf-8", errors="ignore")) or {}
-            if isinstance(job, dict):
-                with JOBS_LOCK:
-                    JOBS[job_id] = job
-                try:
-                    with open(path, "w", encoding="utf-8") as f:
-                        json.dump(job, f, ensure_ascii=False)
-                except Exception:
-                    pass
-                return dict(job)
         except Exception:
-            pass
+            s3 = None
+        if s3 is not None:
+            for key in job_s3_key_fallbacks(job_id):
+                try:
+                    obj = s3.get_object(Bucket=bucket, Key=key)
+                    body = obj["Body"].read()
+                    job = json.loads(body.decode("utf-8", errors="ignore")) or {}
+                    if isinstance(job, dict):
+                        with JOBS_LOCK:
+                            JOBS[job_id] = job
+                        try:
+                            with open(path, "w", encoding="utf-8") as f:
+                                json.dump(job, f, ensure_ascii=False)
+                        except Exception:
+                            pass
+                        return dict(job)
+                except Exception:
+                    continue
     return {}
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
