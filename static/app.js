@@ -675,12 +675,26 @@ async function startAnalyze(){
     toast("Select a file first")
     return
   }
-  setAnalyzeStatus("processing")  const fd = new FormData()
+  setAnalyzeStatus("processing")
+  el("ocrPrompt").classList.add("hidden")
+  const fd = new FormData()
   fd.append("file", uploadedFile)
+
+  const handwritten = el("handwrittenCheck") && el("handwrittenCheck").checked
+  if(handwritten){
+    fd.append("handwritten", "1")
+  }
+
   const res = await fetch("/analyze_start", { method:"POST", body: fd })
   const json = await res.json()
   if(!json.ok){
-    setAnalyzeStatus("waiting")    toast(json.error || "Analyze failed")
+    setAnalyzeStatus("waiting")
+    if(json.needs_ocr){
+      el("ocrPrompt").classList.remove("hidden")
+      toast(json.error || "Text extraction failed")
+      return
+    }
+    toast(json.error || "Analyze failed")
     return
   }
   jobId = json.job_id
@@ -913,10 +927,6 @@ function openRecord(){
       sel.value = "auto"
     }
   }
-  const modeSel = el("recordMode")
-  if(modeSel){
-    modeSel.value = "live"
-  }
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
@@ -1002,11 +1012,7 @@ async function startTranscribeBlob(blob){
   el("recordState").textContent = "Transcribing"
   const fd = new FormData()
   const lang = el("recordLang") ? el("recordLang").value : "auto"
-  const mode = el("recordMode") ? el("recordMode").value : "live"
   fd.append("language", lang)
-  const mode = el("recordMode") ? (el("recordMode").value || "live").trim() : "live"
-  fd.append("mode", mode)
-  fd.append("mode", mode)
   fd.append("audio", blob, "recording.webm")
   const res = await fetch("/transcribe_start", { method:"POST", body: fd })
   const json = await res.json()
@@ -1147,6 +1153,14 @@ el("copyPlain").addEventListener("click", copyPlain)
 el("copyRich").addEventListener("click", copyRich)
 el("exportPdf").addEventListener("click", exportPdf)
 
+if(el("runOcrBtn")){
+  el("runOcrBtn").addEventListener("click", async () => {
+    if(el("handwrittenCheck")){
+      el("handwrittenCheck").checked = true
+    }
+    await startAnalyze()
+  })
+}
 
 el("resetBtn").addEventListener("click", clearAll)
 el("newCaseBtn").addEventListener("click", clearAll)
@@ -1328,4 +1342,3 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
-

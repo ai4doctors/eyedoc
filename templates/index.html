@@ -44,7 +44,14 @@
           <button id="uploadBtn" class="btnPrimary" type="button">Upload file</button>
           <div id="analyzeStatus" class="stepStatus">Ready</div>
         </div>
-        <div class="stepHint">Process audio, images, or PDFs. Works in multiple languages.</div></div>
+        <div class="stepHint">Process audio, images, or PDFs. Works in multiple languages.</div>
+        <div id="ocrPrompt" class="ocrPrompt hidden">
+          <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
+          <div class="ocrControls">
+            <label class="ocrLabel"><input id="handwrittenCheck" type="checkbox" /> Handwritten paper files</label>
+            <button id="runOcrBtn" class="btnSecondary" type="button">Run OCR</button>
+          </div>
+        </div>
       </section>
 
       <section class="summary">
@@ -66,12 +73,6 @@
           <div id="refBox" class="panel">No data yet.</div>
         </section>
       </main>
-
-      <section class="summary">
-        <div class="sectionTitle"><b>Guideline check</b></div>
-        <div id="guidelineBox" class="panel">No guideline suggestions yet.</div>
-      </section>
-
 
       <section class="stepBar step2">
         <div class="stepTitle"><b>STEP 2: COMMUNICATE</b></div>
@@ -173,10 +174,6 @@
               <option value="es-US">Spanish</option>
               <option value="fr-CA">French</option>
             </select>
-        <select id="recordMode" class="field">
-          <option value="live">Live exam</option>
-          <option value="dictation">Dictation</option>
-        </select>
           </div>
         </div>
         <div class="recordControls">
@@ -188,8 +185,8 @@
         <div class="recordGrid">
           <div>
             <div class="sectionTitle"><b>Transcript</b></div>
-            <div class="muted" style="margin:6px 0 6px 0">Transcription will appear here after you press Stop.</div><textarea id="recordTranscript" class="transcriptBox" placeholder="Transcript will appear here after you press Stop."></textarea>
-            <div class="recordNote">Review and edit the transcript before pressing Analyze.</div>
+            <textarea id="recordTranscript" class="transcriptBox" placeholder="Transcription will appear here after you press Stop."></textarea>
+            <div class="recordNote">Review and edit the transcript before you press Analyze.</div>
           </div>
         </div>
       </div>
