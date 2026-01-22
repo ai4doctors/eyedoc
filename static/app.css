@@ -211,7 +211,7 @@ body{
 
 /* Cap tall output panels so STEP 2 stays visible */
 #dxBox, #planBox, #refBox{
-  max-height: 360px;
+  max-height: 720px;
   overflow-y: auto;
   overflow-x: hidden;
 }
