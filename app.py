@@ -80,6 +80,14 @@ JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
 JOB_DIR = os.getenv("JOB_DIR", "/tmp/maneiro_jobs")
 
+# Optional shared job storage in S3.
+#
+# Render can run multiple instances, and /tmp is not shared across instances.
+# When enabled, jobs are mirrored into S3 so any instance can read status.
+JOB_S3_PREFIX = (os.getenv("JOB_S3_PREFIX", "maneiro_jobs/") or "maneiro_jobs/").strip()
+if not JOB_S3_PREFIX.endswith("/"):
+    JOB_S3_PREFIX += "/"
+
 def _job_path(job_id: str) -> str:
     safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
     return os.path.join(JOB_DIR, f"{safe}.json")
@@ -106,6 +114,19 @@ def aws_clients():
     s3 = boto3.client("s3", region_name=region)
     transcribe = boto3.client("transcribe", region_name=region)
     return s3, transcribe
+
+def job_s3_enabled() -> bool:
+    if boto3 is None:
+        return False
+    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+    region = os.getenv("AWS_REGION", "").strip()
+    if not bucket or not region:
+        return False
+    return True
+
+def job_s3_key(job_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
+    return f"{JOB_S3_PREFIX}{safe}.json"
 
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
@@ -1031,6 +1052,20 @@ def set_job(job_id: str, **updates: Any) -> None:
         except Exception:
             pass
 
+    # Mirror to S3 for multi instance deployments.
+    if job_s3_enabled():
+        try:
+            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+            s3, _ = aws_clients()
+            s3.put_object(
+                Bucket=bucket,
+                Key=job_s3_key(job_id),
+                Body=json.dumps(job, ensure_ascii=False).encode("utf-8"),
+                ContentType="application/json",
+            )
+        except Exception:
+            pass
+
 def get_job(job_id: str) -> Dict[str, Any]:
     _ensure_job_dir()
     with JOBS_LOCK:
@@ -1046,6 +1081,26 @@ def get_job(job_id: str) -> Dict[str, Any]:
             return dict(job)
     except Exception:
         pass
+
+    # Fallback to S3 shared store.
+    if job_s3_enabled():
+        try:
+            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+            s3, _ = aws_clients()
+            obj = s3.get_object(Bucket=bucket, Key=job_s3_key(job_id))
+            body = obj["Body"].read()
+            job = json.loads(body.decode("utf-8", errors="ignore")) or {}
+            if isinstance(job, dict):
+                with JOBS_LOCK:
+                    JOBS[job_id] = job
+                try:
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(job, f, ensure_ascii=False)
+                except Exception:
+                    pass
+                return dict(job)
+        except Exception:
+            pass
     return {}
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
