@@ -81,6 +81,9 @@ JOBS_LOCK = threading.Lock()
 # Support both JOB_DIR and job_dir, since environment variable keys are sometimes created in lowercase.
 JOB_DIR = os.getenv("JOB_DIR") or os.getenv("job_dir") or "/tmp/maneiro_jobs"
 
+# Where uploaded source files are persisted for job resume.
+UPLOAD_DIR = os.getenv("UPLOAD_DIR") or os.getenv("upload_dir") or os.path.join(JOB_DIR, "uploads")
+
 # Optional shared job storage in S3.
 #
 # Render can run multiple instances, and /tmp is not shared across instances.
@@ -103,6 +106,18 @@ def _ensure_job_dir() -> None:
         os.makedirs(JOB_DIR, exist_ok=True)
     except Exception:
         pass
+
+    try:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    except Exception:
+        pass
+
+def _upload_path(job_id: str, filename: str) -> str:
+    safe_id = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
+    ext = os.path.splitext((filename or "").strip())[1].lower()
+    if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".webp"):
+        ext = ".bin"
+    return os.path.join(UPLOAD_DIR, f"{safe_id}{ext}")
 
 def aws_ready() -> Tuple[bool, str]:
     if boto3 is None:
@@ -239,6 +254,21 @@ def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+def parse_utc_iso(s: str) -> Optional[datetime]:
+    try:
+        if not s:
+            return None
+        txt = str(s).strip()
+        # fromisoformat does not accept a trailing Z
+        if txt.endswith("Z"):
+            txt = txt[:-1] + "+00:00"
+        dt = datetime.fromisoformat(txt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
 
 def clamp_text(s: str, limit: int) -> str:
     return (s or "")[:limit]
@@ -1250,11 +1280,39 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
     """Extract text (with OCR when needed) then run analysis."""
     set_job(job_id, status="processing", updated_at=now_utc_iso())
 
+    # Persist a heartbeat so we can detect stalled jobs after a restart.
+    set_job(job_id, heartbeat_at=now_utc_iso())
+
+    # If the service restarted, resume from the persisted upload on disk.
+    try:
+        if (not data) and job_id:
+            job = get_job(job_id)
+            up = (job.get("upload_path") or "").strip()
+            if up and os.path.exists(up):
+                with open(up, "rb") as f:
+                    data = f.read()
+                filename = (job.get("upload_name") or filename or "")
+                if isinstance(job.get("force_ocr"), bool):
+                    force_ocr = bool(job.get("force_ocr"))
+    except Exception:
+        pass
+
     name = (filename or "").lower()
     note_text = ""
     ocr_attempted = False
 
     try:
+        # Load bytes from disk if this job was persisted for resume.
+        job = get_job(job_id)
+        upload_path = (job.get("upload_path") or "").strip() if isinstance(job, dict) else ""
+        if upload_path and not data:
+            try:
+                with open(upload_path, "rb") as f:
+                    data = f.read()
+            except Exception as e:
+                set_job(job_id, status="error", error=f"Failed to read uploaded file: {e}", updated_at=now_utc_iso())
+                return
+
         if name.endswith(".pdf"):
             try:
                 note_text = extract_pdf_text(io.BytesIO(data))
@@ -1270,6 +1328,8 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
                 if ocr_text:
                     note_text = ocr_text
 
+            set_job(job_id, heartbeat_at=now_utc_iso())
+
         elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
             ocr_attempted = True
             if Image is None or pytesseract is None:
@@ -1281,6 +1341,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
             except Exception as e:
                 set_job(job_id, status="error", error=f"Image OCR failed: {e}", updated_at=now_utc_iso())
                 return
+            set_job(job_id, heartbeat_at=now_utc_iso())
         else:
             set_job(job_id, status="error", error="Unsupported file type for analysis. Use Record exam or upload a PDF or image.", updated_at=now_utc_iso())
             return
@@ -1312,9 +1373,24 @@ def analyze_start():
     data = file.read()
 
     job_id = new_job_id()
-    set_job(job_id, status="waiting", updated_at=now_utc_iso())
-
+    # Persist the uploaded source so a restart does not lose the job.
     force_ocr = (request.form.get("handwritten") or "").strip() in {"1", "true", "yes", "on"}
+    _ensure_job_dir()
+    upath = _upload_path(job_id, filename)
+    try:
+        with open(upath, "wb") as f:
+            f.write(data)
+    except Exception:
+        upath = ""
+
+    set_job(
+        job_id,
+        status="waiting",
+        updated_at=now_utc_iso(),
+        upload_path=upath,
+        upload_name=filename,
+        force_ocr=force_ocr,
+    )
     t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr), daemon=True)
     t.start()
 
@@ -1328,6 +1404,25 @@ def analyze_status():
     job = get_job(job_id)
     if not job:
         return jsonify({"ok": False, "error": "Unknown job_id"}), 404
+
+    # If a job was in progress when the service restarted, the background
+    # thread is gone. Detect a stale heartbeat and restart the job from the
+    # persisted upload on disk, without changing the UI.
+    try:
+        status = (job.get("status") or "").strip().lower()
+        if status == "processing":
+            hb = parse_utc_iso(job.get("heartbeat_at") or job.get("updated_at") or "")
+            now = datetime.now(timezone.utc)
+            stale_seconds = (now - hb).total_seconds() if hb else 999999
+            if stale_seconds > 25:
+                up = (job.get("upload_path") or "").strip()
+                if up and os.path.exists(up) and not job.get("resume_started"):
+                    set_job(job_id, resume_started=True, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
+                    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, job.get("upload_name") or "", b"", bool(job.get("force_ocr"))), daemon=True)
+                    t.start()
+                    job = get_job(job_id)
+    except Exception:
+        pass
     return jsonify({"ok": True, **job}), 200
 
 
