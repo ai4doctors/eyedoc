@@ -622,3 +622,11 @@ body{
 .sectionTitle b{
   font-weight:900;
 }
+
+/* References scroll cap */
+.references-container,
+.references,
+.references-column {
+  max-height: 35vh;
+  overflow-y: auto;
+}
