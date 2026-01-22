@@ -78,7 +78,8 @@ app = Flask(__name__, template_folder="templates", static_folder="static", stati
 # keeping an in memory cache for speed.
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
-JOB_DIR = os.getenv("JOB_DIR", "/tmp/maneiro_jobs")
+# Support both JOB_DIR and job_dir, since environment variable keys are sometimes created in lowercase.
+JOB_DIR = os.getenv("JOB_DIR") or os.getenv("job_dir") or "/tmp/maneiro_jobs"
 
 # Optional shared job storage in S3.
 #
