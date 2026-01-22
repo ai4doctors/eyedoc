@@ -41,6 +41,11 @@ except Exception:
     OpenAI = None
 
 try:
+    from guidelines.engine import run_guideline_engine
+except Exception:
+    run_guideline_engine = None
+
+try:
     from reportlab.lib.pagesizes import letter as rl_letter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
@@ -98,13 +103,129 @@ def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[
     else:
         args["IdentifyLanguage"] = True
         args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
+    mode_l = (mode or "live").strip().lower()
+    if mode_l in ("live", "exam", "conversation"):
+        try:
+            max_spk = int(os.getenv("TRANSCRIBE_MAX_SPEAKERS", "2") or "2")
+        except Exception:
+            max_spk = 2
+        args["Settings"] = {"ShowSpeakerLabels": True, "MaxSpeakerLabels": max_spk}
     try:
         transcribe.start_transcription_job(**args)
     except Exception as e:
         return False, str(e)
     return True, ""
 
-def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
+
+def diarized_transcript_from_aws(result_json: dict, marker_phrase: str = "let's begin the exam") -> str:
+    """
+    Build a simple Doctor vs Patient style transcript from an AWS Transcribe JSON.
+    Uses the marker phrase to identify which speaker is the doctor.
+    Falls back to speaker labels if the marker is not found.
+    """
+    try:
+        results = (result_json or {}).get("results") or {}
+        items = results.get("items") or []
+        segments = ((results.get("speaker_labels") or {}).get("segments") or [])
+        if not items or not segments:
+            return ""
+
+        # Map time ranges to speaker labels
+        segs = []
+        for seg in segments:
+            spk = seg.get("speaker_label") or ""
+            start = seg.get("start_time")
+            end = seg.get("end_time")
+            if spk and start is not None and end is not None:
+                try:
+                    segs.append((float(start), float(end), spk))
+                except Exception:
+                    pass
+        if not segs:
+            return ""
+
+        # Build utterances per speaker segment
+        def speaker_for_time(t: float) -> str:
+            for a, b, spk in segs:
+                if a <= t <= b:
+                    return spk
+            return segs[-1][2]
+
+        current_spk = None
+        buf = []
+        utterances = []
+
+        def flush():
+            nonlocal buf, current_spk, utterances
+            if current_spk and buf:
+                s = " ".join(buf).strip()
+                if s:
+                    utterances.append((current_spk, s))
+            buf = []
+
+        for it in items:
+            typ = it.get("type")
+            if typ != "pronunciation":
+                # punctuation attaches to last token
+                if typ == "punctuation" and buf:
+                    buf[-1] = buf[-1] + (it.get("alternatives")[0].get("content") if it.get("alternatives") else "")
+                continue
+            alt = (it.get("alternatives") or [{}])[0]
+            word = alt.get("content") or ""
+            st = it.get("start_time")
+            if st is None:
+                continue
+            try:
+                t = float(st)
+            except Exception:
+                continue
+            spk = speaker_for_time(t)
+            if current_spk is None:
+                current_spk = spk
+            if spk != current_spk:
+                flush()
+                current_spk = spk
+            buf.append(word)
+        flush()
+
+        if not utterances:
+            return ""
+
+        # Decide which speaker is doctor
+        doctor_spk = ""
+        mp = (marker_phrase or "").strip().lower()
+        if mp:
+            for spk, text in utterances:
+                if mp in text.lower():
+                    doctor_spk = spk
+                    break
+        if not doctor_spk:
+            doctor_spk = utterances[0][0]
+
+        def role(spk: str) -> str:
+            return "Doctor" if spk == doctor_spk else "Patient"
+
+        # Merge consecutive utterances with same role
+        merged = []
+        last_role = None
+        last_text = ""
+        for spk, text in utterances:
+            r = role(spk)
+            if r == last_role:
+                last_text = (last_text + " " + text).strip()
+            else:
+                if last_role:
+                    merged.append((last_role, last_text))
+                last_role = r
+                last_text = text
+        if last_role:
+            merged.append((last_role, last_text))
+
+        return "\n".join([f"{r}: {t}" for r, t in merged]).strip()
+    except Exception:
+        return ""
+
+def fetch_transcribe_result(job_name: str, mode: str = "live") -> Tuple[str, str, str]:
     ok, msg = aws_ready()
     if not ok:
         return "", "", msg
@@ -177,25 +298,102 @@ def text_is_meaningful(text: str) -> bool:
     ratio = alpha / max(len(s), 1)
     return ratio >= 0.25
 
+def textract_ocr_pdf_bytes(pdf_bytes: bytes) -> Tuple[str, str]:
+    bucket = (os.getenv("AWS_S3_BUCKET") or "").strip()
+    if not bucket:
+        return "", "AWS_S3_BUCKET is not set"
+    ok, msg = aws_ready()
+    if not ok:
+        return "", msg
+    region = (os.getenv("AWS_REGION") or "us-east-1").strip()
+    timeout_sec = int((os.getenv("TEXTRACT_TIMEOUT_SEC") or "90").strip() or "90")
+    tmp_key = f"ocr_tmp/{uuid.uuid4().hex}.pdf"
+    s3, _ = aws_clients()
+    textract = boto3.client("textract", region_name=region)
+    try:
+        s3.put_object(Bucket=bucket, Key=tmp_key, Body=pdf_bytes)
+        resp = textract.start_document_text_detection(
+            DocumentLocation={"S3Object": {"Bucket": bucket, "Name": tmp_key}}
+        )
+        job_id = resp.get("JobId")
+        if not job_id:
+            return "", "Textract did not return a JobId"
+
+        deadline = time.time() + timeout_sec
+        lines: list[str] = []
+        next_token: Optional[str] = None
+
+        while True:
+            if time.time() > deadline:
+                return "", "Textract timed out"
+
+            kwargs: dict = {"JobId": job_id}
+            if next_token:
+                kwargs["NextToken"] = next_token
+
+            out = textract.get_document_text_detection(**kwargs)
+            status = out.get("JobStatus")
+
+            if status == "IN_PROGRESS":
+                time.sleep(1.0)
+                continue
+
+            if status != "SUCCEEDED":
+                return "", f"Textract failed: {status}"
+
+            for b in (out.get("Blocks") or []):
+                if b.get("BlockType") == "LINE" and b.get("Text"):
+                    lines.append(b["Text"])
+
+            next_token = out.get("NextToken")
+            if not next_token:
+                break
+
+        return "\n".join(lines).strip(), ""
+    except Exception as e:
+        return "", f"Textract error: {e}"
+    finally:
+        try:
+            s3.delete_object(Bucket=bucket, Key=tmp_key)
+        except Exception:
+            pass
+
+
 def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+    use_textract = (os.getenv("USE_TEXTRACT_OCR", "1") or "1").strip().lower() in ("1", "true", "yes", "on")
+    if use_textract:
+        txt, err = textract_ocr_pdf_bytes(pdf_bytes)
+        if txt and not err:
+            return txt, ""
+        if err and (fitz is None or Image is None or pytesseract is None):
+            return "", err
+
     if fitz is None or Image is None or pytesseract is None:
         return "", "OCR dependencies missing"
+
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
-        return "", f"Could not open PDF for OCR: {e}"
-    parts: List[str] = []
+        return "", f"OCR open PDF failed: {e}"
+
     try:
-        pages = min(len(doc), max_pages)
+        pages = min(max_pages, doc.page_count)
+        out = []
         for i in range(pages):
             page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=220)
+            pix = page.get_pixmap(dpi=200)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
-            parts.append(pytesseract.image_to_string(img) or "")
+            txt = (pytesseract.image_to_string(img) or "").strip()
+            if txt:
+                out.append(txt)
+        return "\n\n".join(out).strip(), ""
     except Exception as e:
         return "", f"OCR failed: {e}"
-    return "\n".join(parts).strip(), ""
-
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
 def extract_text_from_upload(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
     """Returns text, used_ocr, needs_ocr, error"""
     filename = (getattr(file_storage, "filename", "") or "").lower()
@@ -251,30 +449,6 @@ def ocr_ready() -> Tuple[bool, str]:
         return False, "pytesseract not available"
     return True, ""
 
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> str:
-    ok, _ = ocr_ready()
-    if not ok:
-        return ""
-    try:
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception:
-        return ""
-    parts: List[str] = []
-    try:
-        pages = min(len(doc), max_pages)
-        for i in range(pages):
-            page = doc.load_page(i)
-            pix = page.get_pixmap(dpi=220)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
-            txt = pytesseract.image_to_string(img) or ""
-            parts.append(txt)
-    finally:
-        try:
-            doc.close()
-        except Exception:
-            pass
-    return "\n".join(parts).strip()
-
 def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool, bool, str]:
     """
     Returns: text, used_ocr, needs_ocr, error
@@ -302,11 +476,9 @@ def extract_text_with_ocr_gate(file_storage, force_ocr: bool) -> Tuple[str, bool
     if (not is_meaningful_text(extracted)) and (not force_ocr):
         return "", False, True, "No readable text extracted"
 
-    # OCR path
-    ok, msg = ocr_ready()
-    if not ok:
-        return "", False, False, f"OCR not available: {msg}"
-    ocr_text = ocr_pdf_bytes(pdf_bytes)
+    # OCR path    ocr_text, ocr_err = ocr_pdf_bytes(pdf_bytes)
+    if ocr_err and (not ocr_text):
+        return "", False, False, f"OCR failed: {ocr_err}"
     if is_meaningful_text(ocr_text):
         return ocr_text, True, False, ""
     # Fall back to whatever we extracted
@@ -532,113 +704,114 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
 
 
 
-def canonical_reference_pool(labels):
-    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
-    pool = []
 
-    def add(pmid, citation, url="", source=""):
-        pool.append({
-            "pmid": (pmid or ""),
-            "citation": (citation or ""),
-            "url": (url or ""),
-            "source": (source or ""),
-        })
+def canonical_reference_pool(dx_labels: List[str], specialty: str = "ophthalmology") -> List[Dict[str, Any]]:
+    """
+    Returns a list of canonical references grounded in the local guideline store when available.
 
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
-        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
-        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
-        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
+    Important
+    This avoids guessing citations. If the canonical store is empty, this returns an empty list.
+    """
+    try:
+        from guidelines.store import VectorStore
+    except Exception:
+        return []
 
-    if "myopia" in blob:
-        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
+    dbp = (os.getenv("GUIDELINE_DB_PATH") or "guidelines/guidelines.sqlite").strip()
+    if not os.path.exists(dbp):
+        return []
 
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
-        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
-        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
-        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return []
 
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
-        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
-        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
+    try:
+        from openai import OpenAI
+    except Exception:
+        return []
 
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
-        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
-        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
-        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
+    embed_model = (os.getenv("OPENAI_EMBED_MODEL") or "text-embedding-3-small").strip()
+    client = OpenAI(api_key=api_key)
 
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
-        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+    try:
+        store = VectorStore.load(dbp)
+    except Exception:
+        return []
 
-    if "uveitis" in blob:
-        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
+    labels = [x for x in (dx_labels or []) if isinstance(x, str) and x.strip()]
+    if not labels:
+        return []
 
-    if "cataract" in blob:
-        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
-        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
+    refs_by_citation: Dict[str, Dict[str, Any]] = {}
+    for term in labels[:10]:
+        q = term.strip()
+        try:
+            emb = client.embeddings.create(model=embed_model, input=[q]).data[0].embedding
+        except Exception:
+            continue
+        try:
+            hits = store.search(emb, specialty=specialty, k=6)
+        except Exception:
+            continue
+        for h in hits:
+            cid = (h.get("citation_id") or "").strip()
+            if not cid:
+                continue
+            if cid in refs_by_citation:
+                continue
+            refs_by_citation[cid] = {
+                "stable_id": cid,
+                "title": h.get("title") or "",
+                "year": h.get("year") or "",
+                "source": h.get("title") or "",
+                "version": h.get("version") or "",
+                "section": h.get("section") or "",
+                "page": h.get("page") or "",
+                "url": "",
+            }
 
-    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
-        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+    refs = list(refs_by_citation.values())
+    refs.sort(key=lambda r: (str(r.get("title") or ""), str(r.get("stable_id") or "")))
+    return refs
 
-    return pool[:10]
 
 
-def merge_references(pubmed_refs, canonical_refs, max_total=18):
-    seen = set()
-    merged = []
+def merge_references(canonical: List[Dict[str, Any]], pubmed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Canonical first, PubMed second.
+    De dupes using stable_id when present, otherwise by normalized title.
+    """
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
 
-    def norm_cit(s):
-        return re.sub(r"\s+", " ", (s or "").strip().lower())
+    def key_for(r: Dict[str, Any]) -> str:
+        sid = (r.get("stable_id") or r.get("citation_id") or "").strip()
+        if sid:
+            return "sid:" + sid.lower()
+        t = (r.get("title") or "").strip().lower()
+        t = re.sub(r"\s+", " ", t)
+        return "t:" + t
 
-    def key_for(r):
-        pmid = (r.get("pmid") or "").strip()
-        if pmid:
-            return "pmid:" + pmid
-        return "cit:" + norm_cit(r.get("citation"))
-
-    for r in (pubmed_refs or []):
+    for r in (canonical or []):
         if not isinstance(r, dict):
             continue
         k = key_for(r)
         if k in seen:
             continue
         seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
+        out.append(r)
 
-    for r in (canonical_refs or []):
+    for r in (pubmed or []):
         if not isinstance(r, dict):
             continue
         k = key_for(r)
         if k in seen:
             continue
         seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
+        out.append(r)
 
-    numbered = []
-    for i, r in enumerate(merged[:max_total], start=1):
-        pmid = (r.get("pmid") or "").strip()
-        url = (r.get("url") or "").strip()
-        if (not url) and pmid:
-            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-        numbered.append({
-            "number": str(i),
-            "pmid": pmid,
-            "citation": (r.get("citation") or ""),
-            "url": url,
-            "source": (r.get("source") or ("PubMed" if pmid else "")),
-        })
-    return numbered
+    return out
+
 
 
 def preferred_ref_numbers(label, references):
@@ -887,19 +1060,31 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
-    # Fetch PubMed references based on diagnoses
-    terms = []
+    
+    # Canonical references are primary
+    dx_labels = []
     for dx in analysis.get("diagnoses") or []:
         if isinstance(dx, dict):
             label = (dx.get("label") or "").strip()
             if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
-    analysis['references'] = merge_references(references, canonical)
+                dx_labels.append(label)
 
-    # Assign citation numbers
-    if references:
+    specialty = (os.getenv("CANONICAL_SPECIALTY") or "ophthalmology").strip()
+    canonical = canonical_reference_pool(dx_labels, specialty=specialty)
+
+    # PubMed references are optional supporting evidence
+    # Default to ON so the app returns an evidence trail even before the canonical library is populated.
+    # Set USE_PUBMED_REFERENCES=0 to disable external PubMed lookups.
+    use_pubmed = (os.getenv("USE_PUBMED_REFERENCES") or "1").strip().lower() in ("1","true","yes","on")
+    pubmed_refs: List[Dict[str, Any]] = []
+    if use_pubmed:
+        terms = [x for x in dx_labels if x]
+        pubmed_refs = pubmed_fetch_for_terms(terms)
+
+    analysis["references"] = merge_references(canonical, pubmed_refs)
+
+# Assign citation numbers
+    if analysis.get("references"):
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
         if not cites_err and cites_obj:
             dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
@@ -932,6 +1117,148 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(analysis["plan"][0], dict):
                     analysis["plan"][0]["refs"] = [1]
 
+    # Canonical guideline engine (dry eye flagship)
+    if run_guideline_engine:
+        try:
+            lanes, audit = run_guideline_engine(llm_json, note_text=note_text, analysis=analysis)
+            if lanes:
+                refs = list(analysis.get("references") or [])
+                max_n = 0
+                for r in refs:
+                    try:
+                        max_n = max(max_n, int(r.get("number") or 0))
+                    except Exception:
+                        pass
+                id_to_num = {}
+                for r in refs:
+                    sid = r.get("stable_id")
+                    if sid:
+                        try:
+                            id_to_num[sid] = int(r.get("number") or 0)
+                        except Exception:
+                            pass
+                citations = lanes.get("citations") or []
+                for c in citations:
+                    sid = (c.get("citation_id") or "").strip()
+                    if not sid:
+                        continue
+                    if sid in id_to_num and id_to_num[sid]:
+                        continue
+                    max_n += 1
+                    id_to_num[sid] = max_n
+                    title = (c.get("title") or "").strip()
+                    year = str(c.get("year") or "").strip()
+                    version = (c.get("version") or "").strip()
+                    section = (c.get("section") or "").strip()
+                    page = str(c.get("page") or "").strip()
+                    parts = [p for p in [title, version, year, section] if p]
+                    cite = " ".join(parts)
+                    if page:
+                        cite = (cite + " p" + page).strip()
+                    refs.append({"number": max_n, "citation": cite, "pmid": "", "source": "Canonical", "url": "", "stable_id": sid})
+                analysis["references"] = refs
+
+                def _map_items(items):
+                    out = []
+                    for x in (items or []):
+                        if not isinstance(x, dict):
+                            out.append(x)
+                            continue
+                        rids = x.get("citation_ids") or x.get("refs") or []
+                        mapped = []
+                        for rid in rids:
+                            n = id_to_num.get(rid)
+                            if n:
+                                mapped.append(int(n))
+                        y = dict(x)
+                        y.pop("citation_ids", None)
+                        y["refs"] = mapped
+                        out.append(y)
+                    return out
+
+                lanes2 = dict(lanes)
+                lanes2["documented"] = _map_items(lanes.get("documented"))
+                lanes2["suggested_plan"] = _map_items(lanes.get("suggested_plan"))
+                lanes2.pop("citations", None)
+                analysis["guideline_lanes"] = lanes2
+                analysis["guideline_audit"] = audit
+        except Exception:
+            pass
+
+    
+    # Canonical guideline engine (dry eye flagship)
+        if run_guideline_engine:
+            try:
+                lanes, audit = run_guideline_engine(llm_json, note_text=note_text, analysis=analysis)
+                if lanes:
+                    refs = list(analysis.get("references") or [])
+                    max_n = 0
+                    for r in refs:
+                        try:
+                            max_n = max(max_n, int(r.get("number") or 0))
+                        except Exception:
+                            pass
+                    id_to_num = {}
+                    for r in refs:
+                        sid = (r.get("stable_id") or "").strip()
+                        if sid:
+                            try:
+                                id_to_num[sid] = int(r.get("number") or 0)
+                            except Exception:
+                                pass
+
+                    citations = lanes.get("citations") or []
+                    for c in citations:
+                        sid = (c.get("citation_id") or "").strip()
+                        if not sid:
+                            continue
+                        if sid in id_to_num and id_to_num[sid]:
+                            continue
+                        max_n += 1
+                        id_to_num[sid] = max_n
+                        title = (c.get("title") or "").strip()
+                        version = (c.get("version") or "").strip()
+                        year = str(c.get("year") or "").strip()
+                        section = (c.get("section") or "").strip()
+                        page = str(c.get("page") or "").strip()
+                        cite = " ".join([x for x in [title, version, year, section, ("p"+page if page else "")] if x]).strip()
+                        refs.append({
+                            "number": max_n,
+                            "citation": cite,
+                            "pmid": "",
+                            "source": "Canonical",
+                            "url": "",
+                            "stable_id": sid
+                        })
+                    analysis["references"] = refs
+
+                    def _map_list(items):
+                        out = []
+                        for x in (items or []):
+                            if not isinstance(x, dict):
+                                out.append(x)
+                                continue
+                            rids = x.get("citation_ids") or x.get("refs") or []
+                            mapped = []
+                            for rid in rids:
+                                n = id_to_num.get(rid)
+                                if n:
+                                    mapped.append(int(n))
+                            y = dict(x)
+                            y.pop("citation_ids", None)
+                            y["refs"] = mapped
+                            out.append(y)
+                        return out
+
+                    lanes2 = dict(lanes)
+                    lanes2["documented"] = _map_list(lanes.get("documented"))
+                    lanes2["suggested_plan"] = _map_list(lanes.get("suggested_plan"))
+                    lanes2.pop("citations", None)
+                    analysis["guideline_lanes"] = lanes2
+                    analysis["guideline_audit"] = audit
+            except Exception:
+                pass
+
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
 
 @app.get("/")
@@ -944,15 +1271,23 @@ def analyze_start():
     if not file:
         return jsonify({"ok": False, "error": "No file uploaded"}), 400
 
-    handwritten = (request.form.get("handwritten") or "").strip().lower() in ("1", "true", "yes", "on")
-
     filename = (getattr(file, "filename", "") or "").lower()
     data = file.read()
-    file.stream = io.BytesIO(data)
 
     note_text = ""
     if filename.endswith(".pdf"):
-        note_text = extract_pdf_text(file.stream)
+        try:
+            note_text = extract_pdf_text(io.BytesIO(data))
+        except Exception:
+            note_text = ""
+        # If this looks like a scanned PDF, run OCR automatically
+        if not text_is_meaningful(note_text):
+            ocr_text, ocr_err = ocr_pdf_bytes(data)
+            if ocr_text and text_is_meaningful(ocr_text):
+                note_text = ocr_text
+            else:
+                return jsonify({"ok": False, "error": ocr_err or "Could not read this PDF. Try a clearer scan."}), 200
+
     elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
         if Image is None or pytesseract is None:
             return jsonify({"ok": False, "error": "Image OCR dependencies missing"}), 200
@@ -961,23 +1296,11 @@ def analyze_start():
             note_text = (pytesseract.image_to_string(img) or "").strip()
         except Exception as e:
             return jsonify({"ok": False, "error": f"Image OCR failed: {e}"}), 200
+
     else:
-        return jsonify({"ok": False, "error": "Unsupported file type for analysis. Use Record exam or upload a PDF or image."}), 200
+        return jsonify({"ok": False, "error": "Unsupported file type. Upload a PDF or image."}), 200
 
-    if not handwritten and not text_is_meaningful(note_text):
-        return jsonify({
-            "ok": False,
-            "needs_ocr": True,
-            "error": "No readable text extracted. If these notes are scanned or handwritten, enable the handwritten option and run OCR."
-        }), 200
-
-    if handwritten and filename.endswith(".pdf"):
-        ocr_text, ocr_err = ocr_pdf_bytes(data)
-        if ocr_text:
-            note_text = ocr_text
-        else:
-            return jsonify({"ok": False, "error": ocr_err or "OCR did not return readable text"}), 200
-
+    note_text = (note_text or "").strip()
     if not note_text:
         return jsonify({"ok": False, "error": "No text extracted"}), 200
 
@@ -1019,6 +1342,7 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
+    mode = (request.form.get("mode") or "live").strip()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1035,10 +1359,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language)
+    started, err = start_transcribe_job(job_name, key, language, mode)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 
@@ -1054,7 +1378,7 @@ def transcribe_status():
     if (job.get("status") or "") in ("complete", "error"):
         return jsonify({"ok": True, **job}), 200
 
-    txt, status, err = fetch_transcribe_result(job_id)
+    txt, status, err = fetch_transcribe_result(job_id, (job.get("mode") or "live"))
     if err and status == "failed":
         set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
         return jsonify({"ok": True, **get_job(job_id)}), 200
