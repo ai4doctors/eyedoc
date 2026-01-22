@@ -927,6 +927,10 @@ function openRecord(){
       sel.value = "auto"
     }
   }
+  const modeSel = el("recordMode")
+  if(modeSel){
+    modeSel.value = "live"
+  }
   el("recordState").textContent = "Ready"
   el("recordTimer").textContent = "00:00"
   el("recordTranscript").value = ""
@@ -1012,7 +1016,9 @@ async function startTranscribeBlob(blob){
   el("recordState").textContent = "Transcribing"
   const fd = new FormData()
   const lang = el("recordLang") ? el("recordLang").value : "auto"
+  const mode = el("recordMode") ? el("recordMode").value : "live"
   fd.append("language", lang)
+  fd.append("mode", mode)
   fd.append("audio", blob, "recording.webm")
   const res = await fetch("/transcribe_start", { method:"POST", body: fd })
   const json = await res.json()

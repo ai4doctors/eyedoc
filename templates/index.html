@@ -174,19 +174,23 @@
               <option value="es-US">Spanish</option>
               <option value="fr-CA">French</option>
             </select>
+        <select id="recordMode" class="field">
+          <option value="live">Live exam</option>
+          <option value="dictation">Dictation</option>
+        </select>
           </div>
         </div>
         <div class="recordControls">
-          <button id="recStart" class="btnPrimary" type="button">Start</button>
-          <button id="recPause" class="btnSecondary" type="button" disabled>Pause</button>
-          <button id="recStop" class="btnSecondary" type="button" disabled>Stop</button>
-          <button id="recSave" class="btnPrimary" type="button" disabled>Save and analyze</button>
+          <button id="recStart" class="btnPrimary recBtn" type="button">Start</button>
+          <button id="recPause" class="btnSecondary recBtn" type="button" disabled>Pause</button>
+          <button id="recStop" class="btnSecondary recBtn" type="button" disabled>Stop</button>
+          <button id="recSave" class="btnPrimary recBtn" type="button" disabled>Save and analyze</button>
         </div>
         <div class="recordGrid">
           <div>
             <div class="sectionTitle"><b>Transcript</b></div>
-            <textarea id="recordTranscript" class="transcriptBox" placeholder="Transcript will appear here"></textarea>
-            <div class="recordNote">Review and edit the transcript before saving. Export PDF after generation on the main screen.</div>
+            <textarea id="recordTranscript" class="transcriptBox" placeholder="Transcript will appear here" placeholder="Transcription will appear here after you press Stop."></textarea>
+            <div class="recordNote">Review and edit the transcript before pressing Analyze.</div>
           </div>
         </div>
       </div>

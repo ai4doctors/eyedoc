@@ -81,7 +81,7 @@ def aws_clients():
 def s3_uri(bucket: str, key: str) -> str:
     return f"s3://{bucket}/{key}"
 
-def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[bool, str]:
+def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "live") -> Tuple[bool, str]:
     ok, msg = aws_ready()
     if not ok:
         return False, msg
@@ -98,6 +98,11 @@ def start_transcribe_job(job_name: str, media_key: str, language: str) -> Tuple[
     else:
         args["IdentifyLanguage"] = True
         args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
+
+    mode_val = (mode or "live").strip().lower()
+    if mode_val == "live":
+        args["Settings"] = {"ShowSpeakerLabels": True, "MaxSpeakerLabels": 2}
+
     try:
         transcribe.start_transcription_job(**args)
     except Exception as e:
@@ -1070,6 +1075,7 @@ def transcribe_start():
     if not audio:
         return jsonify({"ok": False, "error": "No audio uploaded"}), 400
     language = (request.form.get("language") or "auto").strip()
+    mode = (request.form.get("mode") or "live").strip()
     ok, msg = aws_ready()
     if not ok:
         return jsonify({"ok": False, "error": msg}), 200
@@ -1086,10 +1092,10 @@ def transcribe_start():
         return jsonify({"ok": False, "error": str(e)}), 200
 
     job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language)
+    started, err = start_transcribe_job(job_name, key, language, mode)
     if not started:
         return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language)
+    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
     return jsonify({"ok": True, "job_id": job_name}), 200
 
 
