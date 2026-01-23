@@ -1,28 +1,14 @@
 
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8">
 <title>Maneiro Login</title>
-<style>
-body{font-family:system-ui;background:#0b0f14;color:#e8eef6;margin:0}
-.wrap{min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#121a24;padding:22px;border-radius:14px;max-width:420px;width:100%}
-input,button{width:100%;padding:12px;margin-top:10px}
-button{background:#3a7afe;color:white;border:0;border-radius:10px}
-.err{color:#ff7b7b;margin-top:10px}
-</style>
 </head>
 <body>
-<div class="wrap">
-<div class="card">
-<form method="post" action="/login">
-<input type="hidden" name="next" value="{{ next_url }}">
+<form method="post">
 <input type="password" name="password" placeholder="Password">
 <button type="submit">Enter</button>
-{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if error %}<p>{{ error }}</p>{% endif %}
 </form>
-</div>
-</div>
 </body>
 </html>

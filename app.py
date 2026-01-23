@@ -9,8 +9,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me")
 def home():
     paywall_on = os.environ.get("PAYWALL_ENABLED", "false").lower() in ("1","true","yes")
     if paywall_on and not session.get("pw_ok"):
-        next_url = request.full_path if request.full_path else "/"
-        return redirect(url_for("login", next=next_url))
+        return redirect(url_for("login", next="/"))
     return render_template("index.html")
 
 @app.route("/login", methods=["GET","POST"])
@@ -29,6 +28,10 @@ def login():
 def logout():
     session.pop("pw_ok", None)
     return redirect(url_for("login"))
+
+@app.route("/submit", methods=["POST"])
+def submit():
+    return jsonify(summary="ok", diagnosis="ok", plan="ok", references=["ref1","ref2"])
 
 @app.route("/healthz")
 def healthz():
