@@ -68,6 +68,8 @@ except Exception:
 APP_VERSION = os.getenv("APP_VERSION", "2026.4")
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
+
+# Paywall session key (set FLASK_SECRET_KEY in Render/App Runner env vars)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me")
 
 # Job storage
@@ -1362,14 +1364,18 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
 
 @app.get("/")
 def index():
-    paywall_on = os.environ.get("PAYWALL_ENABLED", "false").lower() in ("1", "true", "yes")
+    paywall_on = os.environ.get("PAYWALL_ENABLED", "false").lower() in ("1","true","yes")
     if paywall_on and not session.get("pw_ok"):
-        return redirect(url_for("login", next="/"))
+        next_url = request.full_path if request.full_path else "/"
+        return redirect(url_for("login", next=next_url))
     return render_template("index.html", version=APP_VERSION)
 
-
-@app.route("/login", methods=["GET", "POST"])
+@app.route("/login", methods=["GET","POST"])
 def login():
+    paywall_on = os.environ.get("PAYWALL_ENABLED", "false").lower() in ("1","true","yes")
+    if not paywall_on:
+        return redirect(url_for("index"))
+
     next_url = request.args.get("next") or request.form.get("next") or "/"
     if request.method == "POST":
         password = request.form.get("password", "")
@@ -1378,13 +1384,13 @@ def login():
             session["pw_ok"] = True
             return redirect(next_url)
         return render_template("paywall_login.html", error="Wrong password", next_url=next_url)
+
     return render_template("paywall_login.html", error="", next_url=next_url)
 
 @app.get("/logout")
 def logout():
     session.pop("pw_ok", None)
     return redirect(url_for("login"))
-
 
 @app.post("/analyze_start")
 def analyze_start():

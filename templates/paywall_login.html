@@ -1,34 +1,32 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Maneiro Login</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0f14; color:#e8eef6; margin:0}
-.wrap{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px}
-.card{background:#121a24; border:1px solid rgba(255,255,255,0.08); padding:22px; border-radius:16px; width:100%; max-width:420px}
-h1{font-size:18px; margin:0 0 10px 0}
-p{margin:0 0 16px 0; opacity:0.85; font-size:14px}
-input{width:100%; padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,0.12); background:#0f1520; color:#e8eef6; font-size:15px; box-sizing:border-box}
-button{width:100%; margin-top:12px; padding:12px 14px; border-radius:12px; border:0; background:#2f6bff; color:white; font-size:15px; cursor:pointer}
-.err{margin-top:12px; color:#ff7b7b; font-size:14px}
-.small{margin-top:14px; font-size:12px; opacity:0.7}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maneiro Login</title>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#0b0f14;color:#e8eef6}
+    .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{width:100%;max-width:420px;background:#121a24;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    h1{font-size:18px;margin:0 0 14px 0}
+    .muted{opacity:.8;font-size:13px;margin:0 0 16px 0}
+    input{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:#0f1620;color:#e8eef6;font-size:14px;outline:none}
+    button{margin-top:12px;width:100%;padding:12px 12px;border-radius:12px;border:0;background:#3a7afe;color:white;font-size:14px;font-weight:600;cursor:pointer}
+    .err{margin-top:12px;color:#ff7b7b;font-size:13px}
+  </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card">
-    <h1>Enter Maneiro</h1>
-    <p>Password required.</p>
-    <form method="post" action="/login">
-      <input type="hidden" name="next" value="{{ next_url }}">
-      <input type="password" name="password" placeholder="Password" autofocus>
-      <button type="submit">Continue</button>
-      {% if error %}<div class="err">{{ error }}</div>{% endif %}
-      <div class="small">If you do not have access, contact the Maneiro team.</div>
-    </form>
+  <div class="wrap">
+    <div class="card">
+      <h1>Enter Maneiro</h1>
+      <p class="muted">Password required.</p>
+      <form method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <input type="password" name="password" placeholder="Password" autofocus>
+        <button type="submit">Continue</button>
+        {% if error %}<div class="err">{{ error }}</div>{% endif %}
+      </form>
+    </div>
   </div>
-</div>
 </body>
 </html>
