@@ -681,7 +681,7 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
     case_queries: List[str] = []
     for term in uniq_terms[:8]:
         case_queries.append(f"({term}) ophthalmology")
-        case_queries.append(f"({term}) (guideline OR consensus OR "preferred practice pattern" OR systematic review OR meta analysis)")
+        case_queries.append(f"({term}) (guideline OR consensus OR \"preferred practice pattern\" OR systematic review OR meta analysis)")
 
     if not canonical_queries and not case_queries:
         case_queries = ["ophthalmology clinical practice guideline"]
