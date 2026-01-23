@@ -1,0 +1,12 @@
+{
+  "dry_eye_disease": {
+    "definition": "Multifactorial disease of the ocular surface characterized by loss of homeostasis of the tear film.",
+    "key_references": [
+      {
+        "title": "TFOS DEWS II Definition and Classification",
+        "year": 2017,
+        "journal": "The Ocular Surface"
+      }
+    ]
+  }
+}
