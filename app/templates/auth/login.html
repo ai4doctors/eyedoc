@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login | Maneiro.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f6f8ff;
+      --bgAccent: #eef7f5;
+      --panel: #ffffff;
+      --panel2: #f3f6ff;
+      --text: #0b1226;
+      --muted: #51565b;
+      --border: #d8def0;
+      --primary: #9cd0c5;
+      --accent: #9cd0c5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 0%, var(--bgAccent) 0%, var(--bg) 60%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .authCard {
+      width: 100%;
+      max-width: 420px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 32px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    }
+    .authLogo {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .authLogo img {
+      height: 48px;
+      width: auto;
+    }
+    .authTitle {
+      font-size: 24px;
+      font-weight: 900;
+      margin: 0 0 8px 0;
+      text-align: center;
+    }
+    .authSubtitle {
+      color: var(--muted);
+      font-size: 15px;
+      text-align: center;
+      margin: 0 0 28px 0;
+    }
+    .formGroup {
+      margin-bottom: 18px;
+    }
+    .formLabel {
+      display: block;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .formInput {
+      width: 100%;
+      height: 48px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(243,246,255,0.95);
+      color: var(--text);
+      font-size: 16px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .formInput:focus {
+      box-shadow: 0 0 0 3px rgba(156,208,197,0.35);
+      border-color: rgba(156,208,197,0.75);
+    }
+    .formInput::placeholder {
+      color: var(--muted);
+      opacity: 0.7;
+    }
+    .btnPrimary {
+      width: 100%;
+      height: 48px;
+      padding: 12px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.06);
+      background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
+      color: #ffffff;
+      font-weight: 900;
+      font-size: 16px;
+      font-family: inherit;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(156,208,197,0.28);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .btnPrimary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(156,208,197,0.32);
+    }
+    .btnPrimary:active {
+      transform: translateY(0);
+    }
+    .btnPrimary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .authFooter {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .authFooter a {
+      color: var(--text);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .authFooter a:hover {
+      text-decoration: underline;
+    }
+    .errorMsg {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #dc2626;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      margin-bottom: 18px;
+    }
+    .forgotLink {
+      display: block;
+      text-align: right;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      margin-top: 8px;
+    }
+    .forgotLink:hover {
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <div class="authCard">
+    <div class="authLogo">
+      <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro.ai" />
+    </div>
+    
+    <h1 class="authTitle">Welcome back</h1>
+    <p class="authSubtitle">Sign in to your clinic account</p>
+    
+    {% if error %}
+    <div class="errorMsg">{{ error }}</div>
+    {% endif %}
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="errorMsg">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    
+    <form method="POST" action="{{ url_for('auth.login') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      <input type="hidden" name="next" value="{{ request.args.get('next', '') }}"/>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="email">Email</label>
+        <input 
+          type="email" 
+          id="email" 
+          name="email" 
+          class="formInput" 
+          placeholder="you@clinic.com"
+          required 
+          autofocus
+        />
+      </div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="password">Password</label>
+        <input 
+          type="password" 
+          id="password" 
+          name="password" 
+          class="formInput" 
+          placeholder="Enter your password"
+          required
+        />
+        <a href="{{ url_for('auth.forgot_password') if 'forgot_password' in url_for.__globals__ else '#' }}" class="forgotLink">Forgot password?</a>
+      </div>
+      
+      <button type="submit" class="btnPrimary">Sign in</button>
+    </form>
+    
+    <div class="authFooter">
+      New to Maneiro? <a href="{{ url_for('auth.register') }}">Create an account</a>
+    </div>
+  </div>
+</body>
+</html>

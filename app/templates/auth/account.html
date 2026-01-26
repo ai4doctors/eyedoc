@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Account | Maneiro.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+  <style>
+    .accountWrap { max-width: 800px; margin: 0 auto; padding: 32px 24px; }
+    .accountHeader { margin-bottom: 32px; }
+    .accountTitle { font-size: 28px; font-weight: 900; margin: 0 0 8px 0; }
+    .accountSubtitle { color: var(--muted); font-size: 16px; margin: 0; }
+    .accountCard { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 24px; margin-bottom: 20px; }
+    .cardTitle { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 0 0 16px 0; }
+    .infoRow { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .infoRow:last-child { border-bottom: none; }
+    .infoLabel { color: var(--muted); font-weight: 600; }
+    .infoValue { font-weight: 700; }
+    .usageMeter { margin-top: 12px; }
+    .usageBar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+    .usageFill { height: 100%; background: linear-gradient(90deg, var(--primary), rgba(118,185,173,1)); border-radius: 4px; transition: width 0.3s; }
+    .usageText { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-top: 6px; }
+    .planBadge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .planTrial { background: rgba(156,208,197,0.2); color: #2d8a7a; }
+    .planPaid { background: rgba(99,102,241,0.15); color: #4f46e5; }
+    .backLink { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); text-decoration: none; font-weight: 600; margin-bottom: 20px; }
+    .backLink:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <header class="topBar">
+    <div class="brand">
+      <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
+    </div>
+    <div class="topActions">
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.index') }}">Dashboard</a>
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.logout') }}">Logout</a>
+    </div>
+  </header>
+
+  <div class="accountWrap">
+    <a href="{{ url_for('auth.index') }}" class="backLink">← Back to Dashboard</a>
+    
+    <div class="accountHeader">
+      <h1 class="accountTitle">Account Settings</h1>
+      <p class="accountSubtitle">Manage your profile and organization</p>
+    </div>
+    
+    <div class="accountCard">
+      <h2 class="cardTitle">Your Profile</h2>
+      <div class="infoRow">
+        <span class="infoLabel">Name</span>
+        <span class="infoValue">{{ user.first_name }} {{ user.last_name }}</span>
+      </div>
+      <div class="infoRow">
+        <span class="infoLabel">Email</span>
+        <span class="infoValue">{{ user.email }}</span>
+      </div>
+      <div class="infoRow">
+        <span class="infoLabel">Role</span>
+        <span class="infoValue">{{ user.role.value|capitalize }}</span>
+      </div>
+    </div>
+    
+    <div class="accountCard">
+      <h2 class="cardTitle">Organization</h2>
+      <div class="infoRow">
+        <span class="infoLabel">Clinic Name</span>
+        <span class="infoValue">{{ org.name }}</span>
+      </div>
+      <div class="infoRow">
+        <span class="infoLabel">Plan</span>
+        <span class="infoValue">
+          {% if org.plan.value == 'trial' %}
+            <span class="planBadge planTrial">Trial</span>
+          {% else %}
+            <span class="planBadge planPaid">{{ org.plan.value|capitalize }}</span>
+          {% endif %}
+        </span>
+      </div>
+      <div class="infoRow">
+        <span class="infoLabel">Organization ID</span>
+        <span class="infoValue">{{ org.slug }}</span>
+      </div>
+    </div>
+    
+    <div class="accountCard">
+      <h2 class="cardTitle">Usage This Month</h2>
+      <div class="usageMeter">
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+          <span class="infoValue" style="font-size: 32px;">{{ org.monthly_job_count }}</span>
+          <span class="infoLabel">of {{ org.max_monthly_jobs }} jobs</span>
+        </div>
+        <div class="usageBar">
+          <div class="usageFill" style="width: {{ (org.monthly_job_count / org.max_monthly_jobs * 100)|int }}%"></div>
+        </div>
+        <div class="usageText">
+          <span>{{ ((org.monthly_job_count / org.max_monthly_jobs) * 100)|round(1) }}% used</span>
+          <span>{{ org.max_monthly_jobs - org.monthly_job_count }} remaining</span>
+        </div>
+      </div>
+    </div>
+    
+    {% if user.role.value == 'admin' %}
+    <div class="accountCard">
+      <h2 class="cardTitle">Admin Actions</h2>
+      <p style="color: var(--muted); margin: 0 0 16px 0;">Team management and billing coming in Phase 2</p>
+      <button class="btn" disabled>Invite Team Member</button>
+      <button class="btn" disabled style="margin-left: 8px;">Manage Billing</button>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

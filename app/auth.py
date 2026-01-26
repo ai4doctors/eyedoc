@@ -1,163 +1,180 @@
 """
-Authentication routes and utilities
+Authentication Blueprint (Phase 1)
+
+Routes:
+- GET/POST /register: Create organization + first admin user
+- GET/POST /login: Email + password authentication
+- GET /logout: End session
 """
-from functools import wraps
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify
-from flask_login import LoginManager, login_user, logout_user, current_user, login_required
-from .models import db, User, AuditLog, SubscriptionStatus, SubscriptionTier
-import stripe
+import re
+from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask_login import login_user, logout_user, current_user, login_required
+from app import db, login_manager
+from app.models import Organization, User, OrganizationPlan, UserRole, AuditLog
 
 auth_bp = Blueprint('auth', __name__)
-login_manager = LoginManager()
 
-
-def init_auth(app):
-    """Initialize authentication"""
-    login_manager.init_app(app)
-    login_manager.login_view = 'auth.login'
-    login_manager.login_message = 'Please log in to access this page.'
-    
 
 @login_manager.user_loader
 def load_user(user_id):
-    """Load user by ID"""
+    """Load user by ID for Flask-Login"""
     return User.query.get(int(user_id))
 
 
-def subscription_required(tier=None):
-    """Decorator to require active subscription"""
-    def decorator(f):
-        @wraps(f)
-        @login_required
-        def decorated_function(*args, **kwargs):
-            if not current_user.is_subscribed:
-                flash('Please subscribe to access this feature.', 'warning')
-                return redirect(url_for('auth.pricing'))
-            
-            if tier and current_user.subscription_tier.value < tier:
-                flash(f'This feature requires {tier} subscription.', 'warning')
-                return redirect(url_for('auth.pricing'))
-            
-            return f(*args, **kwargs)
-        return decorated_function
-    return decorator
-
-
-def usage_limit_check(f):
-    """Decorator to check usage limits"""
-    @wraps(f)
-    @login_required
-    def decorated_function(*args, **kwargs):
-        if not current_user.can_create_job:
-            flash('Monthly job limit reached. Please upgrade your plan.', 'warning')
-            return redirect(url_for('auth.pricing'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def log_audit_event(event_type, description, metadata=None):
-    """Log audit event"""
-    if current_user.is_authenticated:
-        audit_log = AuditLog(
-            user_id=current_user.id,
+def log_audit_event(event_type, description, user_id=None, org_id=None):
+    """Log an audit event for compliance tracking"""
+    try:
+        log = AuditLog(
+            organization_id=org_id or (current_user.organization_id if current_user.is_authenticated else None),
+            user_id=user_id or (current_user.id if current_user.is_authenticated else None),
             event_type=event_type,
             event_description=description,
-            ip_address=request.remote_addr,
-            user_agent=request.headers.get('User-Agent'),
-            metadata=metadata
+            ip_address=request.remote_addr
         )
-        db.session.add(audit_log)
+        db.session.add(log)
         db.session.commit()
+    except Exception:
+        pass  # Don't fail if audit logging fails
+
+
+def slugify(text):
+    """Convert text to URL-friendly slug"""
+    text = text.lower().strip()
+    text = re.sub(r'[^\w\s-]', '', text)
+    text = re.sub(r'[\s_-]+', '-', text)
+    text = re.sub(r'^-+|-+$', '', text)
+    return text
+
+
+@auth_bp.route('/')
+def index():
+    """Main application page"""
+    if not current_user.is_authenticated:
+        return redirect(url_for('auth.login'))
+    return render_template('index.html', user=current_user)
 
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
-    """User registration"""
+    """Register a new organization and admin user"""
     if current_user.is_authenticated:
-        return redirect(url_for('index'))
+        return redirect(url_for('auth.index'))
     
     if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
-        password = request.form.get('password', '')
+        # Get form data
+        clinic_name = request.form.get('clinic_name', '').strip()
         first_name = request.form.get('first_name', '').strip()
         last_name = request.form.get('last_name', '').strip()
+        email = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        password_confirm = request.form.get('password_confirm', '')
         
         # Validation
-        if not email or not password:
-            flash('Email and password are required.', 'error')
+        errors = []
+        
+        if not clinic_name:
+            errors.append('Clinic name is required')
+        
+        if not first_name or not last_name:
+            errors.append('First and last name are required')
+        
+        if not email:
+            errors.append('Email is required')
+        elif not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
+            errors.append('Please enter a valid email address')
+        elif User.query.filter_by(email=email).first():
+            errors.append('An account with this email already exists')
+        
+        if len(password) < 8:
+            errors.append('Password must be at least 8 characters')
+        elif password != password_confirm:
+            errors.append('Passwords do not match')
+        
+        if errors:
+            for error in errors:
+                flash(error, 'error')
             return render_template('auth/register.html')
         
-        if User.query.filter_by(email=email).first():
-            flash('Email already registered.', 'error')
-            return render_template('auth/register.html')
+        # Create organization
+        slug = slugify(clinic_name)
+        base_slug = slug
+        counter = 1
+        while Organization.query.filter_by(slug=slug).first():
+            slug = f"{base_slug}-{counter}"
+            counter += 1
         
-        # Create user
+        org = Organization(
+            name=clinic_name,
+            slug=slug,
+            email=email,
+            plan=OrganizationPlan.TRIAL,
+            max_monthly_jobs=50  # Trial limit
+        )
+        db.session.add(org)
+        db.session.flush()  # Get org.id
+        
+        # Create admin user
         user = User(
+            organization_id=org.id,
             email=email,
             first_name=first_name,
             last_name=last_name,
-            subscription_status=SubscriptionStatus.TRIAL,
-            subscription_tier=SubscriptionTier.FREE
+            role=UserRole.ADMIN
         )
         user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
         
-        try:
-            # Create Stripe customer
-            stripe_customer = stripe.Customer.create(
-                email=email,
-                name=f"{first_name} {last_name}".strip() or email,
-                metadata={'user_id': user.id}
-            )
-            user.stripe_customer_id = stripe_customer.id
-            
-            db.session.add(user)
-            db.session.commit()
-            
-            log_audit_event('user_registered', f'User {email} registered')
-            
-            # Auto-login
-            login_user(user)
-            flash('Registration successful! Welcome to Maneiro.ai', 'success')
-            return redirect(url_for('index'))
-            
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Registration failed: {str(e)}', 'error')
-            return render_template('auth/register.html')
+        # Log the registration
+        log_audit_event(
+            'user_registered',
+            f'New organization "{clinic_name}" created with admin user {email}',
+            user_id=user.id,
+            org_id=org.id
+        )
+        
+        # Log them in
+        login_user(user)
+        
+        flash('Welcome to Maneiro! Your account has been created.', 'success')
+        return redirect(url_for('auth.index'))
     
     return render_template('auth/register.html')
 
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    """User login"""
+    """Log in an existing user"""
     if current_user.is_authenticated:
-        return redirect(url_for('index'))
+        return redirect(url_for('auth.index'))
     
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
-        remember = request.form.get('remember', False)
+        next_page = request.form.get('next', '')
         
+        # Find user
         user = User.query.filter_by(email=email).first()
         
-        if user and user.check_password(password):
-            if not user.is_active:
-                flash('Account is disabled. Please contact support.', 'error')
-                return render_template('auth/login.html')
-            
-            login_user(user, remember=remember)
-            user.last_login_at = datetime.now(timezone.utc)
-            db.session.commit()
-            
-            log_audit_event('user_login', f'User {email} logged in')
-            
-            next_page = request.args.get('next')
-            if next_page:
-                return redirect(next_page)
-            return redirect(url_for('index'))
+        if user is None or not user.check_password(password):
+            flash('Invalid email or password', 'error')
+            return render_template('auth/login.html')
         
-        flash('Invalid email or password.', 'error')
+        # Check if user is active
+        if not user.organization:
+            flash('Your organization has been deactivated', 'error')
+            return render_template('auth/login.html')
+        
+        # Log them in
+        login_user(user)
+        
+        # Log the event
+        log_audit_event('user_login', f'User {email} logged in')
+        
+        # Redirect to next page or index
+        if next_page and next_page.startswith('/'):
+            return redirect(next_page)
+        return redirect(url_for('auth.index'))
     
     return render_template('auth/login.html')
 
@@ -165,108 +182,26 @@ def login():
 @auth_bp.route('/logout')
 @login_required
 def logout():
-    """User logout"""
-    log_audit_event('user_logout', f'User {current_user.email} logged out')
+    """Log out the current user"""
+    email = current_user.email
+    log_audit_event('user_logout', f'User {email} logged out')
     logout_user()
-    flash('You have been logged out.', 'info')
+    flash('You have been logged out', 'info')
     return redirect(url_for('auth.login'))
-
-
-@auth_bp.route('/pricing')
-def pricing():
-    """Pricing page"""
-    return render_template('auth/pricing.html')
-
-
-@auth_bp.route('/subscribe/<tier>', methods=['POST'])
-@login_required
-def subscribe(tier):
-    """Create Stripe checkout session"""
-    try:
-        # Map tiers to Stripe price IDs (set these in your Stripe dashboard)
-        price_ids = {
-            'basic': 'price_basic_monthly',
-            'professional': 'price_professional_monthly',
-            'enterprise': 'price_enterprise_monthly'
-        }
-        
-        if tier not in price_ids:
-            return jsonify({'error': 'Invalid tier'}), 400
-        
-        # Create checkout session
-        checkout_session = stripe.checkout.Session.create(
-            customer=current_user.stripe_customer_id,
-            mode='subscription',
-            line_items=[{
-                'price': price_ids[tier],
-                'quantity': 1,
-            }],
-            success_url=url_for('auth.subscription_success', _external=True),
-            cancel_url=url_for('auth.pricing', _external=True),
-            metadata={
-                'user_id': current_user.id,
-                'tier': tier
-            }
-        )
-        
-        return jsonify({'checkout_url': checkout_session.url})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@auth_bp.route('/subscription/success')
-@login_required
-def subscription_success():
-    """Subscription success page"""
-    flash('Subscription activated! Thank you for subscribing.', 'success')
-    log_audit_event('subscription_created', f'User subscribed')
-    return redirect(url_for('index'))
 
 
 @auth_bp.route('/account')
 @login_required
 def account():
-    """User account page"""
-    return render_template('auth/account.html', user=current_user)
+    """User account page (placeholder)"""
+    org = current_user.organization
+    return render_template('auth/account.html', user=current_user, org=org)
 
 
-@auth_bp.route('/account/update', methods=['POST'])
-@login_required
-def update_account():
-    """Update account details"""
-    try:
-        current_user.first_name = request.form.get('first_name', '').strip()
-        current_user.last_name = request.form.get('last_name', '').strip()
-        current_user.license_number = request.form.get('license_number', '').strip()
-        current_user.clinic_name = request.form.get('clinic_name', '').strip()
-        
-        db.session.commit()
-        log_audit_event('account_updated', 'User updated account details')
-        flash('Account updated successfully.', 'success')
-        
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Update failed: {str(e)}', 'error')
-    
-    return redirect(url_for('auth.account'))
-
-
-@auth_bp.route('/account/cancel-subscription', methods=['POST'])
-@login_required
-def cancel_subscription():
-    """Cancel subscription"""
-    try:
-        if current_user.stripe_subscription_id:
-            stripe.Subscription.delete(current_user.stripe_subscription_id)
-            
-            current_user.subscription_status = SubscriptionStatus.CANCELED
-            db.session.commit()
-            
-            log_audit_event('subscription_canceled', 'User canceled subscription')
-            flash('Subscription canceled. You can continue using until the end of the billing period.', 'info')
-        
-    except Exception as e:
-        flash(f'Cancellation failed: {str(e)}', 'error')
-    
-    return redirect(url_for('auth.account'))
+# Password reset placeholder (Phase 2)
+@auth_bp.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Password reset request (TODO: implement email sending)"""
+    if request.method == 'POST':
+        flash('Password reset is not yet implemented. Contact your administrator.', 'info')
+    return render_template('auth/forgot_password.html')

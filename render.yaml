@@ -1,25 +1,29 @@
+databases:
+  - name: maneiro-db
+    plan: starter
+    databaseName: maneiro
+    user: maneiro_user
+
 services:
   - type: web
     name: maneiro-web
     env: docker
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /health
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz
     envVars:
-      - key: ENV
-        value: production
       - key: DATABASE_URL
         fromDatabase:
           name: maneiro-db
           property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: maneiro-redis
-          type: redis
-          property: connectionString
-  - type: redis
-    name: maneiro-redis
-    plan: starter
-  - type: pserv
-    name: maneiro-db
-    plan: starter
-    postgresMajorVersion: 15
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: AWS_REGION
+        value: us-west-2

@@ -1,39 +1,40 @@
+"""
+Maneiro.ai Application Factory (Phase 1)
+"""
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_session import Session
+from flask_login import LoginManager
+from flask_wtf.csrf import CSRFProtect
+from config import config
 
-from .utils.config import get_config
-from .models import db
-from .auth import init_auth, auth_bp
-from .api import api_bp, limiter
-from .stripe_webhook import webhook_bp as stripe_webhook_bp
-
+db = SQLAlchemy()
 migrate = Migrate()
-sess = Session()
+login_manager = LoginManager()
+csrf = CSRFProtect()
 
-def create_app(env: str | None = None) -> Flask:
-    app = Flask(__name__, template_folder="templates")
-    cfg = get_config(env)
-    app.config.from_object(cfg)
-
+def create_app(config_name='default'):
+    app = Flask(__name__)
+    app.config.from_object(config[config_name])
+    
+    # Initialize extensions
     db.init_app(app)
     migrate.init_app(app, db)
-    sess.init_app(app)
-
-    init_auth(app)
-    limiter.init_app(app)
-
-    app.register_blueprint(auth_bp, url_prefix="/auth")
-    app.register_blueprint(api_bp, url_prefix="/api")
-    app.register_blueprint(stripe_webhook_bp, url_prefix="/webhooks")
-
-    @app.get("/health")
+    login_manager.init_app(app)
+    csrf.init_app(app)
+    
+    login_manager.login_view = 'auth.login'
+    
+    # Register blueprints
+    from app.auth import auth_bp
+    from app.api import api_bp
+    
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(api_bp, url_prefix='/api')
+    
+    # Health check
+    @app.route('/healthz')
     def health():
-        return {"status": "ok"}
-
-    @app.get("/")
-    def index():
-        return {"name": "Maneiro.ai", "status": "running"}
-
+        return {'status': 'healthy'}, 200
+    
     return app
