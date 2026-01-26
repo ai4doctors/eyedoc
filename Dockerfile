@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-CMD ["sh", "-c", "flask db upgrade && gunicorn wsgi:app --bind 0.0.0.0:${PORT:-10000} --timeout 180 --workers 2"]
+CMD ["sh", "-c", "python init_db.py && gunicorn wsgi:app --bind 0.0.0.0:${PORT:-10000} --timeout 180 --workers 2"]
