@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: maneiro
+      POSTGRES_USER: maneiro_user
+      POSTGRES_PASSWORD: dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maneiro_user -d maneiro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    environment:
+      FLASK_ENV: development
+      FLASK_APP: app:create_app
+      DATABASE_URL: postgresql://maneiro_user:dev_password@postgres:5432/maneiro
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret-key-change-me
+      AWS_REGION: us-west-2
+      # Add other env vars from .env file
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: flask run --host=0.0.0.0
+
+  # Optional: Celery worker for async tasks
+  celery:
+    build: .
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/2
+      CELERY_RESULT_BACKEND: redis://redis:6379/3
+      DATABASE_URL: postgresql://maneiro_user:dev_password@postgres:5432/maneiro
+    depends_on:
+      - postgres
+      - redis
+    command: celery -A app.celery worker --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
