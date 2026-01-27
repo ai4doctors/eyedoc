@@ -1380,3 +1380,16 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
+
+// Expose all functions needed by onclick handlers to global scope
+window.toggleDropdown = toggleDropdown
+window.closeAllDropdowns = closeAllDropdowns
+window.openFaq = openFaq
+window.closeFaq = closeFaq
+window.openSettings = openSettings
+window.closeSettings = closeSettings
+window.openRecord = openRecord
+window.closeRecord = closeRecord
+window.clearAll = clearAll
+window.newCase = newCase
+window.toast = toast

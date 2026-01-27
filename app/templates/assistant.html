@@ -1474,27 +1474,26 @@
     
     <!-- Footer -->
     <footer class="assistantFooter">
-      <div class="footerContent">
+      <div class="footerRow">
         <div class="footerBrand">
           <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" />
           <span class="footerVersion">v2026.8</span>
         </div>
+        <div class="footerDisclaimer">
+          Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
+        </div>
         <div class="footerLinks">
-          <a href="/cdn-cgi/l/email-protection#d1a2a4a1a1bea3a591bcb0bfb4b8a3beffb0b8" class="footerLink">Contact Support</a>
+          <a href="mailto:support@maneiro.ai" class="footerLink">Contact Support</a>
           <span class="footerDot">·</span>
-          <button onclick="showHelp()" class="footerLink" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;">Help & FAQ</button>
+          <button onclick="showHelp()" class="footerLink footerBtn">Help & FAQ</button>
         </div>
       </div>
-      <div class="footerDisclaimer">
-        Maneiro is a clinical documentation aid. All outputs require physician review before use.
-      </div>
-      <div class="footerCopyright">© 2026 Maneiro.ai · All rights reserved</div>
     </footer>
   </div>
 
   <div id="toast" class="toast"></div>
 
-  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+  <script>
     // State
     let currentView = 'dashboard';
     let triageJobId = '';
