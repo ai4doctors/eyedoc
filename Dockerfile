@@ -14,7 +14,13 @@ WORKDIR /app
 
 # Copy requirements first for caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Verify critical packages installed
+RUN python -c "import flask; import flask_sqlalchemy; import flask_login; import flask_bcrypt; print('Dependencies OK')"
 
 # Copy application code
 COPY . .
@@ -22,9 +28,10 @@ COPY . .
 # Set environment variables
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
 
-# Expose port
-EXPOSE 5000
+# Expose port (Render uses 10000)
+EXPOSE 10000
 
 # Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "wsgi:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "2", "--threads", "4", "--timeout", "120", "wsgi:app"]
