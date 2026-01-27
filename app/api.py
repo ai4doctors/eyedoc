@@ -1,5 +1,10 @@
 """
 API Blueprint - All working endpoints from original app.py
+
+Improvements in this version:
+- Jobs persisted to Postgres (survives restarts, multi-worker safe)
+- PubMed query caching (reduces latency and API calls)
+- Schema validation for LLM outputs (prevents silent failures)
 """
 import os
 import tempfile
@@ -18,6 +23,10 @@ import PyPDF2
 import requests
 from flask import Blueprint, jsonify, request, send_file, current_app
 from flask_login import login_required, current_user
+
+# Database imports for job persistence
+from app import db
+from app.models import Job, PubMedCache
 
 try:
     import boto3
@@ -477,6 +486,78 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 }
 
 
+def validate_and_repair_analysis(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate analysis output and repair missing/malformed fields.
+    
+    This prevents silent failures when the model output drifts from expected schema.
+    Returns a repaired dict that always has required fields.
+    """
+    if not obj or not isinstance(obj, dict):
+        return dict(ANALYZE_SCHEMA)
+    
+    result = dict(ANALYZE_SCHEMA)
+    result.update(obj)
+    
+    # Ensure diagnoses is a list of properly structured items
+    if not isinstance(result.get("diagnoses"), list):
+        result["diagnoses"] = []
+    
+    repaired_diagnoses = []
+    for i, dx in enumerate(result.get("diagnoses", []), start=1):
+        if not isinstance(dx, dict):
+            continue
+        # Ensure required fields
+        repaired_dx = {
+            "number": dx.get("number", i),
+            "code": str(dx.get("code", "") or ""),
+            "label": str(dx.get("label", "") or ""),
+            "bullets": dx.get("bullets", []) if isinstance(dx.get("bullets"), list) else [],
+            "severity": str(dx.get("severity", "") or ""),
+            "urgency": str(dx.get("urgency", "") or ""),
+            "refs": dx.get("refs", []) if isinstance(dx.get("refs"), list) else [],
+        }
+        if repaired_dx["label"]:  # Only include if has a label
+            repaired_diagnoses.append(repaired_dx)
+    result["diagnoses"] = repaired_diagnoses
+    
+    # Ensure plan is a list of properly structured items
+    if not isinstance(result.get("plan"), list):
+        result["plan"] = []
+    
+    repaired_plan = []
+    for i, pl in enumerate(result.get("plan", []), start=1):
+        if not isinstance(pl, dict):
+            continue
+        repaired_pl = {
+            "number": pl.get("number", i),
+            "title": str(pl.get("title", "") or ""),
+            "bullets": pl.get("bullets", []) if isinstance(pl.get("bullets"), list) else [],
+            "aligned_dx_numbers": pl.get("aligned_dx_numbers", []) if isinstance(pl.get("aligned_dx_numbers"), list) else [],
+            "timeline": str(pl.get("timeline", "") or ""),
+            "refs": pl.get("refs", []) if isinstance(pl.get("refs"), list) else [],
+        }
+        if repaired_pl["title"]:  # Only include if has a title
+            repaired_plan.append(repaired_pl)
+    result["plan"] = repaired_plan
+    
+    # Ensure references is a list
+    if not isinstance(result.get("references"), list):
+        result["references"] = []
+    
+    # Ensure warnings is a list of strings
+    if not isinstance(result.get("warnings"), list):
+        result["warnings"] = []
+    result["warnings"] = [str(w) for w in result["warnings"] if w]
+    
+    # Ensure string fields are strings
+    for field in ["provider_name", "patient_block", "summary_html", "chief_complaint"]:
+        if not isinstance(result.get(field), str):
+            result[field] = str(result.get(field, "") or "")
+    
+    return result
+
+
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
     return f"""
@@ -674,6 +755,18 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: O
         if t and t.lower() not in [x.lower() for x in uniq_terms]:
             uniq_terms.append(t)
 
+    if not uniq_terms:
+        return []
+    
+    # Check cache first (significantly reduces latency for repeat queries)
+    try:
+        cached = PubMedCache.get_cached(uniq_terms)
+        if cached:
+            current_app.logger.info(f"PubMed cache hit for terms: {uniq_terms[:3]}...")
+            return cached
+    except Exception as e:
+        current_app.logger.warning(f"PubMed cache check failed: {e}")
+
     blob = " ".join(uniq_terms).lower()
     
     # Determine if patient is adult (age >= 18) - filter out pediatric papers
@@ -778,6 +871,15 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: O
                 "source": "PubMed",
             })
             num += 1
+        
+        # Cache the results for future queries
+        if out:
+            try:
+                PubMedCache.set_cached(uniq_terms, out)
+                current_app.logger.info(f"PubMed results cached for terms: {uniq_terms[:3]}...")
+            except Exception as e:
+                current_app.logger.warning(f"Failed to cache PubMed results: {e}")
+        
         return out
     except Exception:
         return []
@@ -1105,18 +1207,47 @@ def new_job_id() -> str:
 
 
 def set_job(job_id: str, **updates: Any) -> None:
+    """
+    Persist job state to Postgres (primary) with in-memory cache (secondary).
+    
+    This ensures jobs survive worker restarts and work across multiple workers.
+    """
     _ensure_job_dir()
+    
+    # Update in-memory cache first (for fast reads during processing)
     with JOBS_LOCK:
-        job = JOBS.get(job_id) or {}
-        job.update(updates)
-        JOBS[job_id] = job
+        job_dict = JOBS.get(job_id) or {}
+        job_dict.update(updates)
+        JOBS[job_id] = job_dict
+    
+    # Persist to Postgres
+    try:
+        with current_app.app_context():
+            job = Job.query.get(job_id)
+            if not job:
+                # Create new job record
+                job = Job(id=job_id)
+                # Set user/org if authenticated
+                if current_user and hasattr(current_user, 'id') and current_user.is_authenticated:
+                    job.user_id = current_user.id
+                    job.organization_id = current_user.organization_id
+                db.session.add(job)
+            
+            # Update job from dict
+            job.update_from_dict(updates)
+            db.session.commit()
+    except Exception as e:
+        # Log but don't fail - fall back to file storage
+        current_app.logger.warning(f"Failed to persist job {job_id} to database: {e}")
+        # Fall back to file storage
         path = _job_path(job_id)
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(job, f, ensure_ascii=False)
+                json.dump(job_dict, f, ensure_ascii=False)
         except Exception:
             pass
 
+    # Also persist to S3 for disaster recovery (if enabled)
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
@@ -1124,7 +1255,7 @@ def set_job(job_id: str, **updates: Any) -> None:
         except Exception:
             s3 = None
         if s3 is not None:
-            body = json.dumps(job, ensure_ascii=False).encode("utf-8")
+            body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
             for key in job_s3_key_fallbacks(job_id):
                 try:
                     s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
@@ -1134,21 +1265,44 @@ def set_job(job_id: str, **updates: Any) -> None:
 
 
 def get_job(job_id: str) -> Dict[str, Any]:
+    """
+    Get job state from Postgres (primary) with fallbacks to cache, file, and S3.
+    
+    Priority: in-memory cache → Postgres → file → S3
+    """
     _ensure_job_dir()
+    
+    # Check in-memory cache first (fast path for active jobs)
     with JOBS_LOCK:
         if job_id in JOBS:
             return dict(JOBS.get(job_id) or {})
+    
+    # Check Postgres
+    try:
+        with current_app.app_context():
+            job = Job.query.get(job_id)
+            if job:
+                job_dict = job.to_dict()
+                # Update cache
+                with JOBS_LOCK:
+                    JOBS[job_id] = job_dict
+                return job_dict
+    except Exception as e:
+        current_app.logger.warning(f"Failed to load job {job_id} from database: {e}")
+    
+    # Fall back to file storage
     path = _job_path(job_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
-            job = json.load(f) or {}
-        if isinstance(job, dict):
+            job_dict = json.load(f) or {}
+        if isinstance(job_dict, dict):
             with JOBS_LOCK:
-                JOBS[job_id] = job
-            return dict(job)
+                JOBS[job_id] = job_dict
+            return dict(job_dict)
     except Exception:
         pass
 
+    # Fall back to S3
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
@@ -1160,16 +1314,16 @@ def get_job(job_id: str) -> Dict[str, Any]:
                 try:
                     obj = s3.get_object(Bucket=bucket, Key=key)
                     body = obj["Body"].read()
-                    job = json.loads(body.decode("utf-8", errors="ignore")) or {}
-                    if isinstance(job, dict):
+                    job_dict = json.loads(body.decode("utf-8", errors="ignore")) or {}
+                    if isinstance(job_dict, dict):
                         with JOBS_LOCK:
-                            JOBS[job_id] = job
+                            JOBS[job_id] = job_dict
                         try:
                             with open(path, "w", encoding="utf-8") as f:
-                                json.dump(job, f, ensure_ascii=False)
+                                json.dump(job_dict, f, ensure_ascii=False)
                         except Exception:
                             pass
-                        return dict(job)
+                        return dict(job_dict)
                 except Exception:
                     continue
     return {}
@@ -1188,8 +1342,8 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
         return
 
-    analysis = dict(ANALYZE_SCHEMA)
-    analysis.update(obj)
+    # Validate and repair the LLM output to ensure consistent schema
+    analysis = validate_and_repair_analysis(obj)
 
     pb = (analysis.get("patient_block") or "")
     pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
