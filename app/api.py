@@ -1207,72 +1207,78 @@ def new_job_id() -> str:
 
 
 def set_job(job_id: str, **updates: Any) -> None:
-    """
-    Persist job state to Postgres (primary) with in-memory cache (secondary).
-    
-    This ensures jobs survive worker restarts and work across multiple workers.
+    """Persist job state.
+
+    Priority:
+    1) Postgres when an app context is available
+    2) File fallback (always)
+    3) In-memory cache (best-effort)
     """
     _ensure_job_dir()
-    
-    # Update in-memory cache first (for fast reads during processing)
-    with JOBS_LOCK:
-        job_dict = JOBS.get(job_id) or {}
-        job_dict.update(updates)
-        JOBS[job_id] = job_dict
-    
-    # Persist to Postgres
+
+    # Merge into in-memory cache (best-effort). Never crash if cache fails.
     try:
-        with current_app.app_context():
+        with JOBS_LOCK:
+            job_dict = JOBS.get(job_id) or {}
+            job_dict.update(updates)
+            JOBS[job_id] = job_dict
+    except Exception:
+        job_dict = dict(updates)
+
+    # Best-effort Postgres write only when we have an app context.
+    try:
+        from flask import has_app_context
+        if has_app_context():
             job = Job.query.get(job_id)
             if not job:
-                # Create new job record
                 job = Job(id=job_id)
-                # Set user/org if authenticated (request context only)
-                if has_request_context():
-                    try:
-                        if current_user and getattr(current_user, 'is_authenticated', False):
-                            job.user_id = current_user.id
-                            job.organization_id = current_user.organization_id
-                    except Exception:
-                        pass
                 db.session.add(job)
-            # Update job from dict
+
+            # Attach user and org if explicitly provided
+            if updates.get("user_id") is not None and getattr(job, "user_id", None) is None:
+                try:
+                    job.user_id = int(updates.get("user_id"))
+                except Exception:
+                    pass
+            if updates.get("organization_id") is not None and getattr(job, "organization_id", None) is None:
+                try:
+                    job.organization_id = int(updates.get("organization_id"))
+                except Exception:
+                    pass
+
             job.update_from_dict(updates)
             db.session.commit()
     except Exception:
-        # Postgres failed (likely no app context in background thread)
-        # Fall back to file storage silently
+        # Never block the request due to persistence issues
+        pass
+
+    # Always persist to file storage as a cross-worker fallback.
+    try:
         path = _job_path(job_id)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(job_dict, f, ensure_ascii=False)
-        except Exception:
-            pass
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(job_dict, f, ensure_ascii=False)
+    except Exception:
+        pass
 
-
-# Always persist to file storage (cross-worker fallback and debugging)
-path = _job_path(job_id)
-try:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(job_dict, f, ensure_ascii=False)
-except Exception:
-    pass
-
-    # Also persist to S3 for disaster recovery (if enabled)
-    if job_s3_enabled():
-        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-        try:
-            s3, _ = aws_clients()
-        except Exception:
-            s3 = None
-        if s3 is not None:
-            body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
-            for key in job_s3_key_fallbacks(job_id):
+    # Optional S3 persistence (disaster recovery)
+    try:
+        if job_s3_enabled():
+            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+            if bucket:
                 try:
-                    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-                    break
+                    s3, _ = aws_clients()
                 except Exception:
-                    continue
+                    s3 = None
+                if s3 is not None:
+                    body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
+                    for key in job_s3_key_fallbacks(job_id):
+                        try:
+                            s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+                            break
+                        except Exception:
+                            continue
+    except Exception:
+        pass
 
 
 def get_job(job_id: str) -> Dict[str, Any]:
