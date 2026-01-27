@@ -411,15 +411,17 @@ function closeFaq(){
   const m = el("faqModal")
   if(m){ m.classList.add("hidden") }
 }
-if(el("faqBtn")){
-  el("faqBtn").addEventListener("click", openFaq)
-}
-if(el("faqClose")){
-  el("faqClose").addEventListener("click", closeFaq)
-}
-if(el("faqModal")){
-  el("faqModal").addEventListener("click", (e) => {
-    if(e.target && (e.target.dataset && e.target.dataset.close)){
+const faqBtn = el("faqBtn")
+if(faqBtn){ faqBtn.addEventListener("click", openFaq) }
+
+const faqClose = el("faqClose")
+if(faqClose){ faqClose.addEventListener("click", closeFaq) }
+
+const faqModal = el("faqModal")
+if(faqModal){
+  faqModal.addEventListener("click", (e) => {
+    const tgt = e && e.target
+    if(tgt && tgt.dataset && tgt.dataset.close){
       closeFaq()
     }
   })
@@ -724,18 +726,22 @@ async function startAnalyze(triedOcr){
     const res = await fetch("/analyze_start", { method:"POST", body: fd })
     json = await res.json()
   }catch(e){
-    console.error(e)
-    setAnalyzeStatus("processing","Temporary connection issue",10)
-    setTimeout(pollAnalyze, 1500)
+    setAnalyzeStatus("waiting")
+    toast("Analyze failed. Server did not return JSON")
     return
   }
-if(!json.ok){
-      const msg = String(json.error || "Status error")
-      setAnalyzeStatus("processing", msg, 10)
-      setTimeout(pollAnalyze, 1200)
-      return
-    }
-toast(json.error || "OCR failed")
+  if(!json.ok){
+    setAnalyzeStatus("waiting")
+    if(json.needs_ocr){
+      if(!triedOcr){
+        if(el("handwrittenCheck")){
+          el("handwrittenCheck").checked = true
+        }
+        toast("Running OCR")
+        await startAnalyze(true)
+        return
+      }
+      toast(json.error || "OCR failed")
       return
     }
     toast(json.error || "Analyze failed")
@@ -753,12 +759,11 @@ async function pollAnalyze(){
     const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`)
     const json = await res.json()
     if(!json.ok){
-      const msg = String(json.error || "Status error")
-      setAnalyzeStatus("processing", msg, 10)
-      setTimeout(pollAnalyze, 1200)
+      setAnalyzeStatus("waiting")
+      toast(json.error || "Analyze status error")
       return
     }
-const status = json.status || "waiting"
+    const status = json.status || "waiting"
     const stageLabel = json.stage_label || ""
     const progress = json.progress || 0
     if(status === "waiting"){
@@ -782,10 +787,10 @@ const status = json.status || "waiting"
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
       buildReasonOptions()
       setToPrefix()
-      try{ renderSummary() }catch(e){ console.error(e) }
-      try{ renderDx() }catch(e){ console.error(e) }
-      try{ renderPlan() }catch(e){ console.error(e) }
-      try{ renderRefs() }catch(e){ console.error(e) }
+      renderSummary()
+      renderDx()
+      renderPlan()
+      renderRefs()
       upsertCase(latestAnalysis)
       toast("Analysis complete")
       return

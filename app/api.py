@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import PyPDF2
 import requests
-from flask import Blueprint, jsonify, request, send_file, current_app, has_request_context
+from flask import Blueprint, jsonify, request, send_file, current_app
 from flask_login import login_required, current_user
 
 # Database imports for job persistence
@@ -1207,102 +1207,90 @@ def new_job_id() -> str:
 
 
 def set_job(job_id: str, **updates: Any) -> None:
-    """Persist job state.
-
-    Priority:
-    1) Postgres when an app context is available
-    2) File fallback (always)
-    3) In-memory cache (best-effort)
+    """
+    Persist job state to Postgres (primary) with in-memory cache (secondary).
+    
+    This ensures jobs survive worker restarts and work across multiple workers.
     """
     _ensure_job_dir()
-
-    # Merge into in-memory cache (best-effort). Never crash if cache fails.
+    
+    # Update in-memory cache first (for fast reads during processing)
+    with JOBS_LOCK:
+        job_dict = JOBS.get(job_id) or {}
+        job_dict.update(updates)
+        JOBS[job_id] = job_dict
+    
+    # Persist to Postgres
     try:
-        with JOBS_LOCK:
-            job_dict = JOBS.get(job_id) or {}
-            job_dict.update(updates)
-            JOBS[job_id] = job_dict
-    except Exception:
-        job_dict = dict(updates)
-
-    # Best-effort Postgres write only when we have an app context.
-    try:
-        from flask import has_app_context
-        if has_app_context():
+        with current_app.app_context():
             job = Job.query.get(job_id)
             if not job:
+                # Create new job record
                 job = Job(id=job_id)
+                # Set user/org if authenticated
+                if current_user and hasattr(current_user, 'id') and current_user.is_authenticated:
+                    job.user_id = current_user.id
+                    job.organization_id = current_user.organization_id
                 db.session.add(job)
-
-            # Attach user and org if explicitly provided
-            if updates.get("user_id") is not None and getattr(job, "user_id", None) is None:
-                try:
-                    job.user_id = int(updates.get("user_id"))
-                except Exception:
-                    pass
-            if updates.get("organization_id") is not None and getattr(job, "organization_id", None) is None:
-                try:
-                    job.organization_id = int(updates.get("organization_id"))
-                except Exception:
-                    pass
-
+            
+            # Update job from dict
             job.update_from_dict(updates)
             db.session.commit()
     except Exception:
-        # Never block the request due to persistence issues
-        pass
-
-    # Always persist to file storage as a cross-worker fallback.
-    try:
+        # Postgres failed (likely no app context in background thread)
+        # Fall back to file storage silently
         path = _job_path(job_id)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(job_dict, f, ensure_ascii=False)
-    except Exception:
-        pass
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(job_dict, f, ensure_ascii=False)
+        except Exception:
+            pass
 
-    # Optional S3 persistence (disaster recovery)
-    try:
-        if job_s3_enabled():
-            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-            if bucket:
+    # Also persist to S3 for disaster recovery (if enabled)
+    if job_s3_enabled():
+        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+        try:
+            s3, _ = aws_clients()
+        except Exception:
+            s3 = None
+        if s3 is not None:
+            body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
+            for key in job_s3_key_fallbacks(job_id):
                 try:
-                    s3, _ = aws_clients()
+                    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+                    break
                 except Exception:
-                    s3 = None
-                if s3 is not None:
-                    body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
-                    for key in job_s3_key_fallbacks(job_id):
-                        try:
-                            s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-                            break
-                        except Exception:
-                            continue
-    except Exception:
-        pass
+                    continue
 
 
 def get_job(job_id: str) -> Dict[str, Any]:
     """
-    Get job state with durable storage as the source of truth.
-
-    Priority: Postgres -> file -> in-memory cache -> S3
+    Get job state from Postgres (primary) with fallbacks to cache, file, and S3.
+    
+    Priority: in-memory cache → Postgres → file → S3
     """
     _ensure_job_dir()
-
-    # 1) Postgres (authoritative across workers)
+    
+    # Check in-memory cache first (fast path for active jobs)
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            return dict(JOBS.get(job_id) or {})
+    
+    # Check Postgres
     try:
         with current_app.app_context():
             job = Job.query.get(job_id)
             if job:
                 job_dict = job.to_dict()
+                # Update cache
                 with JOBS_LOCK:
                     JOBS[job_id] = job_dict
                 return job_dict
     except Exception:
-        # No app context in background thread or DB unavailable
+        # Postgres failed (likely no app context in background thread)
         pass
-
-    # 2) File storage (cross-worker fallback)
+    
+    # Fall back to file storage
     path = _job_path(job_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1314,12 +1302,7 @@ def get_job(job_id: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # 3) In-memory cache (same worker only)
-    with JOBS_LOCK:
-        if job_id in JOBS:
-            return dict(JOBS.get(job_id) or {})
-
-    # 4) S3 (optional fallback)
+    # Fall back to S3
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
@@ -1343,7 +1326,6 @@ def get_job(job_id: str) -> Dict[str, Any]:
                         return dict(job_dict)
                 except Exception:
                     continue
-
     return {}
 
 
@@ -1530,10 +1512,7 @@ def analyze_start():
 
     set_job(
         job_id,
-        status="processing",
-        stage="received",
-        stage_label="Received file",
-        progress=1,
+        status="waiting",
         updated_at=now_utc_iso(),
         upload_path=upath,
         upload_name=filename,
