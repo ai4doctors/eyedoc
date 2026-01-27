@@ -1277,30 +1277,26 @@ except Exception:
 
 def get_job(job_id: str) -> Dict[str, Any]:
     """
-    Get job state from Postgres (primary) with fallbacks to cache, file, and S3.
-    
-    Priority: in-memory cache → Postgres → file → S3
+    Get job state with durable storage as the source of truth.
+
+    Priority: Postgres -> file -> in-memory cache -> S3
     """
     _ensure_job_dir()
-    
-    # Check Postgres first (authoritative across workers)
-    # (cache is a best-effort optimization and can be stale or empty on other workers)
-    
-    # Check Postgres
+
+    # 1) Postgres (authoritative across workers)
     try:
         with current_app.app_context():
             job = Job.query.get(job_id)
             if job:
                 job_dict = job.to_dict()
-                # Update cache
                 with JOBS_LOCK:
                     JOBS[job_id] = job_dict
                 return job_dict
     except Exception:
-        # Postgres failed (likely no app context in background thread)
+        # No app context in background thread or DB unavailable
         pass
-    
-    # Fall back to file storage
+
+    # 2) File storage (cross-worker fallback)
     path = _job_path(job_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -1312,13 +1308,12 @@ def get_job(job_id: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    
-# Final fallback: in-memory cache (same-worker only)
-with JOBS_LOCK:
-    if job_id in JOBS:
-        return dict(JOBS.get(job_id) or {})
+    # 3) In-memory cache (same worker only)
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            return dict(JOBS.get(job_id) or {})
 
-# Fall back to S3
+    # 4) S3 (optional fallback)
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
@@ -1342,6 +1337,7 @@ with JOBS_LOCK:
                         return dict(job_dict)
                 except Exception:
                     continue
+
     return {}
 
 
