@@ -338,35 +338,50 @@
       color: var(--muted);
     }
 
-    /* Status Bar */
+    /* Status Bar - matches doctor UI progress bar */
     .statusBar {
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 8px;
-      padding: 10px 14px;
+      padding: 12px 16px;
       background: linear-gradient(135deg, var(--panel2), var(--panel));
-      border-radius: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
       margin-top: 14px;
     }
 
     .statusText {
       font-weight: 700;
-      font-size: 11px;
+      font-size: 14px;
+      color: var(--text);
     }
 
     .progressBarContainer {
-      flex: 1;
-      height: 4px;
+      width: 100%;
+      height: 8px;
       background: var(--border);
-      border-radius: 2px;
+      border-radius: 4px;
       overflow: hidden;
     }
 
     .progressBarFill {
       height: 100%;
-      background: linear-gradient(90deg, var(--primary), #76b9ad);
-      border-radius: 2px;
-      transition: width 0.3s ease;
+      width: 100%;
+      background: linear-gradient(90deg, var(--primary), #76b9ad, var(--primary), #76b9ad);
+      background-size: 300% 100%;
+      border-radius: 4px;
+      animation: progressWave 2s linear infinite;
+    }
+    
+    @keyframes progressWave {
+      0% { background-position: 100% 0; }
+      100% { background-position: 0% 0; }
+    }
+    
+    .statusHint {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
     }
 
     /* Output Sections */
@@ -1151,11 +1166,11 @@
             </div>
 
             <div id="triageStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="triageStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="triageProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="triageProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="triageResults" class="hidden">
@@ -1255,11 +1270,11 @@
             </div>
 
             <div id="letterStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="letterStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="letterProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="letterProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="letterControls" class="hidden">
@@ -1388,11 +1403,11 @@
             </div>
 
             <div id="insuranceStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="insuranceStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="insuranceProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="insuranceProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="insuranceControls" class="hidden">
@@ -1463,7 +1478,7 @@
           Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
         </div>
         <div class="footerLinks">
-          <a href="mailto:support@maneiro.ai" class="footerLink footerBtn">Contact Support</a>
+          <a href="/cdn-cgi/l/email-protection#22515752524d5056624f434c474b504d0c434b" class="footerLink footerBtn">Contact Support</a>
           <span class="footerDot">·</span>
           <span class="footerCopyright">© 2026 Maneiro. All rights reserved.</span>
         </div>
@@ -1473,7 +1488,7 @@
 
   <div id="toast" class="toast"></div>
 
-  <script>
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     // State
     let currentView = 'dashboard';
     let triageJobId = '';
@@ -1677,8 +1692,8 @@
       el('triageFrontDesk').innerHTML = formatTasks(data.front_desk_tasks || [], docType.includes('REFERRAL'));
       el('triageDoctor').innerHTML = formatTasks(data.doctor_tasks || [], false);
 
-      // Add to recent
-      addRecentActivity('triage', data.regarding || 'Document triaged', data.urgency);
+      // Add to recent - pass full data for recall
+      addRecentActivity('triage', data.regarding || 'Document triaged', data.urgency, data);
     }
 
     function formatDocTypeIcon(type) {
@@ -1854,7 +1869,19 @@
         
         stats.letters++;
         updateStats();
-        addRecentActivity('letter', 'Patient letter generated');
+        
+        // Store letter data for recall
+        const letterData = {
+          analysis: letterAnalysis,
+          letter: json.letter,
+          settings: {
+            recipientType: el('letterRecipientType').value,
+            to: el('letterTo').value,
+            from: el('letterFrom').value,
+            tone: el('letterTone').value
+          }
+        };
+        addRecentActivity('letter', 'Patient letter generated', null, letterData);
         toast('Letter generated!');
       } catch (e) {
         toast(e.message || 'Generation failed');
@@ -2104,7 +2131,19 @@
         
         stats.letters++;
         updateStats();
-        addRecentActivity('insurance', 'Insurance letter generated');
+        
+        // Store insurance letter data for recall
+        const insuranceData = {
+          analysis: insuranceAnalysis,
+          letter: json.letter,
+          settings: {
+            type: el('insuranceType').value,
+            procedure: el('insuranceProcedure').value,
+            company: el('insuranceCompany').value,
+            from: el('insuranceFrom').value
+          }
+        };
+        addRecentActivity('insurance', 'Insurance letter generated', null, insuranceData);
         toast('Letter generated!');
       } catch (e) {
         toast(e.message || 'Generation failed');
@@ -2184,14 +2223,54 @@
       saveStats();
     }
 
-    function addRecentActivity(type, title, urgency) {
-      // Add to stored array
-      recentActivityItems.unshift({ type, title, urgency, time: Date.now() });
+    function addRecentActivity(type, title, urgency, analysisData) {
+      // Add to stored array with full analysis data
+      const item = { 
+        id: 'activity_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        type, 
+        title, 
+        urgency, 
+        time: Date.now(),
+        analysis: analysisData || null
+      };
+      recentActivityItems.unshift(item);
       // Keep only last 10
       recentActivityItems = recentActivityItems.slice(0, 10);
       saveRecentActivity();
       
       renderRecentActivity();
+    }
+    
+    function loadRecentItem(itemId) {
+      const item = recentActivityItems.find(i => i.id === itemId);
+      if (!item || !item.analysis) {
+        toast('Analysis data not available for this item');
+        return;
+      }
+      
+      // Restore the analysis based on type
+      if (item.type === 'triage') {
+        triageAnalysis = item.analysis;
+        showView('triage');
+        // Re-render the triage results
+        setTimeout(() => {
+          displayTriageResults(triageAnalysis);
+        }, 100);
+      } else if (item.type === 'letter') {
+        letterAnalysis = item.analysis;
+        showView('letter');
+        setTimeout(() => {
+          displayLetterResults(letterAnalysis);
+        }, 100);
+      } else if (item.type === 'insurance') {
+        insuranceAnalysis = item.analysis;
+        showView('insurance');
+        setTimeout(() => {
+          displayInsuranceResults(insuranceAnalysis);
+        }, 100);
+      }
+      
+      toast('Loaded: ' + item.title);
     }
     
     function renderRecentActivity() {
@@ -2214,8 +2293,10 @@
       
       list.innerHTML = recentActivityItems.map(item => {
         const timeAgo = getTimeAgo(item.time);
+        const hasData = item.analysis ? 'cursor: pointer;' : 'opacity: 0.6;';
+        const clickHandler = item.analysis ? `onclick="loadRecentItem('${item.id}')"` : '';
         return `
-          <div class="recentItem">
+          <div class="recentItem" style="${hasData}" ${clickHandler}>
             <div class="recentIcon">${icons[item.type] || icons.triage}</div>
             <div class="recentInfo">
               <div class="recentTitle">${escapeHtml(item.title)}</div>
@@ -2259,6 +2340,57 @@
     function showShortcuts() {
       toast('Keyboard shortcuts: Ctrl+U = Upload, Ctrl+T = Triage, Ctrl+L = Letter');
     }
+    
+    // Helper functions for restoring saved items
+    function displayLetterResults(data) {
+      if (!data) return;
+      
+      // Show the letter output area
+      el('letterUpload').classList.add('hidden');
+      el('letterStatusBar').classList.add('hidden');
+      el('letterControls').classList.add('hidden');
+      el('letterOutput').classList.remove('hidden');
+      
+      // Restore the letter text
+      if (data.letter) {
+        el('letterText').value = data.letter;
+      }
+      
+      // Restore settings if available
+      if (data.settings) {
+        if (data.settings.recipientType) el('letterRecipientType').value = data.settings.recipientType;
+        if (data.settings.to) el('letterTo').value = data.settings.to;
+        if (data.settings.from) el('letterFrom').value = data.settings.from;
+        if (data.settings.tone) el('letterTone').value = data.settings.tone;
+      }
+      
+      letterAnalysis = data.analysis;
+    }
+    
+    function displayInsuranceResults(data) {
+      if (!data) return;
+      
+      // Show the insurance output area
+      el('insuranceUpload').classList.add('hidden');
+      el('insuranceStatusBar').classList.add('hidden');
+      el('insuranceControls').classList.add('hidden');
+      el('insuranceOutput').classList.remove('hidden');
+      
+      // Restore the letter text
+      if (data.letter) {
+        el('insuranceText').value = data.letter;
+      }
+      
+      // Restore settings if available
+      if (data.settings) {
+        if (data.settings.type) el('insuranceType').value = data.settings.type;
+        if (data.settings.procedure) el('insuranceProcedure').value = data.settings.procedure;
+        if (data.settings.company) el('insuranceCompany').value = data.settings.company;
+        if (data.settings.from) el('insuranceFrom').value = data.settings.from;
+      }
+      
+      insuranceAnalysis = data.analysis;
+    }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
@@ -2292,11 +2424,5 @@
     window.generatePatientLetter = generatePatientLetter;
     window.generateInsuranceLetter = generateInsuranceLetter;
     window.clearRecent = clearRecent;
-    window.renderRecentActivity = renderRecentActivity;
-
-    // Initialize
-    updateStats();
-    renderRecentActivity();
-  </script>
-</body>
-</html>
+    window.loadRecentItem = loadRecentItem;
+ 
