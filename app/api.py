@@ -1205,3 +1205,156 @@ def healthz():
         "ocr_message": ocr_msg,
         "model": model_name(),
     }), 200
+
+
+# ============ ASSISTANT MODE ENDPOINTS ============
+
+def triage_fax_prompt(summary_html: str, patient_block: str, full_text: str = "") -> str:
+    """Prompt for triaging incoming fax/communication"""
+    context = summary_html or full_text or ""
+    return f"""
+You are a clinic assistant helping triage incoming faxes and communications.
+
+Analyze the document and extract:
+1. FROM: Who sent this communication (doctor name, clinic name, or organization)
+2. REGARDING: Brief description of what this is about (patient name if mentioned, type of document)
+3. FRONT DESK ACTIONS: Tasks the front desk should do (e.g., file document, update patient record, schedule appointment, send records)
+4. DOCTOR ACTIONS: Tasks requiring doctor attention (e.g., review results, sign forms, call back, clinical decision needed)
+
+Output VALID JSON only:
+{{
+  "from": "string - sender name and organization",
+  "regarding": "string - brief description",
+  "front_desk_tasks": ["array of clear, actionable task strings"],
+  "doctor_tasks": ["array of clear, actionable task strings"]
+}}
+
+Rules:
+1. Tasks should be single, clear sentences suitable for copying into an EHR task list
+2. If the document is routine (e.g., normal lab results), note that no urgent action is needed
+3. If patient information is present, include it in the "regarding" field
+4. Keep tasks specific and actionable
+
+Patient info:
+{patient_block}
+
+Document content:
+{context[:8000]}
+""".strip()
+
+
+def patient_letter_prompt(analysis: dict) -> str:
+    """Prompt for generating patient-friendly letter"""
+    return f"""
+You are a clinic assistant writing a letter to a patient about their recent visit.
+
+Write a warm, professional letter in patient-friendly language:
+- Avoid medical jargon or explain terms simply
+- Be reassuring but accurate
+- Include key findings and next steps
+- End with contact information for questions
+
+Output VALID JSON only:
+{{
+  "letter": "string - the complete letter text"
+}}
+
+Patient info:
+{analysis.get('patient_block', '')}
+
+Provider:
+{analysis.get('provider_name', '')}
+
+Clinical summary:
+{analysis.get('summary_html', '')[:4000]}
+
+Diagnoses:
+{json.dumps(analysis.get('diagnoses', []), ensure_ascii=False)}
+
+Plan:
+{json.dumps(analysis.get('plan', []), ensure_ascii=False)}
+""".strip()
+
+
+def insurance_letter_prompt(analysis: dict) -> str:
+    """Prompt for generating insurance/prior authorization letter"""
+    return f"""
+You are a clinic assistant writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
+
+Write a formal, clinical letter that:
+- Uses proper medical terminology and ICD codes if available
+- Clearly states the medical necessity
+- References clinical findings and examination results
+- Includes specific treatment recommendations
+- Is structured for insurance review
+
+Output VALID JSON only:
+{{
+  "letter": "string - the complete letter text"
+}}
+
+Patient info:
+{analysis.get('patient_block', '')}
+
+Provider:
+{analysis.get('provider_name', '')}
+
+Clinical summary:
+{analysis.get('summary_html', '')[:4000]}
+
+Diagnoses:
+{json.dumps(analysis.get('diagnoses', []), ensure_ascii=False)}
+
+Plan:
+{json.dumps(analysis.get('plan', []), ensure_ascii=False)}
+""".strip()
+
+
+@api_bp.route("/triage_fax", methods=["POST"])
+@login_required
+def triage_fax():
+    """Triage an incoming fax/communication for front desk"""
+    payload = request.get_json(silent=True) or {}
+    analysis = payload.get("analysis") or {}
+    
+    summary_html = analysis.get("summary_html", "")
+    patient_block = analysis.get("patient_block", "")
+    
+    prompt = triage_fax_prompt(summary_html, patient_block)
+    obj, err = llm_json(prompt, temperature=0.2)
+    
+    if err or not obj:
+        return jsonify({"ok": False, "error": err or "Triage failed"}), 200
+    
+    return jsonify({
+        "ok": True,
+        "from": obj.get("from", ""),
+        "regarding": obj.get("regarding", ""),
+        "front_desk_tasks": obj.get("front_desk_tasks", []),
+        "doctor_tasks": obj.get("doctor_tasks", [])
+    }), 200
+
+
+@api_bp.route("/generate_assistant_letter", methods=["POST"])
+@login_required
+def generate_assistant_letter():
+    """Generate patient or insurance letter from analysis"""
+    payload = request.get_json(silent=True) or {}
+    analysis = payload.get("analysis") or {}
+    letter_type = payload.get("letter_type", "patient")
+    
+    if letter_type == "insurance":
+        prompt = insurance_letter_prompt(analysis)
+    else:
+        prompt = patient_letter_prompt(analysis)
+    
+    obj, err = llm_json(prompt, temperature=0.3)
+    
+    if err or not obj:
+        return jsonify({"ok": False, "error": err or "Letter generation failed"}), 200
+    
+    letter = obj.get("letter", "")
+    if not letter:
+        return jsonify({"ok": False, "error": "Empty letter generated"}), 200
+    
+    return jsonify({"ok": True, "letter": letter}), 200

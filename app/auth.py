@@ -198,6 +198,13 @@ def account():
     return render_template('auth/account.html', user=current_user, org=org)
 
 
+@auth_bp.route('/assistant')
+@login_required
+def assistant():
+    """Assistant mode page for front desk staff"""
+    return render_template('assistant.html', user=current_user)
+
+
 # Password reset placeholder (Phase 2)
 @auth_bp.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
