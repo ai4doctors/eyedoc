@@ -480,102 +480,28 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
     return f"""
-You are an expert clinical documentation analyst with deep ophthalmology knowledge. Analyze this document thoroughly.
+You are a clinician assistant. Analyze this clinical document and output VALID JSON only.
 
-STEP 1 - DOCUMENT CLASSIFICATION
-Determine what type of document this is:
-- Clinical encounter note (exam, consultation, follow-up)
-- Referral request (someone asking for a referral TO a specialist)
-- Consultation report (specialist reporting BACK to referring doctor)
-- Lab/imaging results
-- Prescription or eyeglass Rx
-- Insurance/authorization form
-- Patient correspondence
-- Other
+Schema:
+provider_name: string (authoring clinician only, never patient name)
+patient_block: string (demographics only: name, DOB, PHN, phone. Use <br> for line breaks. Exclude clinic address)
+summary_html: string (comprehensive clinical summary with <b>headings</b> and <p>paragraphs</p>)
+diagnoses: array of {{number, code, label, bullets}}
+plan: array of {{number, title, bullets, aligned_dx_numbers}}
+warnings: array of strings (critical findings, abnormal values, red flags)
 
-STEP 2 - EXTRACT INFORMATION
-Extract all clinical information accurately.
+Rules:
+1. summary_html must include ALL exam findings with clear structure:
+   - <b>Chief Complaint</b> with presenting symptoms
+   - <b>Exam Findings</b> with VA, IOP, slit lamp, fundus, all measurements
+   - <b>Imaging</b> if present (OCT, photos, fields)
+   - <b>Assessment</b> with clinical interpretation
+2. diagnoses: problem list with laterality/severity when present
+3. plan: actionable items aligned to diagnoses
+4. warnings: flag IOP>21, VA worse than 20/40, acute findings, urgent referrals
+5. Use only facts from the document. Leave empty if unknown.
 
-STEP 3 - CLINICAL REASONING (IMPORTANT)
-Go BEYOND simple extraction:
-- If exam findings suggest a diagnosis that wasn't explicitly listed, note it in suggested_diagnoses
-- If a finding is mentioned but not addressed in the plan, note it in unaddressed_findings
-- If clinical values are concerning, add to warnings
-- Cross-reference findings with standard clinical guidelines mentally
-
-Output VALID JSON only:
-{{
-  "document_type": "string - one of: encounter_note, referral_request, consultation_report, lab_results, prescription, insurance_form, correspondence, other",
-  "provider_name": "string - the authoring/sending clinician name and credentials",
-  "provider_clinic": "string - clinic or practice name if mentioned",
-  "patient_block": "string - patient demographics with <br> line breaks: name, DOB, PHN/MRN, phone, address",
-  "summary_html": "string - structured HTML summary with <b> headings and <p> paragraphs",
-  "chief_complaint": "string - main reason for visit or referral in one sentence",
-  "diagnoses": [
-    {{
-      "number": 1,
-      "code": "string - ICD code if available",
-      "label": "string - diagnosis with laterality/severity",
-      "bullets": ["key findings supporting this diagnosis"],
-      "severity": "string - mild/moderate/severe/not specified",
-      "urgency": "string - routine/soon/urgent/emergent"
-    }}
-  ],
-  "suggested_diagnoses": [
-    {{
-      "label": "string - potential diagnosis suggested by findings",
-      "supporting_findings": ["findings that suggest this"],
-      "reasoning": "string - why this should be considered",
-      "confidence": "string - low/medium/high"
-    }}
-  ],
-  "plan": [
-    {{
-      "number": 1,
-      "title": "string - action item title",
-      "bullets": ["specific details"],
-      "aligned_dx_numbers": [1],
-      "timeline": "string - when this should happen"
-    }}
-  ],
-  "unaddressed_findings": [
-    {{
-      "finding": "string - the finding that wasn't addressed",
-      "potential_significance": "string - why this might matter",
-      "suggested_action": "string - what could be done"
-    }}
-  ],
-  "referral_info": {{
-    "is_referral": true/false,
-    "referral_direction": "string - 'requesting' or 'responding'",
-    "referring_to": "string - specialist/subspecialty being referred to",
-    "referring_from": "string - who is making the referral",
-    "reason_for_referral": "string - specific reason",
-    "requested_service": "string - what they want done"
-  }},
-  "clinical_values": {{
-    "visual_acuity_od": "string",
-    "visual_acuity_os": "string",
-    "iop_od": "string",
-    "iop_os": "string",
-    "refraction": "string",
-    "other_measurements": ["string - any other significant measurements"]
-  }},
-  "warnings": ["any critical findings or red flags that need immediate attention"],
-  "clinical_pearls": ["brief insights that might help the receiving clinician"],
-  "follow_up": "string - recommended follow-up timing"
-}}
-
-CLINICAL REASONING RULES:
-1. Extract facts explicitly stated in the document
-2. For suggested_diagnoses: Only suggest if there's reasonable clinical evidence (e.g., RPE changes might suggest early AMD even if not explicitly diagnosed)
-3. For unaddressed_findings: Flag findings mentioned but with no corresponding plan item
-4. For warnings: Include values outside normal range (IOP > 21, VA worse than 20/40, etc.)
-5. For clinical_pearls: Add helpful context (e.g., "LPI patent suggests prior angle closure episode")
-6. Be conservative with suggestions - mark confidence appropriately
-7. Never make up findings - only analyze what's actually documented
-
-Document to analyze:
+Document:
 {excerpt}
 """.strip()
 
