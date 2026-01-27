@@ -32,46 +32,46 @@
 
     .assistantLayout {
       display: grid;
-      grid-template-columns: 280px 1fr;
+      grid-template-columns: 200px 1fr;
       grid-template-rows: 1fr auto;
-      min-height: calc(100vh - 60px);
+      min-height: calc(100vh - 48px);
     }
 
     /* Sidebar */
     .assistantSidebar {
       background: var(--panel);
       border-right: 1px solid var(--border);
-      padding: 20px 16px;
+      padding: 14px 12px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 14px;
     }
 
     .sidebarSection {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 5px;
     }
 
     .sidebarTitle {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.4px;
       color: var(--muted);
-      padding: 0 12px;
+      padding: 0 8px;
     }
 
     .navItem {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 12px;
-      border-radius: 12px;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 8px;
       color: var(--text);
       text-decoration: none;
       font-weight: 600;
-      font-size: 14px;
+      font-size: 12px;
       cursor: pointer;
       border: none;
       background: none;
@@ -90,8 +90,8 @@
     }
 
     .navItem svg {
-      width: 20px;
-      height: 20px;
+      width: 14px;
+      height: 14px;
       stroke: currentColor;
       stroke-width: 2;
       fill: none;
@@ -99,9 +99,9 @@
 
     .navBadge {
       margin-left: auto;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 8px;
+      font-size: 9px;
       font-weight: 700;
       background: var(--primary);
       color: white;
@@ -109,24 +109,24 @@
 
     /* Main Content */
     .assistantMain {
-      padding: 24px 32px;
+      padding: 16px 22px;
       overflow-y: auto;
     }
 
     /* Welcome Header */
     .welcomeHeader {
-      margin-bottom: 28px;
+      margin-bottom: 18px;
     }
 
     .welcomeTitle {
-      font-size: 28px;
+      font-size: 20px;
       font-weight: 900;
-      margin: 0 0 6px 0;
+      margin: 0 0 4px 0;
     }
 
     .welcomeSubtitle {
       color: var(--muted);
-      font-size: 16px;
+      font-size: 12px;
       margin: 0;
     }
 
@@ -134,32 +134,32 @@
     .statsGrid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 28px;
+      gap: 10px;
+      margin-bottom: 18px;
     }
 
     .statCard {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 20px;
+      border-radius: 12px;
+      padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 5px;
     }
 
     .statIcon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
     .statIcon svg {
-      width: 22px;
-      height: 22px;
+      width: 15px;
+      height: 15px;
       stroke: white;
       stroke-width: 2;
       fill: none;
@@ -171,13 +171,13 @@
     .statIcon.orange { background: linear-gradient(135deg, #f59e0b, #d97706); }
 
     .statValue {
-      font-size: 32px;
+      font-size: 22px;
       font-weight: 900;
       line-height: 1;
     }
 
     .statLabel {
-      font-size: 13px;
+      font-size: 11px;
       color: var(--muted);
       font-weight: 600;
     }
@@ -186,32 +186,32 @@
     .quickActionsGrid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-      margin-bottom: 28px;
+      gap: 10px;
+      margin-bottom: 18px;
     }
 
     .quickActionCard {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 24px;
+      border-radius: 12px;
+      padding: 16px;
       cursor: pointer;
       transition: all 0.2s;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
     }
 
     .quickActionCard:hover {
       border-color: var(--primary);
       transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(156,208,197,0.15);
+      box-shadow: 0 6px 18px rgba(156,208,197,0.15);
     }
 
     .quickActionIcon {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
       background: linear-gradient(135deg, var(--bgAccent), var(--panel2));
       display: flex;
       align-items: center;
@@ -219,20 +219,20 @@
     }
 
     .quickActionIcon svg {
-      width: 24px;
-      height: 24px;
+      width: 16px;
+      height: 16px;
       stroke: var(--primary);
       stroke-width: 2;
       fill: none;
     }
 
     .quickActionTitle {
-      font-size: 16px;
+      font-size: 12px;
       font-weight: 700;
     }
 
     .quickActionDesc {
-      font-size: 13px;
+      font-size: 10px;
       color: var(--muted);
       line-height: 1.4;
     }
@@ -241,7 +241,7 @@
     .workArea {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: 14px;
       overflow: hidden;
     }
 
@@ -249,24 +249,24 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 24px;
+      padding: 10px 16px;
       border-bottom: 1px solid var(--border);
       background: linear-gradient(180deg, var(--panel), var(--panel2));
     }
 
     .workTabs {
       display: flex;
-      gap: 4px;
+      gap: 3px;
     }
 
     .workTab {
-      padding: 10px 20px;
-      border-radius: 10px;
+      padding: 7px 14px;
+      border-radius: 7px;
       border: none;
       background: none;
       color: var(--muted);
       font-weight: 700;
-      font-size: 14px;
+      font-size: 11px;
       cursor: pointer;
       transition: all 0.15s;
     }
@@ -281,14 +281,14 @@
     }
 
     .workBody {
-      padding: 24px;
+      padding: 16px;
     }
 
     /* Upload Area */
     .uploadArea {
       border: 2px dashed var(--border);
-      border-radius: 16px;
-      padding: 48px 32px;
+      border-radius: 12px;
+      padding: 32px 22px;
       text-align: center;
       cursor: pointer;
       transition: all 0.2s;
@@ -307,33 +307,33 @@
     }
 
     .uploadIcon {
-      font-size: 56px;
-      margin-bottom: 16px;
+      font-size: 38px;
+      margin-bottom: 10px;
     }
 
     .uploadText {
-      font-size: 18px;
+      font-size: 13px;
       font-weight: 700;
-      margin-bottom: 8px;
+      margin-bottom: 5px;
     }
 
     .uploadHint {
       color: var(--muted);
-      font-size: 14px;
+      font-size: 11px;
     }
 
     .uploadFormats {
       display: flex;
-      gap: 8px;
+      gap: 5px;
       justify-content: center;
-      margin-top: 16px;
+      margin-top: 10px;
     }
 
     .formatBadge {
-      padding: 4px 12px;
-      border-radius: 20px;
+      padding: 3px 8px;
+      border-radius: 14px;
       background: var(--panel2);
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 600;
       color: var(--muted);
     }
@@ -342,30 +342,30 @@
     .statusBar {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
+      gap: 8px;
+      padding: 10px 14px;
       background: linear-gradient(135deg, var(--panel2), var(--panel));
-      border-radius: 14px;
-      margin-top: 20px;
+      border-radius: 10px;
+      margin-top: 14px;
     }
 
     .statusText {
       font-weight: 700;
-      font-size: 14px;
+      font-size: 11px;
     }
 
     .progressBarContainer {
       flex: 1;
-      height: 6px;
+      height: 4px;
       background: var(--border);
-      border-radius: 3px;
+      border-radius: 2px;
       overflow: hidden;
     }
 
     .progressBarFill {
       height: 100%;
       background: linear-gradient(90deg, var(--primary), #76b9ad);
-      border-radius: 3px;
+      border-radius: 2px;
       transition: width 0.3s ease;
     }
 
@@ -373,8 +373,8 @@
     .outputSection {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      margin-top: 20px;
+      border-radius: 11px;
+      margin-top: 14px;
       overflow: hidden;
     }
 
@@ -382,20 +382,20 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 20px;
+      padding: 10px 14px;
       border-bottom: 1px solid var(--border);
       background: var(--panel2);
     }
 
     .outputTitle {
-      font-size: 14px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.4px;
       color: var(--muted);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
 
     .outputTitle svg {
@@ -697,13 +697,13 @@
     }
 
     .btn {
-      padding: 10px 18px;
-      border-radius: 10px;
+      padding: 7px 12px;
+      border-radius: 7px;
       border: 1px solid var(--border);
       background: var(--panel);
       color: var(--text);
       font-weight: 700;
-      font-size: 14px;
+      font-size: 11px;
       cursor: pointer;
       transition: all 0.15s;
     }
@@ -716,21 +716,21 @@
       background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
       color: white;
       border: none;
-      box-shadow: 0 4px 12px rgba(156,208,197,0.3);
+      box-shadow: 0 3px 8px rgba(156,208,197,0.3);
     }
 
     .btn.primary:hover {
       transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(156,208,197,0.35);
+      box-shadow: 0 4px 12px rgba(156,208,197,0.35);
     }
 
     .copyBtn {
-      padding: 6px 12px;
-      border-radius: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
       border: 1px solid var(--border);
       background: var(--panel);
       color: var(--muted);
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 700;
       cursor: pointer;
     }
@@ -746,15 +746,15 @@
       align-items: center;
       justify-content: space-between;
       width: 100%;
-      padding: 14px 20px;
+      padding: 10px 14px;
       background: var(--panel2);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 8px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 11px;
       font-weight: 700;
       color: var(--muted);
-      margin-bottom: 12px;
+      margin-bottom: 8px;
     }
 
     .collapsibleToggle:hover {
@@ -762,29 +762,29 @@
     }
 
     .collapsibleContent {
-      padding: 16px 20px;
+      padding: 11px 14px;
       background: var(--panel);
       border: 1px solid var(--border);
       border-top: none;
-      border-radius: 0 0 12px 12px;
-      margin-top: -12px;
-      margin-bottom: 16px;
+      border-radius: 0 0 8px 8px;
+      margin-top: -8px;
+      margin-bottom: 11px;
     }
 
     /* Recent Activity */
     .recentList {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
     }
 
     .recentItem {
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 14px 16px;
+      gap: 10px;
+      padding: 10px 11px;
       background: var(--panel2);
-      border-radius: 12px;
+      border-radius: 8px;
       cursor: pointer;
       transition: all 0.15s;
     }
@@ -794,9 +794,9 @@
     }
 
     .recentIcon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
       background: var(--panel);
       display: flex;
       align-items: center;

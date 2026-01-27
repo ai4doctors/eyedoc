@@ -21,7 +21,9 @@ BUILD_TIME = os.environ.get("BUILD_TIME", "")
 GIT_COMMIT = os.environ.get("GIT_COMMIT", "")
 
 def create_app(config_name='default'):
-    app = Flask(__name__)
+    app = Flask(__name__,
+                template_folder='templates',
+                static_folder='static')
     app.config.from_object(config[config_name])
     
     # Initialize extensions

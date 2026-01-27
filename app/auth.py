@@ -94,8 +94,7 @@ def index():
 @role_required(UserRole.ADMIN, UserRole.DOCTOR)
 def doctor():
     """Doctor view - for doctors and admins only"""
-    from app import APP_VERSION
-    return render_template('index.html', user=current_user, version=APP_VERSION)
+    return render_template('index.html', user=current_user)
 
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
