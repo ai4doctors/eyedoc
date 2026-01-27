@@ -30,11 +30,9 @@ def create_app(config_name='default'):
     from app.api import api_bp
     
     app.register_blueprint(auth_bp)
-    app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(api_bp)  # No prefix - routes match original app.js
     
-    # Health check
-    @app.route('/healthz')
-    def health():
-        return {'status': 'healthy'}, 200
+    # Exempt API routes from CSRF (JS doesn't send tokens)
+    csrf.exempt(api_bp)
     
     return app
