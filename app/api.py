@@ -769,8 +769,12 @@ def get_job(job_id: str) -> Dict[str, Any]:
 
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso())
+    set_job(job_id, status="processing", updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
     obj, err = llm_json(analyze_prompt(note_text))
+    
+    # Heartbeat after LLM call
+    set_job(job_id, heartbeat_at=now_utc_iso())
+    
     if err or not obj:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
         return
@@ -802,6 +806,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
+    # Heartbeat before PubMed fetch
+    set_job(job_id, heartbeat_at=now_utc_iso())
+    
     terms = []
     for dx in analysis.get("diagnoses") or []:
         if isinstance(dx, dict):
@@ -810,6 +817,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 terms.append(label)
     references = pubmed_fetch_for_terms(terms)
     analysis['references'] = references
+
+    # Heartbeat before citation assignment
+    set_job(job_id, heartbeat_at=now_utc_iso())
 
     if references:
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
@@ -956,7 +966,8 @@ def analyze_status():
             hb = parse_utc_iso(job.get("heartbeat_at") or job.get("updated_at") or "")
             now = datetime.now(timezone.utc)
             stale_seconds = (now - hb).total_seconds() if hb else 999999
-            if stale_seconds > 25:
+            # Only restart if stale for 90+ seconds (LLM calls can take 60s)
+            if stale_seconds > 90:
                 up = (job.get("upload_path") or "").strip()
                 if up and os.path.exists(up) and not job.get("resume_started"):
                     set_job(job_id, resume_started=True, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
