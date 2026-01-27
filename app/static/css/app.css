@@ -321,7 +321,7 @@ body{
   gap:14px;
 }
 .brandMark{display:flex; align-items:center}
-.brandLogo{height:46px; width:auto; display:block; background:transparent; border-radius:8px}
+.brandLogo{height:46px; width:auto; display:block; background:none !important; border-radius:0}
 .brandName{
   font-weight:900;
 }
@@ -455,29 +455,6 @@ body{
   font-size:16px;
   outline:none;
 }
-.ctrl:focus{
-  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
-  border-color: rgba(156,208,197,0.75);
-}
-.hidden{display:none}
-}
-.ctrl:focus{
-  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
-  border-color: rgba(156,208,197,0.75);
-}
-.hidden{display:none}
-}
-.ctrl:focus{
-  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
-  border-color: rgba(156,208,197,0.75);
-}
-.hidden{display:none}
-}
-.ctrl:focus{
-  box-shadow:0 0 0 3px rgba(156,208,197,0.35);
-  border-color: rgba(156,208,197,0.75);
-}
-.hidden{display:none}
 .hidden{display:none}
 
 .btnPrimary{
@@ -852,34 +829,4 @@ body{
   background:linear-gradient(90deg, #667eea, #764ba2);
   border-radius:4px;
   transition:width 0.3s ease;
-}
-
-/* Exam Findings Section */
-.examFindingsSection{
-  margin-top:16px;
-  padding-top:16px;
-  border-top:1px solid var(--border);
-}
-.examCategory{
-  font-size:14px;
-  line-height:1.6;
-  margin-bottom:8px;
-  color:var(--text);
-}
-.examCategoryLabel{
-  font-weight:700;
-  color:var(--muted);
-}
-.examCategory .abnormal{
-  color:#dc2626;
-  font-weight:600;
-}
-.patientBlock{
-  background:rgba(156,208,197,0.08);
-  border-left:3px solid var(--primary);
-  padding:12px 14px;
-  margin-bottom:16px;
-  border-radius:0 8px 8px 0;
-  font-size:14px;
-  line-height:1.5;
 }

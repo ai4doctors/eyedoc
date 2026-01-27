@@ -13,7 +13,7 @@
   <header class="topBar">
     <div class="topBarLeft">
       <div class="brand">
-        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" style="background:transparent !important" /></div>
+        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" style="background:transparent" /></div>
       </div>
       {% if user %}
       <span class="orgName">{{ user.organization.name }}</span>
@@ -37,7 +37,7 @@
             FAQ & Help
           </a>
           <div class="dropdownDivider"></div>
-          <a class="dropdownItem" href="/cdn-cgi/l/email-protection#eb989e9b9b84999fab868a858e829984c58a82">
+          <a class="dropdownItem" href="mailto:support@maneiro.ai">
             <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
             Contact Support
           </a>
@@ -445,4 +445,6 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script data-cfasync="false" src="/cdn-cgi/sc
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
