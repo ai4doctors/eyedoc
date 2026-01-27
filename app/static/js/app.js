@@ -6,6 +6,43 @@ let latestLetterHtml = ""
 // Single theme for consistency
 let theme = "light"
 
+// Dropdown functionality
+function toggleDropdown(id) {
+  const dropdown = document.getElementById(id)
+  if (!dropdown) return
+  
+  const wasOpen = dropdown.classList.contains('open')
+  closeAllDropdowns()
+  
+  if (!wasOpen) {
+    dropdown.classList.add('open')
+    const btn = dropdown.querySelector('button')
+    if (btn) btn.setAttribute('aria-expanded', 'true')
+  }
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.dropdown.open').forEach(d => {
+    d.classList.remove('open')
+    const btn = d.querySelector('button')
+    if (btn) btn.setAttribute('aria-expanded', 'false')
+  })
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.dropdown')) {
+    closeAllDropdowns()
+  }
+})
+
+// Close dropdowns on escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeAllDropdowns()
+  }
+})
+
 const SETTINGS_KEY = "maneiro_settings_v1"
 const DEFAULT_SETTINGS = {
   input_language: "auto",
@@ -298,10 +335,16 @@ function toast(msg){
   setTimeout(() => { t.style.display = "none" }, 2400)
 }
 
-function setAnalyzeStatus(state){
+function setAnalyzeStatus(state, stageLabel, progress){
   const box = el("analyzeStatus")
   if(state === "processing"){
-    box.innerHTML = 'Wait for analysis to complete <span class="muted">(processing)</span> <span class="spinner" aria-hidden="true"></span>'
+    let label = stageLabel || "Processing"
+    let pct = typeof progress === "number" ? progress : 0
+    box.innerHTML = `<div class="progressContainer">
+      <div class="progressLabel">${label}</div>
+      <div class="progressBar"><div class="progressFill" style="width:${pct}%"></div></div>
+      <span class="spinner" aria-hidden="true"></span>
+    </div>`
     return
   }
   if(state === "analysis complete"){
@@ -531,9 +574,6 @@ function renderDx(){
         }
       })
     }else{
-      if(aligned){
-        meta.appendChild(document.createTextNode("   "))
-      }
       const label = document.createElement("span")
       label.textContent = "General reasoning"
       meta.appendChild(label)
@@ -751,13 +791,15 @@ async function pollAnalyze(){
       return
     }
     const status = json.status || "waiting"
+    const stageLabel = json.stage_label || ""
+    const progress = json.progress || 0
     if(status === "waiting"){
       setAnalyzeStatus("waiting")
       setTimeout(pollAnalyze, 600)
       return
     }
     if(status === "processing"){
-      setAnalyzeStatus("processing")
+      setAnalyzeStatus("processing", stageLabel, progress)
       setTimeout(pollAnalyze, 1200)
       return
     }
@@ -781,7 +823,7 @@ async function pollAnalyze(){
       return
     }
   }catch(e){
-    setAnalyzeStatus("processing")
+    setAnalyzeStatus("processing", "Processing...", 50)
     setTimeout(pollAnalyze, 1500)
   }
 }
@@ -1197,7 +1239,7 @@ if(el("runOcrBtn")){
   })
 }
 
-el("resetBtn").addEventListener("click", clearAll)
+if(el("resetBtn")){ el("resetBtn").addEventListener("click", clearAll) }
 el("newCaseBtn").addEventListener("click", clearAll)
 
 if(el("clearCasesBtn")){

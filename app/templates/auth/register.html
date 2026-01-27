@@ -1,163 +1,324 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - Maneiro.ai</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        .register-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 40px;
-            width: 100%;
-            max-width: 450px;
-        }
-        .logo {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .logo h1 {
-            color: #333;
-            font-size: 28px;
-            font-weight: 700;
-        }
-        .logo p {
-            color: #666;
-            font-size: 14px;
-            margin-top: 5px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            color: #333;
-            font-weight: 500;
-            margin-bottom: 8px;
-        }
-        input[type="text"],
-        input[type="password"],
-        input[type="email"] {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
-        input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        .flash {
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 14px;
-        }
-        .flash.error {
-            background: #fee;
-            color: #c00;
-            border: 1px solid #fcc;
-        }
-        .links {
-            text-align: center;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-        }
-        .links a {
-            color: #667eea;
-            text-decoration: none;
-            font-size: 14px;
-        }
-        .links a:hover {
-            text-decoration: underline;
-        }
-        .hint {
-            font-size: 12px;
-            color: #999;
-            margin-top: 4px;
-        }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create Account | Maneiro.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f6f8ff;
+      --bgAccent: #eef7f5;
+      --panel: #ffffff;
+      --panel2: #f3f6ff;
+      --text: #0b1226;
+      --muted: #51565b;
+      --border: #d8def0;
+      --primary: #9cd0c5;
+      --accent: #9cd0c5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 800px at 20% 0%, var(--bgAccent) 0%, var(--bg) 60%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .authCard {
+      width: 100%;
+      max-width: 480px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 32px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+    }
+    .authLogo {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .authLogo img {
+      height: 48px;
+      width: auto;
+      background: transparent;
+      border-radius: 8px;
+    }
+    .authTitle {
+      font-size: 24px;
+      font-weight: 900;
+      margin: 0 0 8px 0;
+      text-align: center;
+    }
+    .authSubtitle {
+      color: var(--muted);
+      font-size: 15px;
+      text-align: center;
+      margin: 0 0 28px 0;
+    }
+    .sectionLabel {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      margin: 24px 0 12px 0;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sectionLabel:first-of-type {
+      margin-top: 0;
+    }
+    .formGroup {
+      margin-bottom: 16px;
+    }
+    .formRow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .formLabel {
+      display: block;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .formInput {
+      width: 100%;
+      height: 48px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(243,246,255,0.95);
+      color: var(--text);
+      font-size: 16px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .formInput:focus {
+      box-shadow: 0 0 0 3px rgba(156,208,197,0.35);
+      border-color: rgba(156,208,197,0.75);
+    }
+    .formInput::placeholder {
+      color: var(--muted);
+      opacity: 0.7;
+    }
+    .formHint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .btnPrimary {
+      width: 100%;
+      height: 48px;
+      padding: 12px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.06);
+      background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
+      color: #ffffff;
+      font-weight: 900;
+      font-size: 16px;
+      font-family: inherit;
+      cursor: pointer;
+      box-shadow: 0 10px 22px rgba(156,208,197,0.28);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      margin-top: 8px;
+    }
+    .btnPrimary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 26px rgba(156,208,197,0.32);
+    }
+    .btnPrimary:active {
+      transform: translateY(0);
+    }
+    .btnPrimary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .authFooter {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .authFooter a {
+      color: var(--text);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .authFooter a:hover {
+      text-decoration: underline;
+    }
+    .errorMsg {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #dc2626;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      margin-bottom: 18px;
+    }
+    .terms {
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 16px;
+      line-height: 1.5;
+    }
+    .terms a {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .terms a:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 500px) {
+      .formRow {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 <body>
-    <div class="register-container">
-        <div class="logo">
-            <h1>Maneiro.ai</h1>
-            <p>Create your account</p>
-        </div>
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="flash {{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        
-        <form method="POST" action="{{ url_for('auth.register') }}">
-            {{ form.hidden_tag() }}
-            
-            <div class="form-group">
-                <label for="username">Username</label>
-                {{ form.username(placeholder="Choose a username") }}
-                <div class="hint">3-50 characters, letters and numbers only</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="email">Email</label>
-                {{ form.email(placeholder="your@email.com") }}
-            </div>
-            
-            <div class="form-group">
-                <label for="full_name">Full Name</label>
-                {{ form.full_name(placeholder="Dr. Jane Smith") }}
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Password</label>
-                {{ form.password(placeholder="Minimum 8 characters") }}
-            </div>
-            
-            <div class="form-group">
-                <label for="confirm">Confirm Password</label>
-                {{ form.confirm(placeholder="Confirm your password") }}
-            </div>
-            
-            <button type="submit" class="btn">Create Account</button>
-        </form>
-        
-        <div class="links">
-            <a href="{{ url_for('auth.login') }}">Already have an account? Sign in</a>
-        </div>
+  <div class="authCard">
+    <div class="authLogo">
+      <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro.ai" />
     </div>
+    
+    <h1 class="authTitle">Create your account</h1>
+    <p class="authSubtitle">Start your 14-day free trial. No credit card required.</p>
+    
+    {% if error %}
+    <div class="errorMsg">{{ error }}</div>
+    {% endif %}
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="errorMsg">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    
+    <form method="POST" action="{{ url_for('auth.register') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+      
+      <div class="sectionLabel">Clinic Information</div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="clinic_name">Clinic Name</label>
+        <input 
+          type="text" 
+          id="clinic_name" 
+          name="clinic_name" 
+          class="formInput" 
+          placeholder="Your clinic name"
+          required 
+          autofocus
+        />
+        <div class="formHint">This will be your organization name</div>
+      </div>
+      
+      <div class="sectionLabel">Your Information</div>
+      
+      <div class="formRow">
+        <div class="formGroup">
+          <label class="formLabel" for="first_name">First Name</label>
+          <input 
+            type="text" 
+            id="first_name" 
+            name="first_name" 
+            class="formInput" 
+            placeholder="First name"
+            required
+          />
+        </div>
+        <div class="formGroup">
+          <label class="formLabel" for="last_name">Last Name</label>
+          <input 
+            type="text" 
+            id="last_name" 
+            name="last_name" 
+            class="formInput" 
+            placeholder="Last name"
+            required
+          />
+        </div>
+      </div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="username">Username</label>
+        <input 
+          type="text" 
+          id="username" 
+          name="username" 
+          class="formInput" 
+          placeholder="e.g. jsmith"
+          pattern="[a-zA-Z0-9_]+"
+          required
+        />
+        <div class="formHint">Letters, numbers, underscore only. Used for login.</div>
+      </div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+        <input 
+          type="email" 
+          id="email" 
+          name="email" 
+          class="formInput" 
+          placeholder="you@clinic.com"
+        />
+      </div>
+      
+      <div class="sectionLabel">Security</div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="password">Password</label>
+        <input 
+          type="password" 
+          id="password" 
+          name="password" 
+          class="formInput" 
+          placeholder="At least 8 characters"
+          minlength="8"
+          required
+        />
+      </div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="password_confirm">Confirm Password</label>
+        <input 
+          type="password" 
+          id="password_confirm" 
+          name="password_confirm" 
+          class="formInput" 
+          placeholder="Enter password again"
+          minlength="8"
+          required
+        />
+      </div>
+      
+      <button type="submit" class="btnPrimary">Create account</button>
+      
+      <div class="terms">
+        By creating an account, you agree to our<br>
+        <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>
+      </div>
+    </form>
+    
+    <div class="authFooter">
+      Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a>
+    </div>
+  </div>
 </body>
 </html>

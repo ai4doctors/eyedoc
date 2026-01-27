@@ -1,136 +1,145 @@
-# Maneiro.ai v2026.7
+# Maneiro.ai - Clinical Documentation Assistant
 
-Clinical Documentation Assistant - Transform clinical notes into professional referral letters with AI-powered analysis.
+🏥 Transform clinical notes into professional referral letters with AI-powered analysis
 
-## Features
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
 
-### Core
-- **Multi-tenant Architecture** - Organizations with role-based access (Owner, Admin, Doctor, Assistant)
-- **User Authentication** - Secure login with bcrypt password hashing
-- **Usage Tracking** - Per-organization job limits by subscription tier
-- **Audit Logging** - Compliance-ready activity tracking
+## v2026.8 New Features
 
-### Analysis (v2026.6+)
-- **9-Stage Progress Tracking** - Real-time progress updates during analysis
-- **Schema Validation** - Strict output validation with auto-repair
-- **Multi-Specialty Support** - Ophthalmology, Primary Care, Cardiology, Dermatology
-- **Quality Scoring** - Automatic referral quality assessment
-- **ICD-10 Extraction** - Automatic diagnosis code extraction
-- **Clinical Warnings** - Red flag identification
+- **Progress Stages** - Real-time progress bar showing analysis steps (Extracting → Analyzing → Structuring → References → Citations → Complete)
+- **Health Endpoint** - `/healthz` for load balancer health checks
+- **Version Endpoint** - `/version` returns build info and feature flags
 
-### Letter Generation
-- **7-Stage Progress Tracking** - Real-time letter generation progress
-- **Multiple Templates** - Standard, Urgent, Co-management, Second Opinion, Patient Education, Insurance
-- **PDF Export** - Professional PDF output with letterhead/signature
-
-## Directory Structure
-
-```
-maneiro-v2026.7/
-├── app/
-│   ├── __init__.py          # Flask app factory
-│   ├── models.py            # Database models (User, Org, Job, AuditLog)
-│   ├── auth.py              # Authentication routes
-│   ├── api.py               # API endpoints with progress stages
-│   ├── static/
-│   │   ├── css/app.css
-│   │   ├── js/app.js
-│   │   └── images/
-│   └── templates/
-│       ├── index.html
-│       └── auth/
-├── config.py                # Configuration with AWS Parameter Store
-├── wsgi.py                  # Production entry point
-├── requirements.txt
-├── Dockerfile
-├── render.yaml
-└── README.md
-```
-
-## Quick Start
-
-### Local Development
+## 🚀 Quick Start
 
 ```bash
-# Clone and enter directory
 git clone https://github.com/yourusername/maneiro-ai.git
 cd maneiro-ai
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# Install dependencies
+docker-compose up -d
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-
-# Set environment variables
-export FLASK_ENV=development
-export SECRET_KEY=dev-secret-key
-export OPENAI_API_KEY=sk-your-key
-
-# Run
+cp .env.example .env  # Edit with your keys
+flask db upgrade
 flask run
 ```
 
-Visit http://localhost:5000
+Visit: http://localhost:5000
 
-### Deploy to Render
+## 📖 Documentation
 
-1. Push to GitHub
-2. Create new Web Service on Render
-3. Connect repository
-4. Add environment variables:
-   - `OPENAI_API_KEY`
-   - `SECRET_KEY` (auto-generated)
-5. Deploy
+- **[Phased Implementation](docs/PHASED_IMPLEMENTATION.md)** - Strategic rollout plan
+- **[Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)** - 2-week sprint guide
 
-## API Endpoints
+## 🏗️ Phase 1 Architecture (Current)
 
-### Analysis
-- `POST /analyze_start` - Start analysis (accepts `specialty` param)
-- `GET /analyze_status?job_id=xxx` - Get status with progress
+**Status:** ✅ Ready to implement | **Timeline:** 2 weeks
 
-### Letter
-- `POST /letter_start` - Start letter generation (accepts `template` param)
-- `GET /letter_status?job_id=xxx` - Get status with progress
+```
+Multi-Tenant System
+├── Organizations (clinics) → billing entity
+│   ├── Users (doctors, staff)
+│   └── Jobs (analysis tasks)
+├── Authentication (Flask-Login)
+├── PostgreSQL (persistence)
+└── Audit Logging (compliance)
+```
 
-### Configuration
-- `GET /specialties` - List available specialties
-- `GET /templates` - List available letter templates
-- `GET /stages` - Get stage definitions
-- `GET /healthz` - Health check
-- `GET /version` - Version and feature flags
+**Core Features:**
+- ✅ Multi-tenant (organizations + users)
+- ✅ Job persistence in PostgreSQL
+- ✅ Usage limits (50 jobs/month trial)
+- ✅ Audit logging
+- ✅ PDF/image OCR analysis
+- ✅ AWS Transcribe integration
+- ✅ AI report generation
+- ✅ PubMed citations
 
-## Environment Variables
+## 🔑 Multi-Tenant Design
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FLASK_ENV` | Environment (development/production) | development |
-| `SECRET_KEY` | Flask secret key | required |
-| `DATABASE_URL` | PostgreSQL connection string | sqlite:///maneiro.db |
-| `OPENAI_API_KEY` | OpenAI API key | required |
-| `OPENAI_MODEL` | Model to use | gpt-4.1 |
-| `APP_VERSION` | Version string | 2026.7 |
-| `FEATURE_STRICT_SCHEMA` | Enable schema validation | 1 |
-| `FEATURE_PROGRESS_STAGES` | Enable progress tracking | 1 |
-| `FEATURE_MULTI_SPECIALTY` | Enable specialty selection | 1 |
+Every user belongs to an Organization:
 
-## Subscription Tiers
+```python
+# Registration creates org + admin user
+Organization(name="Vancouver Eye Clinic", plan="trial", max_jobs=50)
+User(organization_id=1, email="dr@clinic.com", role="admin")
 
-| Tier | Jobs/Month | Team Members |
-|------|------------|--------------|
-| Free | 5 | 1 |
-| Basic | 50 | 3 |
-| Professional | 500 | 10 |
-| Enterprise | Unlimited | Unlimited |
+# Usage checked at org level
+if not org.can_create_job:  # Checks org.monthly_count < org.max_jobs
+    return error("Limit reached")
+```
 
-## Version History
+## 🗄️ Database Schema
 
-- **v2026.7** - Full multi-tenant architecture with all v2026.6 improvements
-- **v2026.6** - Progress stages, schema validation, specialty handling
-- **v2026.5** - Quality scoring, ICD-10 extraction, clinical warnings
-- **v2026.1** - Initial multi-tenant architecture
+```sql
+organizations   -- Clinics (billable entities)
+users          -- Belongs to organization  
+jobs           -- Belongs to org + user
+audit_logs     -- Compliance tracking
+```
 
-## License
+## ⚙️ Configuration
 
-Copyright © 2026 Maneiro.ai. All rights reserved.
+**Phase 1:** Use environment variables (simple)
+```bash
+DATABASE_URL=postgresql://...
+OPENAI_API_KEY=sk-...
+AWS_S3_BUCKET=bucket
+SECRET_KEY=secret
+```
+
+**Phase 2:** AWS Parameter Store (optional later)
+
+## 📊 Phase Roadmap
+
+### Phase 1: Foundation (2 weeks) ← **YOU ARE HERE**
+- Multi-tenant architecture
+- User authentication
+- Job persistence  
+- Audit logging
+- Usage limits
+
+### Phase 2: Monetization (2 weeks)
+- Stripe integration
+- Multi-tier pricing
+- Webhooks
+- Redis + rate limiting
+
+### Phase 3: Enterprise (8-12 weeks)
+- Team management
+- SSO, API access
+- Custom branding
+- Advanced compliance
+
+## ✅ Phase 1 Success Criteria
+
+Ready for Phase 2 when:
+- [ ] 3+ clinics registered
+- [ ] Jobs persist across restarts
+- [ ] Usage limits enforced
+- [ ] Audit log working
+- [ ] Demoed to real clinic
+
+## 🚀 Deploy to Render
+
+```bash
+git push origin main
+# Render auto-deploys
+# Add PostgreSQL database
+# Set environment variables
+# Migrations run automatically
+```
+
+## 🛠️ Tech Stack
+
+Flask 3.1 | PostgreSQL | SQLAlchemy | OpenAI GPT-4 | AWS S3/Transcribe | ReportLab | Tesseract OCR
+
+## 📞 Next Steps
+
+1. Read: `docs/PHASED_IMPLEMENTATION.md`
+2. Follow: `docs/PHASE_1_CHECKLIST.md`  
+3. Ship Phase 1 in 2 weeks
+
+---
+
+**Version:** 2026.8 | **Status:** Production Ready | **Python:** 3.11+
