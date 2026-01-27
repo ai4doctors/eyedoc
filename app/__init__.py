@@ -36,14 +36,37 @@ def create_app(config_name='default'):
     # Exempt API routes from CSRF (JS doesn't send tokens)
     csrf.exempt(api_bp)
     
-    # Auto-create tables on startup (useful for SQLite dev/staging)
+    # Handle database initialization
     with app.app_context():
-        # Reset DB if flag is set
+        from sqlalchemy import text, inspect
+        
+        # Reset DB if flag is set (works for both SQLite and PostgreSQL)
         if os.getenv('RESET_DB', '').strip() in ('1', 'true', 'yes'):
             app.logger.warning('RESET_DB is set - dropping all tables...')
-            db.drop_all()
-        
-        # Create tables if they don't exist
-        db.create_all()
+            try:
+                # For PostgreSQL, drop and recreate schema
+                db.session.execute(text('DROP SCHEMA public CASCADE'))
+                db.session.execute(text('CREATE SCHEMA public'))
+                db.session.execute(text('GRANT ALL ON SCHEMA public TO public'))
+                db.session.commit()
+                app.logger.warning('PostgreSQL schema reset complete')
+            except Exception as e:
+                db.session.rollback()
+                app.logger.warning(f'PostgreSQL reset failed, trying SQLAlchemy drop_all: {e}')
+                try:
+                    db.drop_all()
+                except Exception:
+                    pass
+            
+            # Now create fresh tables
+            db.create_all()
+            app.logger.warning('Fresh tables created')
+        else:
+            # Only create tables if they don't exist (safe for existing DB)
+            inspector = inspect(db.engine)
+            existing_tables = inspector.get_table_names()
+            if not existing_tables:
+                app.logger.info('No tables found, creating...')
+                db.create_all()
     
     return app
