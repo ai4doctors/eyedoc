@@ -590,7 +590,7 @@ Output VALID JSON only:
   "provider_name": "string - the authoring/sending clinician name and credentials",
   "provider_clinic": "string - clinic or practice name if mentioned",
   "patient_block": "string - patient demographics with <br> line breaks: name, DOB/Age, Sex, PHN/MRN, phone, address. MUST include DOB or Age if available.",
-  "summary_html": "string - IMPORTANT: Write a concise clinical summary in 2-4 sections. Format: <p><b>Visit Context:</b> Brief reason for visit and relevant history.</p><p><b>Key Findings:</b> Important exam findings in narrative form.</p><p><b>Tests &amp; Measurements:</b></p><ul><li>VA: OD 20/xx, OS 20/xx</li><li>IOP: OD xx, OS xx</li><li>Other relevant tests with values</li></ul><p><b>Clinical Impression:</b> Brief assessment synthesis.</p>",
+  "summary_html": "string - Structured clinical summary with ZERO redundancy. Each value appears ONCE. Format exactly as: <p><b>Visit Context:</b> Reason for visit, relevant history, referral source.</p><p><b>Examination:</b></p><ul><li>VA: OD [value], OS [value]</li><li>IOP: OD [value], OS [value]</li><li>Pupils: [findings]</li><li>Anterior segment: [findings]</li><li>Posterior segment: [findings]</li><li>Imaging: [OCT, VF, photos if any]</li></ul><p><b>Key Findings:</b> 1-2 sentences on what is clinically significant (do NOT repeat the measurements above).</p><p><b>Clinical Impression:</b> Brief synthesis of what this means for the patient. Do NOT list diagnoses - those go in the diagnoses field below.</p>",
   "chief_complaint": "string - main reason for visit or referral in one sentence",
   "diagnoses": [
     {{
@@ -659,14 +659,15 @@ Output VALID JSON only:
   "follow_up": "string - recommended follow-up timing"
 }}
 
-CRITICAL FORMATTING RULES:
-1. summary_html should have narrative sections PLUS a bulleted list for Tests & Measurements
-2. DO NOT repeat diagnoses or plan in summary_html - they have their own fields
-3. Use <ul><li>...</li></ul> for the Tests & Measurements section to list VA, IOP, and other key values
-4. Include ALL tests/findings mentioned in the document in clinical_values or in diagnosis bullets
-5. For patient_block, ALWAYS extract age or DOB if present - this is critical for reference selection
-6. exam_findings should list EVERY measurable exam component found (VA, IOP, pupils, slit lamp, fundus, OCT, visual field, etc.)
-7. Group exam_findings by category (e.g., "Visual Acuity", "Tonometry", "Anterior Segment", "Posterior Segment", "Imaging")
+CRITICAL FORMATTING RULES FOR summary_html:
+1. ZERO REDUNDANCY - VA, IOP, and other measurements appear ONLY ONCE in the Examination bullet list
+2. DO NOT mention VA or IOP values anywhere except in the Examination bullets
+3. Key Findings should describe what is abnormal or significant in words, NOT repeat numbers
+4. Clinical Impression explains what this means clinically, does NOT list diagnoses or repeat values
+5. Diagnoses and Plan have their own separate fields - do NOT include them in summary_html
+6. For patient_block, ALWAYS extract age or DOB if present - critical for reference selection
+7. exam_findings should list EVERY measurable exam component (VA, IOP, pupils, slit lamp, fundus, OCT, VF, etc.)
+8. Group exam_findings by category (Visual Acuity, Tonometry, Anterior Segment, Posterior Segment, Imaging)
 
 CLINICAL REASONING RULES:
 1. Extract facts explicitly stated in the document

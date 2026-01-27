@@ -384,10 +384,14 @@ body{
   .commGrid{grid-template-columns: 1fr}
   .fieldDoc,.fieldTo,.fieldFrom,.fieldAction,.fieldReason,.fieldFocus,.fieldRequests{grid-column:1}
 }
+.summary{
+  margin-bottom:20px;
+}
 .triCols{
   display:grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap:0;
+  margin-top:16px;
 }
 .col .panel{
   min-height:360px;
