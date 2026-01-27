@@ -298,17 +298,40 @@ function toast(msg){
   setTimeout(() => { t.style.display = "none" }, 2400)
 }
 
-function setAnalyzeStatus(state){
+function setAnalyzeStatus(state, stageLabel, progress){
   const box = el("analyzeStatus")
+  const progressBox = el("progressBox")
+  const progressLabel = el("progressLabel")
+  const progressFill = el("progressFill")
+  
   if(state === "processing"){
-    box.innerHTML = 'Wait for analysis to complete <span class="muted">(processing)</span> <span class="spinner" aria-hidden="true"></span>'
+    // Show stage-based progress
+    const label = stageLabel || "Processing..."
+    box.innerHTML = `${escapeHtml(label)} <span class="spinner" aria-hidden="true"></span>`
+    
+    // Update progress bar if elements exist
+    if(progressBox && progressLabel && progressFill){
+      progressBox.classList.remove("hidden")
+      progressLabel.textContent = label
+      progressFill.style.width = `${progress || 0}%`
+    }
     return
   }
   if(state === "analysis complete"){
     box.innerHTML = 'Analysis complete <span class="muted">(ready)</span>'
+    if(progressBox){
+      progressBox.classList.add("hidden")
+    }
     return
   }
-  box.innerHTML = 'Wait for analysis to complete <span class="muted">(waiting)</span>'
+  box.innerHTML = 'Upload a document to begin <span class="muted">(waiting)</span>'
+  if(progressBox){
+    progressBox.classList.add("hidden")
+  }
+}
+
+function escapeHtml(s){
+  return (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 function setGenerateStatus(state){
@@ -698,10 +721,15 @@ async function startAnalyze(triedOcr){
     toast("Select a file first")
     return
   }
-  setAnalyzeStatus("processing")
+  setAnalyzeStatus("processing", "Request received...", 0)
   el("ocrPrompt").classList.add("hidden")
   const fd = new FormData()
   fd.append("file", uploadedFile)
+
+  // Get specialty from selector (if it exists)
+  const specialtySel = el("specialty")
+  const specialty = specialtySel ? specialtySel.value : "auto"
+  fd.append("specialty", specialty)
 
   const handwritten = (el("handwrittenCheck") && el("handwrittenCheck").checked) || !!triedOcr
   if(handwritten){
@@ -752,12 +780,16 @@ async function pollAnalyze(){
     }
     const status = json.status || "waiting"
     if(status === "waiting"){
-      setAnalyzeStatus("waiting")
+      const label = json.stage_label || "Request received..."
+      const progress = json.progress || 0
+      setAnalyzeStatus("processing", label, progress)
       setTimeout(pollAnalyze, 600)
       return
     }
     if(status === "processing"){
-      setAnalyzeStatus("processing")
+      const label = json.stage_label || "Processing..."
+      const progress = json.progress || 0
+      setAnalyzeStatus("processing", label, progress)
       setTimeout(pollAnalyze, 1200)
       return
     }
@@ -781,7 +813,7 @@ async function pollAnalyze(){
       return
     }
   }catch(e){
-    setAnalyzeStatus("processing")
+    setAnalyzeStatus("processing", "Processing...", 50)
     setTimeout(pollAnalyze, 1500)
   }
 }

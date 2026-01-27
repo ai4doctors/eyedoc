@@ -65,9 +65,138 @@ except Exception:
     rl_letter = None
     ImageReader = None
 
-APP_VERSION = os.getenv("APP_VERSION", "2026.4")
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
+
+APP_VERSION = os.getenv("APP_VERSION", "2026.6")
+BUILD_TIME = os.getenv("BUILD_TIME", "unknown")
+GIT_COMMIT = os.getenv("GIT_COMMIT", "unknown")
 
 app = Flask(__name__, template_folder="templates", static_folder="static", static_url_path="/static")
+
+# Boot logging
+logger.info(f"Maneiro starting version={APP_VERSION} build={BUILD_TIME}")
+
+
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
+
+def feature_enabled(name: str, default: bool = True) -> bool:
+    """Check if a feature flag is enabled via environment variable."""
+    key = f"FEATURE_{name.upper()}"
+    val = os.getenv(key, "").strip().lower()
+    if val in ("1", "true", "yes", "on"):
+        return True
+    if val in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+# =============================================================================
+# JOB STAGES (Progress indicators like Claude/ChatGPT)
+# =============================================================================
+
+JOB_STAGES = [
+    {"id": "received", "label": "Request received", "icon": "📥"},
+    {"id": "extracting", "label": "Extracting text from document", "icon": "📄"},
+    {"id": "analyzing_provider", "label": "Identifying provider and patient", "icon": "👤"},
+    {"id": "extracting_findings", "label": "Extracting clinical findings", "icon": "🔍"},
+    {"id": "building_assessment", "label": "Building diagnosis and assessment", "icon": "📋"},
+    {"id": "cross_referencing", "label": "Cross-referencing medical evidence", "icon": "📚"},
+    {"id": "structuring", "label": "Structuring output and plan", "icon": "🏗️"},
+    {"id": "validating", "label": "Validating schema and completeness", "icon": "✅"},
+    {"id": "complete", "label": "Analysis complete", "icon": "🎉"},
+]
+
+LETTER_STAGES = [
+    {"id": "received", "label": "Request received", "icon": "📥"},
+    {"id": "loading_context", "label": "Loading clinical context", "icon": "📂"},
+    {"id": "selecting_template", "label": "Selecting template for recipient", "icon": "📝"},
+    {"id": "drafting", "label": "Drafting clinical narrative", "icon": "✍️"},
+    {"id": "formatting", "label": "Formatting document", "icon": "🎨"},
+    {"id": "finalizing", "label": "Finalizing letter", "icon": "📧"},
+    {"id": "complete", "label": "Letter ready", "icon": "✅"},
+]
+
+
+# =============================================================================
+# SPECIALTY AND TEMPLATE HANDLING (Backend-Owned)
+# =============================================================================
+
+SPECIALTIES = {
+    "auto": {
+        "name": "Auto-detect",
+        "prompt_modifier": "",
+    },
+    "ophthalmology": {
+        "name": "Ophthalmology",
+        "prompt_modifier": "Focus on visual acuity, IOP, slit lamp findings, fundus exam, and OCT/imaging results. Include laterality (OD/OS/OU) for all findings.",
+    },
+    "primary_care": {
+        "name": "Primary Care",
+        "prompt_modifier": "Focus on vitals, chronic disease management, medications, preventive care, and social history.",
+    },
+    "cardiology": {
+        "name": "Cardiology",
+        "prompt_modifier": "Focus on cardiac history, ECG findings, echo results, stress testing, and cardiovascular risk factors.",
+    },
+    "dermatology": {
+        "name": "Dermatology",
+        "prompt_modifier": "Focus on lesion description (size, color, borders, symmetry), anatomic location, and dermoscopy findings.",
+    },
+}
+
+ADVANCED_TEMPLATES = {
+    "standard": {
+        "name": "Standard",
+        "description": "Default professional format",
+        "prompt_modifier": "",
+    },
+    "urgent_referral": {
+        "name": "Urgent Referral",
+        "description": "Emphasizes urgency and time-sensitive findings",
+        "prompt_modifier": "This is URGENT. Lead with critical findings and timeline. Emphasize what must happen immediately.",
+    },
+    "comanagement": {
+        "name": "Co-management",
+        "description": "Collaborative care with shared responsibility",
+        "prompt_modifier": "Frame as collaborative care. Clearly delineate who is responsible for what. Include shared follow-up plan.",
+    },
+    "second_opinion": {
+        "name": "Second Opinion Request",
+        "description": "Request for expert review",
+        "prompt_modifier": "Present case objectively for expert review. Include differential diagnosis. Request specific input on diagnosis or management.",
+    },
+    "patient_education": {
+        "name": "Patient Letter",
+        "description": "Patient-friendly explanation",
+        "prompt_modifier": "Use plain language. Avoid medical jargon. Explain what the patient needs to know and do next.",
+    },
+    "insurance": {
+        "name": "Insurance/Prior Auth",
+        "description": "Medical necessity justification",
+        "prompt_modifier": "Lead with medical necessity. Document failed alternatives. Reference clinical guidelines. Focus on why this is required.",
+    },
+}
+
+
+def get_prompt_modifiers(specialty: str, advanced_template: str) -> str:
+    """Combine specialty and template modifiers for prompts. Backend owns this logic."""
+    modifiers = []
+    
+    spec = SPECIALTIES.get(specialty or "auto", {})
+    if spec.get("prompt_modifier"):
+        modifiers.append(spec["prompt_modifier"])
+    
+    tmpl = ADVANCED_TEMPLATES.get(advanced_template or "standard", {})
+    if tmpl.get("prompt_modifier"):
+        modifiers.append(tmpl["prompt_modifier"])
+    
+    return " ".join(modifiers)
 
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me")
 
@@ -1194,15 +1323,188 @@ def get_job(job_id: str) -> Dict[str, Any]:
                     continue
     return {}
 
-def run_analysis_job(job_id: str, note_text: str) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso())
-    obj, err = llm_json(analyze_prompt(note_text))
+
+def set_job_stage(job_id: str, stage_id: str, stages: List[Dict] = None) -> None:
+    """Update job to a specific stage with progress info for UI feedback."""
+    stages = stages or JOB_STAGES
+    stage_ids = [s["id"] for s in stages]
+    
+    if stage_id not in stage_ids:
+        return
+    
+    current_idx = stage_ids.index(stage_id)
+    current_stage = stages[current_idx]
+    
+    # Calculate progress percentage
+    progress = int((current_idx / max(len(stages) - 1, 1)) * 100)
+    
+    set_job(
+        job_id,
+        stage=stage_id,
+        stage_label=current_stage["label"],
+        stage_icon=current_stage.get("icon", ""),
+        stage_index=current_idx,
+        stage_count=len(stages),
+        progress=progress,
+        updated_at=now_utc_iso(),
+    )
+
+
+# =============================================================================
+# SCHEMA VALIDATION AND REPAIR
+# =============================================================================
+
+def validate_analysis(obj: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """Validate analysis output against required schema. Returns (valid, errors)."""
+    errors = []
+    
+    # Required string fields
+    for field in ["provider_name", "patient_block", "summary_html"]:
+        if not isinstance(obj.get(field), str):
+            errors.append(f"{field} must be string")
+    
+    # Summary must have meaningful content
+    summary = (obj.get("summary_html") or "").strip()
+    if len(summary) < 50:
+        errors.append("summary_html too short (min 50 chars)")
+    
+    # Diagnoses must be array with required structure
+    diagnoses = obj.get("diagnoses")
+    if not isinstance(diagnoses, list):
+        errors.append("diagnoses must be array")
+    elif len(diagnoses) == 0:
+        errors.append("diagnoses array is empty")
+    else:
+        for i, dx in enumerate(diagnoses):
+            if not isinstance(dx, dict):
+                errors.append(f"diagnoses[{i}] must be object")
+            elif not dx.get("label"):
+                errors.append(f"diagnoses[{i}] missing label")
+    
+    # Plan must be array
+    plan = obj.get("plan")
+    if not isinstance(plan, list):
+        errors.append("plan must be array")
+    
+    # Warnings must be array
+    warnings = obj.get("warnings")
+    if not isinstance(warnings, list):
+        errors.append("warnings must be array")
+    
+    return len(errors) == 0, errors
+
+
+def coerce_analysis_types(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Fix common type issues in LLM output."""
+    result = dict(obj)
+    
+    # Ensure arrays
+    for field in ["diagnoses", "plan", "references", "warnings"]:
+        if not isinstance(result.get(field), list):
+            result[field] = []
+    
+    # Ensure strings
+    for field in ["provider_name", "patient_block", "summary_html"]:
+        if not isinstance(result.get(field), str):
+            result[field] = str(result.get(field) or "")
+    
+    # Fix diagnosis numbers and ensure refs array
+    for i, dx in enumerate(result.get("diagnoses", [])):
+        if isinstance(dx, dict):
+            if not isinstance(dx.get("number"), int):
+                dx["number"] = i + 1
+            if not isinstance(dx.get("bullets"), list):
+                dx["bullets"] = []
+            if not isinstance(dx.get("refs"), list):
+                dx["refs"] = []
+    
+    # Fix plan numbers
+    for i, pl in enumerate(result.get("plan", [])):
+        if isinstance(pl, dict):
+            if not isinstance(pl.get("number"), int):
+                pl["number"] = i + 1
+            if not isinstance(pl.get("bullets"), list):
+                pl["bullets"] = []
+            if not isinstance(pl.get("aligned_dx_numbers"), list):
+                pl["aligned_dx_numbers"] = []
+            if not isinstance(pl.get("refs"), list):
+                pl["refs"] = []
+    
+    return result
+
+
+def repair_analysis_prompt(original_output: str, errors: List[str]) -> str:
+    """Generate a repair prompt for invalid analysis output."""
+    return f"""The following analysis output has validation errors that must be fixed.
+
+Errors:
+{chr(10).join(f"- {e}" for e in errors)}
+
+Original output (partial):
+{original_output[:2000]}
+
+Please fix these errors and return VALID JSON matching this schema exactly:
+{{
+  "provider_name": "string - authoring clinician only",
+  "patient_block": "string with <br> for line breaks",
+  "summary_html": "string with <b> headings and <p> content - MUST be at least 50 characters",
+  "diagnoses": [
+    {{"number": 1, "code": "ICD-10 or empty", "label": "diagnosis name - REQUIRED", "bullets": ["finding"]}}
+  ],
+  "plan": [
+    {{"number": 1, "title": "plan item", "bullets": ["action"], "aligned_dx_numbers": [1]}}
+  ],
+  "warnings": ["string array"]
+}}
+
+Return ONLY valid JSON. No markdown fences. No explanation."""
+
+
+def run_analysis_job(job_id: str, note_text: str, specialty: str = "auto") -> None:
+    """Run analysis with explicit stage progression for UI feedback."""
+    
+    # Stage: Extracting findings
+    set_job_stage(job_id, "extracting_findings", JOB_STAGES)
+    set_job(job_id, status="processing")
+    
+    # Get specialty modifier for prompts
+    spec_modifier = get_prompt_modifiers(specialty, "standard")
+    
+    # Stage: Building assessment
+    set_job_stage(job_id, "building_assessment", JOB_STAGES)
+    
+    # Build the analysis prompt with specialty modifiers
+    base_prompt = analyze_prompt(note_text)
+    if spec_modifier:
+        base_prompt = base_prompt.replace("You are a clinician assistant.", f"You are a clinician assistant. {spec_modifier}")
+    
+    obj, err = llm_json(base_prompt)
     if err or not obj:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
         return
 
     analysis = dict(ANALYZE_SCHEMA)
     analysis.update(obj)
+    
+    # Coerce types to fix common LLM issues
+    analysis = coerce_analysis_types(analysis)
+    
+    # Stage: Validating schema
+    set_job_stage(job_id, "validating", JOB_STAGES)
+    
+    # Schema validation with repair attempt
+    valid, errors = validate_analysis(analysis)
+    if not valid and feature_enabled("STRICT_SCHEMA", default=True):
+        logger.warning(f"Analysis {job_id} failed validation: {errors}")
+        # Attempt repair via re-prompt
+        repair_obj, repair_err = llm_json(repair_analysis_prompt(json.dumps(obj)[:2000], errors))
+        if repair_obj and not repair_err:
+            analysis.update(repair_obj)
+            analysis = coerce_analysis_types(analysis)
+            analysis["_repaired"] = True
+            logger.info(f"Analysis {job_id} repaired successfully")
+        else:
+            logger.warning(f"Analysis {job_id} repair failed, using original")
 
     # Derive patient_name from patient_block for UI convenience and for provider name cleanup
     pb = (analysis.get("patient_block") or "")
@@ -1230,6 +1532,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
+    # Stage: Cross-referencing medical evidence
+    set_job_stage(job_id, "cross_referencing", JOB_STAGES)
+    
     # Fetch PubMed references based on diagnoses
     terms = []
     for dx in analysis.get("diagnoses") or []:
@@ -1241,6 +1546,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
     canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
     analysis['references'] = merge_references(references, canonical)
 
+    # Stage: Structuring output
+    set_job_stage(job_id, "structuring", JOB_STAGES)
+    
     # Assign citation numbers
     if references:
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
@@ -1275,12 +1583,26 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(analysis["plan"][0], dict):
                     analysis["plan"][0]["refs"] = [1]
 
+    # Add metadata
+    analysis["metadata"] = {
+        "analysis_version": "2.1",
+        "generated_at": now_utc_iso(),
+        "schema_valid": "_repaired" not in analysis,
+        "detected_specialty": specialty,
+    }
+    
+    # Stage: Complete
+    set_job_stage(job_id, "complete", JOB_STAGES)
     set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
+    logger.info(f"Analysis {job_id} completed successfully")
 
 
-def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False) -> None:
+def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False, specialty: str = "auto") -> None:
     """Extract text (with OCR when needed) then run analysis."""
     set_job(job_id, status="processing", updated_at=now_utc_iso())
+    
+    # Stage: Extracting text from document
+    set_job_stage(job_id, "extracting", JOB_STAGES)
 
     # Persist a heartbeat so we can detect stalled jobs after a restart.
     set_job(job_id, heartbeat_at=now_utc_iso())
@@ -1358,8 +1680,11 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
         set_job(job_id, status="error", error=msg, updated_at=now_utc_iso())
         return
 
+    # Stage: Analyzing provider and patient
+    set_job_stage(job_id, "analyzing_provider", JOB_STAGES)
+    
     # Run the main LLM analysis
-    run_analysis_job(job_id, note_text)
+    run_analysis_job(job_id, note_text, specialty)
 
 @app.get("/")
 def index():
@@ -1395,6 +1720,7 @@ def analyze_start():
 
     filename = (getattr(file, "filename", "") or "").lower()
     data = file.read()
+    specialty = (request.form.get("specialty") or "auto").strip()
 
     job_id = new_job_id()
     # Persist the uploaded source so a restart does not lose the job.
@@ -1406,19 +1732,26 @@ def analyze_start():
             f.write(data)
     except Exception:
         upath = ""
-
+    
+    # Set initial job state with stage info for immediate UI feedback
     set_job(
         job_id,
         status="waiting",
+        stage="received",
+        stage_label="Request received",
+        progress=0,
         updated_at=now_utc_iso(),
         upload_path=upath,
         upload_name=filename,
         force_ocr=force_ocr,
+        specialty=specialty,
     )
-    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr), daemon=True)
+    
+    logger.info(f"Analysis started job_id={job_id} specialty={specialty}")
+    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr, specialty), daemon=True)
     t.start()
 
-    return jsonify({"ok": True, "job_id": job_id}), 200
+    return jsonify({"ok": True, "job_id": job_id, "stages": JOB_STAGES}), 200
 
 @app.get("/analyze_status")
 def analyze_status():
@@ -1442,7 +1775,8 @@ def analyze_status():
                 up = (job.get("upload_path") or "").strip()
                 if up and os.path.exists(up) and not job.get("resume_started"):
                     set_job(job_id, resume_started=True, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
-                    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, job.get("upload_name") or "", b"", bool(job.get("force_ocr"))), daemon=True)
+                    specialty = (job.get("specialty") or "auto").strip()
+                    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, job.get("upload_name") or "", b"", bool(job.get("force_ocr")), specialty), daemon=True)
                     t.start()
                     job = get_job(job_id)
     except Exception:
@@ -1856,8 +2190,8 @@ def export_pdf():
 
 
 @app.get("/healthz")
-
 def healthz():
+    """Production health check endpoint."""
     ok, msg = client_ready()
     ocr_ok, ocr_msg = ocr_ready()
     tpath = ""
@@ -1868,6 +2202,7 @@ def healthz():
     return jsonify({
         "ok": True,
         "app_version": APP_VERSION,
+        "build_time": BUILD_TIME,
         "time_utc": now_utc_iso(),
         "openai_ready": ok,
         "openai_message": msg,
@@ -1875,4 +2210,39 @@ def healthz():
         "ocr_message": ocr_msg,
         "tesseract_path": tpath,
         "model": model_name(),
+    }), 200
+
+
+@app.get("/version")
+def version():
+    """Return version info, features, and available options."""
+    return jsonify({
+        "version": APP_VERSION,
+        "analysis_version": "2.1",
+        "build_time": BUILD_TIME,
+        "git_commit": GIT_COMMIT,
+        "features": {
+            "strict_schema": feature_enabled("STRICT_SCHEMA", True),
+            "progress_stages": True,
+            "specialty_detection": True,
+            "advanced_templates": True,
+        },
+        "specialties": [
+            {"id": k, "name": v["name"]} for k, v in SPECIALTIES.items()
+        ],
+        "templates": [
+            {"id": k, "name": v["name"], "description": v.get("description", "")} 
+            for k, v in ADVANCED_TEMPLATES.items()
+        ],
+        "stages": JOB_STAGES,
+    }), 200
+
+
+@app.get("/stages")
+def stages():
+    """Return job stages for UI progress display."""
+    return jsonify({
+        "ok": True,
+        "analysis_stages": JOB_STAGES,
+        "letter_stages": LETTER_STAGES,
     }), 200

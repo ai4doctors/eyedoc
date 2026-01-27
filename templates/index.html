@@ -39,12 +39,24 @@
       <section class="stepBar">
         <div class="stepTitle"><b>STEP 1: ANALYZE</b></div>
         <div class="stepControls">
+          <select id="specialty" class="ctrl ctrlSmall" title="Specialty">
+            <option value="auto">Auto-detect</option>
+            <option value="ophthalmology">Ophthalmology</option>
+            <option value="primary_care">Primary Care</option>
+            <option value="cardiology">Cardiology</option>
+            <option value="dermatology">Dermatology</option>
+          </select>
           <input id="file" type="file" accept="application/pdf,image/*,audio/*" class="fileInput hidden" />
           <button id="recordBtn" class="btnPrimary" type="button">Record exam</button>
           <button id="uploadBtn" class="btnPrimary" type="button">Upload file</button>
-          <div id="analyzeStatus" class="stepStatus">Ready</div>
         </div>
-        <div class="stepHint">Process audio, images, or PDFs. Works in multiple languages.</div>
+        <div id="progressBox" class="progressBox hidden">
+          <div class="progressLabel" id="progressLabel">Starting...</div>
+          <div class="progressBar">
+            <div class="progressFill" id="progressFill"></div>
+          </div>
+        </div>
+        <div id="analyzeStatus" class="stepStatus">Upload a document to begin</div>
         <div id="ocrPrompt" class="ocrPrompt hidden">
           <div class="ocrText">I could not extract readable text from this file. If it is scanned or handwritten, enable the option below and run OCR.</div>
           <div class="ocrControls">

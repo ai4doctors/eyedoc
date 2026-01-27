@@ -1,139 +1,87 @@
-# Maneiro.ai - Clinical Documentation Assistant
+# Maneiro.ai
 
-🏥 Transform clinical notes into professional referral letters with AI-powered analysis
+Clinical documentation assistant for post-visit reasoning and document quality.
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
+## What It Does
 
-## 🚀 Quick Start
+Maneiro takes messy clinical inputs (PDFs, audio, images) and produces structured outputs:
+- **Diagnosis** with ICD-10 codes and laterality
+- **Plan** aligned to diagnoses  
+- **References** from PubMed
+
+Optimized for referral letters, consult letters, follow-ups, and specialty communication.
+
+## What It Is NOT
+
+Maneiro is not an ambient AI scribe. We don't compete with Nabla, Suki, Abridge, or DeepScribe.
+Those tools focus on live transcription and tight EMR integration. 
+Our strength is post-visit reasoning and document quality.
+
+## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/maneiro-ai.git
-cd maneiro-ai
-docker-compose up -d
-python3 -m venv venv && source venv/bin/activate
+# 1. Copy environment
+cp .env.example .env
+# Add your OPENAI_API_KEY to .env
+
+# 2. Install dependencies  
 pip install -r requirements.txt
-cp .env.example .env  # Edit with your keys
-flask db upgrade
-flask run
+
+# 3. Run
+python app.py
 ```
 
-Visit: http://localhost:5000
+## Deploy on Render
 
-## 📖 Documentation
+The included `render.yaml` configures a standard Python web service.
 
-- **[Phased Implementation](docs/PHASED_IMPLEMENTATION.md)** - Strategic rollout plan
-- **[Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)** - 2-week sprint guide
+## Environment Variables
 
-## 🏗️ Phase 1 Architecture (Current)
-
-**Status:** ✅ Ready to implement | **Timeline:** 2 weeks
-
-```
-Multi-Tenant System
-├── Organizations (clinics) → billing entity
-│   ├── Users (doctors, staff)
-│   └── Jobs (analysis tasks)
-├── Authentication (Flask-Login)
-├── PostgreSQL (persistence)
-└── Audit Logging (compliance)
-```
-
-**Core Features:**
-- ✅ Multi-tenant (organizations + users)
-- ✅ Job persistence in PostgreSQL
-- ✅ Usage limits (50 jobs/month trial)
-- ✅ Audit logging
-- ✅ PDF/image OCR analysis
-- ✅ AWS Transcribe integration
-- ✅ AI report generation
-- ✅ PubMed citations
-
-## 🔑 Multi-Tenant Design
-
-Every user belongs to an Organization:
-
-```python
-# Registration creates org + admin user
-Organization(name="Vancouver Eye Clinic", plan="trial", max_jobs=50)
-User(organization_id=1, email="dr@clinic.com", role="admin")
-
-# Usage checked at org level
-if not org.can_create_job:  # Checks org.monthly_count < org.max_jobs
-    return error("Limit reached")
-```
-
-## 🗄️ Database Schema
-
-```sql
-organizations   -- Clinics (billable entities)
-users          -- Belongs to organization  
-jobs           -- Belongs to org + user
-audit_logs     -- Compliance tracking
-```
-
-## ⚙️ Configuration
-
-**Phase 1:** Use environment variables (simple)
 ```bash
-DATABASE_URL=postgresql://...
+# Required
 OPENAI_API_KEY=sk-...
-AWS_S3_BUCKET=bucket
-SECRET_KEY=secret
+
+# Optional
+APP_VERSION=2026.6
+FLASK_SECRET_KEY=change-me
+OPENAI_MODEL=gpt-4.1
+BUILD_TIME=2026-01-27
+GIT_COMMIT=abc1234
+
+# Feature flags
+FEATURE_STRICT_SCHEMA=1    # Schema validation with repair
+
+# AWS (for audio transcription)
+AWS_S3_BUCKET=
+AWS_REGION=
 ```
 
-**Phase 2:** AWS Parameter Store (optional later)
+## API Endpoints
 
-## 📊 Phase Roadmap
+```
+POST /analyze_start     - Start document analysis
+GET  /analyze_status    - Poll job status (includes stage progress)
+POST /generate_report   - Generate letter from analysis
+POST /export_pdf        - Export letter as PDF
 
-### Phase 1: Foundation (2 weeks) ← **YOU ARE HERE**
-- Multi-tenant architecture
-- User authentication
-- Job persistence  
-- Audit logging
-- Usage limits
-
-### Phase 2: Monetization (2 weeks)
-- Stripe integration
-- Multi-tier pricing
-- Webhooks
-- Redis + rate limiting
-
-### Phase 3: Enterprise (8-12 weeks)
-- Team management
-- SSO, API access
-- Custom branding
-- Advanced compliance
-
-## ✅ Phase 1 Success Criteria
-
-Ready for Phase 2 when:
-- [ ] 3+ clinics registered
-- [ ] Jobs persist across restarts
-- [ ] Usage limits enforced
-- [ ] Audit log working
-- [ ] Demoed to real clinic
-
-## 🚀 Deploy to Render
-
-```bash
-git push origin main
-# Render auto-deploys
-# Add PostgreSQL database
-# Set environment variables
-# Migrations run automatically
+GET  /healthz           - Health check
+GET  /version           - Version and feature info
+GET  /stages            - Available job stages
 ```
 
-## 🛠️ Tech Stack
+## Version 2026.6
 
-Flask 3.1 | PostgreSQL | SQLAlchemy | OpenAI GPT-4 | AWS S3/Transcribe | ReportLab | Tesseract OCR
+**New in this release:**
+- Progress stages showing what's happening during analysis (like Claude/ChatGPT)
+- Schema validation with automatic repair
+- Specialty selection before generation
+- Backend-owned prompt logic
+- Feature flags for safe iteration
+- Enhanced logging and boot diagnostics
 
-## 📞 Next Steps
+## Legal
 
-1. Read: `docs/PHASED_IMPLEMENTATION.md`
-2. Follow: `docs/PHASE_1_CHECKLIST.md`  
-3. Ship Phase 1 in 2 weeks
+Maneiro is a clinical documentation aid. It does not provide medical advice.
+Clinicians are responsible for verifying accuracy before use.
 
----
-
-**Version:** Phase 1 | **Status:** Ready | **Python:** 3.11+
+All rights reserved.
