@@ -525,6 +525,8 @@ function renderSummary(){
   }
   const header = (latestAnalysis.patient_block || "").trim()
   const summary = (latestAnalysis.summary_html || "").trim()
+  const examFindings = latestAnalysis.exam_findings || []
+  
   let html = ""
   if(header){
     html += `<div class="patientBlock">${header}</div>`
@@ -534,7 +536,28 @@ function renderSummary(){
   }else{
     html += "<p>No summary extracted.</p>"
   }
+  
+  // Render individual exam findings
+  if(examFindings.length){
+    html += `<div class="examFindingsSection"><p><b>Examination:</b></p>`
+    examFindings.forEach(cat => {
+      if(cat.findings && cat.findings.length){
+        html += `<div class="examCategory"><span class="examCategoryLabel">${escapeHtml(cat.category || 'Findings')}:</span> `
+        const items = cat.findings.map(f => {
+          const abnormalClass = f.abnormal ? ' class="abnormal"' : ''
+          return `<span${abnormalClass}>${escapeHtml(f.label)}: ${escapeHtml(f.value)}</span>`
+        })
+        html += items.join(' · ') + `</div>`
+      }
+    })
+    html += `</div>`
+  }
+  
   box.innerHTML = html
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function renderDx(){

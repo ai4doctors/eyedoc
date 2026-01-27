@@ -853,3 +853,33 @@ body{
   border-radius:4px;
   transition:width 0.3s ease;
 }
+
+/* Exam Findings Section */
+.examFindingsSection{
+  margin-top:16px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+}
+.examCategory{
+  font-size:14px;
+  line-height:1.6;
+  margin-bottom:8px;
+  color:var(--text);
+}
+.examCategoryLabel{
+  font-weight:700;
+  color:var(--muted);
+}
+.examCategory .abnormal{
+  color:#dc2626;
+  font-weight:600;
+}
+.patientBlock{
+  background:rgba(156,208,197,0.08);
+  border-left:3px solid var(--primary);
+  padding:12px 14px;
+  margin-bottom:16px;
+  border-radius:0 8px 8px 0;
+  font-size:14px;
+  line-height:1.5;
+}

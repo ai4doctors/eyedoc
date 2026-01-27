@@ -6,31 +6,26 @@
 [![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## ✨ Features
+## Features
 
-- **AI-Powered Analysis**: Extract diagnoses, plans, and clinical summaries from uploaded notes
-- **Smart Reference Selection**: Age-appropriate PubMed citations (filters pediatric papers for adult patients)
-- **Professional Letter Generation**: Create referral letters, patient letters, and insurance letters
-- **Multi-Tenant Architecture**: Support for multiple clinics with usage tracking
-- **Audio Transcription**: Record and transcribe exam notes via AWS Transcribe
-- **OCR Support**: Extract text from scanned PDFs and images
-- **PDF Export**: Professional letterhead-enabled PDF generation
+- **Document Analysis** - Upload PDFs, images, or audio recordings for AI-powered clinical analysis
+- **Smart Extraction** - Automatic extraction of diagnoses, treatment plans, and clinical findings
+- **Letter Generation** - Generate professional referral letters, patient letters, and insurance documentation
+- **Evidence Citations** - Automatic PubMed references and clinical guideline citations
+- **Multi-Language** - Support for English, Spanish, Portuguese, and French
+- **OCR Support** - Extract text from scanned documents and handwritten notes
+- **Audio Transcription** - AWS Transcribe integration for voice recordings
+- **Assistant Mode** - Triage incoming faxes and generate patient communications
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- PostgreSQL 15+ (or Docker)
-- OpenAI API key
-- AWS account (for S3 + Transcribe)
-
-### Local Setup
+## Quick Start
 
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/maneiro-ai.git
 cd maneiro-ai
+
+# Start database with Docker
+docker-compose up -d postgres
 
 # Create virtual environment
 python3 -m venv venv
@@ -38,9 +33,6 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Start PostgreSQL with Docker
-docker-compose up -d postgres
 
 # Configure environment
 cp .env.example .env
@@ -55,148 +47,141 @@ flask run
 
 Visit: http://localhost:5000
 
-## 📁 Project Structure
+## Configuration
+
+Create a `.env` file with the following variables:
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/maneiro
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+
+# AWS (for audio transcription and file storage)
+AWS_S3_BUCKET=your-bucket-name
+AWS_REGION=us-west-2
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+
+# Application
+SECRET_KEY=your-secret-key
+FLASK_ENV=development
+```
+
+## Project Structure
 
 ```
 maneiro-ai/
 ├── app/
-│   ├── __init__.py          # Flask app factory
-│   ├── api.py               # API endpoints (analyze, generate, export)
+│   ├── __init__.py          # Application factory
+│   ├── api.py               # API endpoints
 │   ├── auth.py              # Authentication routes
 │   ├── models.py            # Database models
-│   ├── templates/
-│   │   ├── index.html       # Doctor view (main app)
-│   │   ├── assistant.html   # Staff view (triage & letters)
-│   │   └── auth/            # Login, register, etc.
+│   ├── templates/           # Jinja2 templates
+│   │   ├── index.html       # Doctor view
+│   │   ├── assistant.html   # Assistant/staff view
+│   │   └── auth/            # Auth templates
 │   └── static/
-│       ├── css/app.css
-│       ├── js/app.js
-│       └── img/
-├── config.py                # Environment configurations
-├── wsgi.py                  # Production entry point
-├── init_db.py               # Database initialization
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-├── render.yaml              # Render.com deployment
-├── docs/                    # Implementation guides
-└── tests/                   # Test suite
+│       ├── css/app.css      # Styles
+│       ├── js/app.js        # Frontend logic
+│       └── img/             # Images
+├── docs/                    # Documentation
+├── tests/                   # Test suite
+├── config.py               # Configuration classes
+├── wsgi.py                 # WSGI entry point
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Container build
+├── docker-compose.yml      # Local development
+└── render.yaml             # Render deployment
 ```
 
-## 🔑 Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `SECRET_KEY` | Flask secret key | Yes |
-| `OPENAI_API_KEY` | OpenAI API key | Yes |
-| `AWS_S3_BUCKET` | S3 bucket for uploads | For audio |
-| `AWS_REGION` | AWS region | For audio |
-
-## 🏗️ Architecture
+## Architecture
 
 ### Multi-Tenant Design
 
-Every user belongs to an Organization (clinic):
-
-```python
-Organization(name="Vancouver Eye Clinic", plan="trial", max_jobs=50)
-User(organization_id=1, email="dr@clinic.com", role="admin")
+```
+Organization (Clinic)
+├── Users (Doctors, Staff)
+├── Jobs (Analysis tasks)
+└── Audit Logs (Compliance)
 ```
 
 ### User Roles
 
-- **Admin**: Full access + team management
-- **Doctor**: Clinical analysis + letter generation
-- **Staff**: Triage + patient/insurance letters
+- **Admin** - Full access, team management
+- **Doctor** - Clinical analysis and letter generation
+- **Staff** - Triage and patient communications
 
 ### API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/analyze_start` | POST | Start document analysis |
-| `/analyze_status` | GET | Poll analysis status |
+| `/analyze_status` | GET | Check analysis progress |
 | `/generate_report` | POST | Generate referral letter |
+| `/triage_fax` | POST | Triage incoming communication |
+| `/generate_assistant_letter` | POST | Generate patient/insurance letter |
 | `/export_pdf` | POST | Export letter as PDF |
-| `/triage_fax` | POST | Triage incoming documents |
 | `/transcribe_start` | POST | Start audio transcription |
 
-## 📊 Database Schema
+## Deployment
 
-```sql
-organizations   -- Clinics (billable entities)
-users           -- Belongs to organization  
-jobs            -- Analysis tasks (belongs to org + user)
-audit_logs      -- Compliance tracking
-```
+### Render (Recommended)
 
-## 🚢 Deployment
-
-### Render.com (Recommended)
-
-1. Connect your GitHub repository
+1. Connect your GitHub repository to Render
 2. Add PostgreSQL database
 3. Set environment variables
-4. Deploy!
-
-```yaml
-# render.yaml is pre-configured
-databases:
-  - name: maneiro-db
-    plan: starter
-
-services:
-  - type: web
-    name: maneiro-web
-    env: docker
-```
+4. Deploy automatically on push
 
 ### Docker
 
 ```bash
 docker build -t maneiro-ai .
-docker run -p 10000:10000 --env-file .env maneiro-ai
+docker run -p 5000:5000 --env-file .env maneiro-ai
 ```
 
-## 🧪 Testing
+## Development
+
+### Running Tests
 
 ```bash
-# Run all tests
 pytest
-
-# With coverage
-pytest --cov=app tests/
-
-# Specific test file
-pytest tests/test_api.py -v
+pytest --cov=app tests/  # With coverage
 ```
 
-## 📖 Documentation
+### Database Migrations
 
-- [Phased Implementation Guide](docs/PHASED_IMPLEMENTATION.md)
-- [Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)
+```bash
+flask db migrate -m "Description"
+flask db upgrade
+```
+
+## Tech Stack
+
+- **Backend**: Flask 3.1, SQLAlchemy, Flask-Login
+- **Database**: PostgreSQL
+- **AI**: OpenAI GPT-4
+- **OCR**: Tesseract, PyMuPDF
+- **PDF**: ReportLab, PyPDF2
+- **Cloud**: AWS S3, AWS Transcribe
+- **Deployment**: Render, Docker
+
+## Documentation
+
 - [Quick Start Guide](docs/QUICKSTART.md)
+- [Phased Implementation](docs/PHASED_IMPLEMENTATION.md)
+- [Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)
 
-## 🔒 Security
+## License
 
-- CSRF protection on all forms
-- Bcrypt password hashing
-- Session-based authentication
-- Audit logging for compliance
-- Rate limiting (Phase 2)
+MIT License - see [LICENSE](LICENSE) file
 
-## 📝 License
+## Support
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
+For support, email support@maneiro.ai
 
 ---
 
-**Version:** 2026.8 | **Status:** Production Ready | **Python:** 3.11+
+**Version:** 2026.8 | **Status:** Production Ready

@@ -561,6 +561,18 @@ Output VALID JSON only:
     "refraction": "string",
     "other_measurements": ["string - any other significant measurements"]
   }},
+  "exam_findings": [
+    {{
+      "category": "string - e.g., Visual Acuity, Intraocular Pressure, Slit Lamp, Fundus, etc.",
+      "findings": [
+        {{
+          "label": "string - finding name with laterality if applicable",
+          "value": "string - the measurement or observation",
+          "abnormal": "boolean - true if outside normal range"
+        }}
+      ]
+    }}
+  ],
   "warnings": ["any critical findings or red flags that need immediate attention"],
   "clinical_pearls": ["brief insights that might help the receiving clinician"],
   "follow_up": "string - recommended follow-up timing"
@@ -572,6 +584,8 @@ CRITICAL FORMATTING RULES:
 3. summary_html should read like a clinical note paragraph, not a data dump
 4. Include ALL tests/findings mentioned in the document in clinical_values or in diagnosis bullets
 5. For patient_block, ALWAYS extract age or DOB if present - this is critical for reference selection
+6. exam_findings should list EVERY measurable exam component found (VA, IOP, pupils, slit lamp, fundus, OCT, visual field, etc.)
+7. Group exam_findings by category (e.g., "Visual Acuity", "Tonometry", "Anterior Segment", "Posterior Segment", "Imaging")
 
 CLINICAL REASONING RULES:
 1. Extract facts explicitly stated in the document
@@ -1563,16 +1577,27 @@ def export_pdf():
 
     def find_signature_image(prov_name: str) -> Optional[str]:
         base_dir = os.getenv("SIGNATURE_DIR", "static/signatures")
-        # Try relative to app folder
-        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        abs_dir = os.path.join(app_dir, "app", base_dir)
+        # Try multiple possible locations
+        possible_dirs = [
+            # Relative to api.py file (app/static/signatures)
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "signatures"),
+            # Relative to project root (app/static/signatures)
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "static", "signatures"),
+            # Environment-specified directory
+            base_dir if os.path.isabs(base_dir) else os.path.join(os.path.dirname(os.path.abspath(__file__)), base_dir),
+        ]
+        
         slug = signature_slug(prov_name)
         if not slug:
             return None
-        for ext in (".png", ".jpg", ".jpeg"):
-            cand = os.path.join(abs_dir, slug + ext)
-            if os.path.exists(cand):
-                return cand
+        
+        for abs_dir in possible_dirs:
+            if not os.path.isdir(abs_dir):
+                continue
+            for ext in (".png", ".jpg", ".jpeg"):
+                cand = os.path.join(abs_dir, slug + ext)
+                if os.path.exists(cand):
+                    return cand
         return None
 
     # Get letterhead: client upload > static letterhead.png
@@ -1913,8 +1938,9 @@ EXAMPLE for a referral request:
 """.strip()
 
 
-def patient_letter_prompt(analysis: dict) -> str:
+def patient_letter_prompt(analysis: dict, form: dict = None) -> str:
     """Prompt for generating patient-friendly letter"""
+    form = form or {}
     diagnoses = analysis.get("diagnoses", [])
     plan = analysis.get("plan", [])
     
@@ -1930,16 +1956,47 @@ def patient_letter_prompt(analysis: dict) -> str:
         if isinstance(p, dict) and p.get("title"):
             plan_summary += f"- {p.get('title')}\n"
             for bullet in (p.get("bullets") or [])[:3]:
-                plan_summary += f"  â€¢ {bullet}\n"
+                plan_summary += f"  - {bullet}\n"
+    
+    # Extract form settings
+    recipient_type = form.get("recipient_type", "Patient")
+    to_whom = form.get("to_whom", "")
+    from_doctor = form.get("from_doctor", "") or analysis.get("provider_name", "")
+    reason = form.get("reason_for_referral", "")
+    focus = form.get("referral_focus", "")
+    special = form.get("special_requests", "")
+    tone = form.get("tone", "warm")
+    detail = form.get("detail", "standard")
+    out_lang = form.get("output_language", "en")
+    
+    tone_instruction = {
+        "warm": "Use warm, reassuring, empathetic language. The patient may be anxious.",
+        "professional": "Use clear, professional language while remaining approachable.",
+        "simple": "Use very simple, plain language. Avoid all medical jargon."
+    }.get(tone, "Use warm, reassuring language.")
+    
+    detail_instruction = {
+        "brief": "Keep the letter concise - 2-3 short paragraphs maximum.",
+        "standard": "Provide a balanced level of detail - about 4-5 paragraphs.",
+        "detailed": "Provide comprehensive detail with thorough explanations."
+    }.get(detail, "Provide a balanced level of detail.")
+    
+    lang_map = {"en": "", "es": "Write the letter in Spanish.", "pt": "Write the letter in Portuguese.", "fr": "Write the letter in French."}
+    lang_instruction = lang_map.get(out_lang, "")
+    
+    reason_section = f"REASON FOR LETTER: {reason}" if reason else ""
+    focus_section = f"FOCUS/PURPOSE: {focus}" if focus else ""
+    special_section = f"SPECIAL REQUESTS: {special}" if special else ""
     
     return f"""
-You are a compassionate healthcare communicator writing a letter to a patient about their recent eye examination.
+You are a compassionate healthcare communicator writing a letter about a recent eye examination.
+
+RECIPIENT TYPE: {recipient_type}
+TO: {to_whom or 'the patient'}
+FROM: {from_doctor}
 
 PATIENT INFO:
 {analysis.get('patient_block', '')}
-
-PROVIDER:
-{analysis.get('provider_name', '')}
 
 CLINICAL SUMMARY:
 {analysis.get('summary_html', '')[:4000]}
@@ -1950,35 +2007,49 @@ DIAGNOSES FOUND:
 RECOMMENDED PLAN:
 {plan_summary}
 
+{reason_section}
+{focus_section}
+{special_section}
+
+TONE: {tone_instruction}
+DETAIL LEVEL: {detail_instruction}
+{lang_instruction}
+
 WRITING GUIDELINES:
-1. Use warm, reassuring language - patients may be anxious about their results
-2. Explain medical terms in plain English (e.g., "IOP" â†’ "eye pressure")
+1. Address the letter appropriately for {recipient_type}
+2. Explain medical terms in plain English (e.g., "IOP" means "eye pressure")
 3. If findings are normal, emphasize the good news
-4. If there are concerns, explain them clearly but without causing undue alarm
+4. If there are concerns, explain them clearly but without undue alarm
 5. List next steps clearly (appointments, medications, lifestyle changes)
 6. Include when they should return for follow-up
-7. Provide contact information for questions
-8. Sign off warmly from the provider
+7. Sign off appropriately from {from_doctor}
 
 STRUCTURE:
-- Opening: Reference their recent visit and thank them
-- Summary: What we examined and found (in plain terms)
+- Opening: Reference their recent visit
+- Summary: What was examined and found (in plain terms)
 - What this means: Explain the significance simply
-- Next steps: Clear action items they need to take
-- Reassurance: Appropriate closing based on findings
-- Contact info: How to reach the clinic with questions
+- Next steps: Clear action items
+- Closing: Appropriate sign-off from {from_doctor}
 
 Output VALID JSON only:
-{{
+{{{{
   "letter": "string - the complete letter text with proper paragraph breaks"
-}}
+}}}}
 """.strip()
 
-
-def insurance_letter_prompt(analysis: dict) -> str:
+def insurance_letter_prompt(analysis: dict, form: dict = None) -> str:
     """Prompt for generating insurance/prior authorization letter"""
+    form = form or {}
     diagnoses = analysis.get("diagnoses", [])
     plan = analysis.get("plan", [])
+    
+    # Extract form settings
+    from_doctor = form.get("from_doctor", "") or analysis.get("provider_name", "")
+    reason = form.get("reason_for_referral", "")
+    focus = form.get("referral_focus", "")
+    special = form.get("special_requests", "")
+    detail = form.get("detail", "standard")
+    out_lang = form.get("output_language", "en")
     
     # Format diagnoses with codes
     dx_formatted = ""
@@ -1989,7 +2060,7 @@ def insurance_letter_prompt(analysis: dict) -> str:
             bullets = dx.get("bullets", [])
             dx_formatted += f"- {code} {label}\n"
             for b in bullets[:3]:
-                dx_formatted += f"  â€¢ {b}\n"
+                dx_formatted += f"  - {b}\n"
     
     # Format plan items
     plan_formatted = ""
@@ -1997,16 +2068,28 @@ def insurance_letter_prompt(analysis: dict) -> str:
         if isinstance(p, dict):
             plan_formatted += f"- {p.get('title', '')}\n"
             for b in (p.get("bullets") or [])[:3]:
-                plan_formatted += f"  â€¢ {b}\n"
+                plan_formatted += f"  - {b}\n"
+    
+    detail_instruction = {
+        "brief": "Keep the letter concise while covering all essential points.",
+        "standard": "Provide thorough documentation with all relevant clinical details.",
+        "detailed": "Provide exhaustive documentation with comprehensive clinical justification."
+    }.get(detail, "Provide thorough documentation.")
+    
+    lang_map = {"en": "", "es": "Write the letter in Spanish.", "pt": "Write the letter in Portuguese.", "fr": "Write the letter in French."}
+    lang_instruction = lang_map.get(out_lang, "")
+    
+    reason_section = f"SPECIFIC CONDITION/PROCEDURE: {reason}" if reason else ""
+    focus_section = f"REQUESTED SERVICE: {focus}" if focus else ""
+    special_section = f"ADDITIONAL NOTES: {special}" if special else ""
     
     return f"""
 You are a medical documentation specialist writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
 
+FROM PROVIDER: {from_doctor}
+
 PATIENT INFO:
 {analysis.get('patient_block', '')}
-
-PROVIDER:
-{analysis.get('provider_name', '')}
 
 CLINICAL SUMMARY:
 {analysis.get('summary_html', '')[:4000]}
@@ -2016,6 +2099,13 @@ DIAGNOSES (with ICD codes if available):
 
 TREATMENT PLAN:
 {plan_formatted}
+
+{reason_section}
+{focus_section}
+{special_section}
+
+DETAIL LEVEL: {detail_instruction}
+{lang_instruction}
 
 LETTER REQUIREMENTS:
 1. Use formal medical terminology appropriate for insurance review
@@ -2038,6 +2128,7 @@ STRUCTURE:
 - Treatment plan: What is being requested
 - Supporting evidence: Guidelines, standards of care
 - Closing: Request for approval, contact for questions
+- Sign from {from_doctor}
 
 PERSUASION TECHNIQUES:
 - Lead with the most compelling clinical findings
@@ -2047,9 +2138,9 @@ PERSUASION TECHNIQUES:
 - Note any failed conservative treatments
 
 Output VALID JSON only:
-{{
+{{{{
   "letter": "string - the complete formal letter text"
-}}
+}}}}
 """.strip()
 
 
@@ -2097,10 +2188,23 @@ def generate_assistant_letter():
     analysis = payload.get("analysis") or {}
     letter_type = payload.get("letter_type", "patient")
     
+    # Extract form fields
+    form = {
+        "recipient_type": payload.get("recipient_type", "Patient"),
+        "to_whom": payload.get("to_whom", ""),
+        "from_doctor": payload.get("from_doctor", ""),
+        "reason_for_referral": payload.get("reason_for_referral", ""),
+        "referral_focus": payload.get("referral_focus", ""),
+        "special_requests": payload.get("special_requests", ""),
+        "tone": payload.get("tone", "warm"),
+        "detail": payload.get("detail", "standard"),
+        "output_language": payload.get("output_language", "en"),
+    }
+    
     if letter_type == "insurance":
-        prompt = insurance_letter_prompt(analysis)
+        prompt = insurance_letter_prompt(analysis, form)
     else:
-        prompt = patient_letter_prompt(analysis)
+        prompt = patient_letter_prompt(analysis, form)
     
     obj, err = llm_json(prompt, temperature=0.3)
     

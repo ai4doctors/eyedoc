@@ -583,6 +583,59 @@
       grid-template-columns: repeat(3, 1fr);
     }
 
+    /* Step 2 Section Styles */
+    .step2Section {
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(243,246,255,0.95));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 16px;
+    }
+
+    .step2Title {
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      color: var(--text);
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .step2Grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .step2Grid .fullWidth {
+      grid-column: span 2;
+    }
+
+    @media (max-width: 1100px) {
+      .step2Grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .step2Grid .fullWidth {
+        grid-column: span 2;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .step2Grid {
+        grid-template-columns: 1fr;
+      }
+      .step2Grid .fullWidth {
+        grid-column: span 1;
+      }
+    }
+
+    .statusHint {
+      font-size: 14px;
+      color: var(--muted);
+      margin-left: 12px;
+    }
+
     .controlGroup {
       display: flex;
       flex-direction: column;
@@ -848,7 +901,7 @@
   <header class="topBar">
     <div class="topBarLeft">
       <div class="brand">
-        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
+        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" style="background:transparent !important" /></div>
       </div>
       {% if user %}
       <span class="orgName">{{ user.organization.name }}</span>
@@ -1167,48 +1220,86 @@
             </div>
 
             <div id="letterControls" class="hidden">
-              <!-- Step 2 Controls (like doctor view) -->
-              <div class="letterControls threeCol">
-                <div class="controlGroup">
-                  <label class="controlLabel">Letter Tone</label>
-                  <select id="letterTone" class="ctrl">
-                    <option value="warm">Warm & Reassuring</option>
-                    <option value="professional">Professional</option>
-                    <option value="simple">Simple & Clear</option>
-                  </select>
+              <!-- Step 2 Controls (matching doctor view) -->
+              <div class="step2Section">
+                <div class="step2Title">STEP 2: CUSTOMIZE LETTER</div>
+                
+                <div class="step2Grid">
+                  <div class="controlGroup">
+                    <label class="controlLabel">Document Type</label>
+                    <select id="letterRecipientType" class="ctrl">
+                      <option value="Patient" selected>Patient</option>
+                      <option value="Family physician">Family Physician</option>
+                      <option value="Specialist">Specialist</option>
+                      <option value="Insurance">Insurance</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Output Language</label>
+                    <select id="letterLang" class="ctrl">
+                      <option value="en">English</option>
+                      <option value="es">Spanish</option>
+                      <option value="pt">Portuguese</option>
+                      <option value="fr">French</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">To</label>
+                    <input id="letterTo" class="ctrl" placeholder="Recipient name" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">From</label>
+                    <input id="letterFrom" class="ctrl" placeholder="Provider name" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Reason</label>
+                    <select id="letterReasonDx" class="ctrl">
+                      <option value="">Select diagnosis...</option>
+                    </select>
+                    <input id="letterReasonOther" class="ctrl hidden" placeholder="Other reason" style="margin-top:8px" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Referral Focus</label>
+                    <select id="letterReasonFocus" class="ctrl" disabled>
+                      <option value="">Select focus...</option>
+                    </select>
+                    <input id="letterFocusOther" class="ctrl hidden" placeholder="Other focus" style="margin-top:8px" />
+                  </div>
+                  
+                  <div class="controlGroup fullWidth">
+                    <label class="controlLabel">Special Requests</label>
+                    <input id="letterInstructions" class="ctrl" placeholder="e.g., Emphasize importance of follow-up, include specific instructions" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Tone</label>
+                    <select id="letterTone" class="ctrl">
+                      <option value="warm">Warm & Reassuring</option>
+                      <option value="professional">Professional</option>
+                      <option value="simple">Simple & Clear</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Detail Level</label>
+                    <select id="letterDetail" class="ctrl">
+                      <option value="brief">Brief Summary</option>
+                      <option value="standard" selected>Standard</option>
+                      <option value="detailed">Detailed Explanation</option>
+                    </select>
+                  </div>
                 </div>
-                <div class="controlGroup">
-                  <label class="controlLabel">Detail Level</label>
-                  <select id="letterDetail" class="ctrl">
-                    <option value="brief">Brief Summary</option>
-                    <option value="standard" selected>Standard</option>
-                    <option value="detailed">Detailed Explanation</option>
-                  </select>
-                </div>
-                <div class="controlGroup">
-                  <label class="controlLabel">Language</label>
-                  <select id="letterLang" class="ctrl">
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="pt">Portuguese</option>
-                    <option value="fr">French</option>
-                  </select>
-                </div>
-              </div>
 
-              <div class="letterControls">
-                <div class="controlGroup">
-                  <label class="controlLabel">From (Provider)</label>
-                  <input id="letterFrom" class="ctrl" placeholder="Dr. Smith" />
+                <div class="actionBar" style="justify-content: flex-start; margin-top: 20px;">
+                  <button class="btn primary" onclick="generatePatientLetter()">Generate Letter</button>
+                  <span id="letterGenerateStatus" class="statusHint"></span>
                 </div>
-                <div class="controlGroup">
-                  <label class="controlLabel">Special Instructions</label>
-                  <input id="letterInstructions" class="ctrl" placeholder="e.g., Emphasize importance of follow-up" />
-                </div>
-              </div>
-
-              <div class="actionBar" style="justify-content: flex-start; margin-bottom: 20px;">
-                <button class="btn primary" onclick="generatePatientLetter()">Generate Letter</button>
               </div>
             </div>
 
@@ -1629,6 +1720,14 @@
             el('letterFrom').value = letterAnalysis.provider_name;
           }
           
+          // Pre-fill patient name for patient letters
+          if (letterAnalysis.patient_name) {
+            el('letterTo').value = letterAnalysis.patient_name;
+          }
+          
+          // Populate diagnoses dropdown
+          populateLetterDiagnoses();
+          
           toast('Document analyzed! Configure your letter below.');
         }
       } catch (e) {
@@ -1645,18 +1744,31 @@
       el('letterStatusText').textContent = 'Generating letter...';
       el('letterProgressFill').style.width = '50%';
 
+      // Build the form data with all fields
+      const reasonDx = el('letterReasonDx').value;
+      const reasonOther = el('letterReasonOther').value;
+      const reason = (reasonDx === 'Other') ? reasonOther : reasonDx;
+      
+      const focusSel = el('letterReasonFocus').value;
+      const focusOther = el('letterFocusOther').value;
+      const focus = (focusSel === 'Other') ? focusOther : focusSel;
+
       try {
         const res = await fetch('/generate_assistant_letter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             analysis: letterAnalysis,
-            letter_type: 'patient',
+            letter_type: el('letterRecipientType').value === 'Insurance' ? 'insurance' : 'patient',
+            recipient_type: el('letterRecipientType').value,
+            to_whom: el('letterTo').value,
+            from_doctor: el('letterFrom').value,
+            reason_for_referral: reason,
+            referral_focus: focus,
+            special_requests: el('letterInstructions').value,
             tone: el('letterTone').value,
             detail: el('letterDetail').value,
-            language: el('letterLang').value,
-            from: el('letterFrom').value,
-            instructions: el('letterInstructions').value
+            output_language: el('letterLang').value
           })
         });
         const json = await res.json();
@@ -1686,7 +1798,108 @@
       el('letterOutput').classList.add('hidden');
       el('letterFileInput').value = '';
       el('letterText').value = '';
+      el('letterReasonDx').innerHTML = '<option value="">Select diagnosis...</option>';
+      el('letterReasonFocus').innerHTML = '<option value="">Select focus...</option>';
+      el('letterReasonFocus').disabled = true;
     }
+
+    function populateLetterDiagnoses() {
+      const sel = el('letterReasonDx');
+      sel.innerHTML = '<option value="">Select diagnosis...</option>';
+      
+      const dx = (letterAnalysis && letterAnalysis.diagnoses) ? letterAnalysis.diagnoses : [];
+      dx.forEach(item => {
+        const opt = document.createElement('option');
+        const code = item.code ? `${item.code} ` : '';
+        const val = `${code}${item.label || ''}`.trim();
+        opt.value = val;
+        opt.textContent = `${item.number}. ${val}`;
+        sel.appendChild(opt);
+      });
+      
+      const otherOpt = document.createElement('option');
+      otherOpt.value = 'Other';
+      otherOpt.textContent = 'Other';
+      sel.appendChild(otherOpt);
+    }
+
+    function getFocusOptionsForDx(dxLabel) {
+      const d = (dxLabel || '').toLowerCase();
+      if (d.includes('glaucoma')) {
+        return ['Consult and management recommendations', 'Laser evaluation', 'LPI evaluation', 'Gonioscopy and angle assessment', 'Surgical opinion', 'Other'];
+      }
+      if (d.includes('dry eye') || d.includes('mgd') || d.includes('blephar') || d.includes('meibomian')) {
+        return ['Confirm diagnosis and stage severity', 'Advanced therapy recommendations', 'Procedure consideration', 'Medication options', 'Other'];
+      }
+      if (d.includes('cataract')) {
+        return ['Surgical consultation', 'Pre operative evaluation', 'Co management plan', 'Other'];
+      }
+      if (d.includes('retina') || d.includes('macula') || d.includes('amd') || d.includes('diabetic')) {
+        return ['Urgent assessment', 'Treatment options and follow up plan', 'Imaging review', 'Other'];
+      }
+      return ['Consultation', 'Management recommendations', 'Second opinion', 'Co management', 'Other'];
+    }
+
+    // Letter reason change handler
+    el('letterReasonDx').addEventListener('change', function() {
+      const v = this.value;
+      const otherInput = el('letterReasonOther');
+      const focusSel = el('letterReasonFocus');
+      const focusOther = el('letterFocusOther');
+      
+      if (v === 'Other') {
+        otherInput.classList.remove('hidden');
+        focusSel.disabled = true;
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+      } else if (v) {
+        otherInput.classList.add('hidden');
+        otherInput.value = '';
+        focusSel.disabled = false;
+        
+        // Populate focus options
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+        const opts = getFocusOptionsForDx(v);
+        opts.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o;
+          opt.textContent = o;
+          focusSel.appendChild(opt);
+        });
+      } else {
+        otherInput.classList.add('hidden');
+        otherInput.value = '';
+        focusSel.disabled = true;
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+      }
+      focusOther.classList.add('hidden');
+      focusOther.value = '';
+    });
+
+    // Focus change handler
+    el('letterReasonFocus').addEventListener('change', function() {
+      const focusOther = el('letterFocusOther');
+      if (this.value === 'Other') {
+        focusOther.classList.remove('hidden');
+      } else {
+        focusOther.classList.add('hidden');
+        focusOther.value = '';
+      }
+    });
+
+    // Recipient type change - adjust "To" field
+    el('letterRecipientType').addEventListener('change', function() {
+      const toInput = el('letterTo');
+      const v = this.value;
+      if (v === 'Patient' && letterAnalysis && letterAnalysis.patient_name) {
+        toInput.value = letterAnalysis.patient_name;
+        toInput.placeholder = 'Patient name';
+      } else if (v === 'Family physician' || v === 'Specialist') {
+        toInput.value = toInput.value.startsWith('Dr.') ? toInput.value : 'Dr. ';
+        toInput.placeholder = 'Dr. Lastname';
+      } else {
+        toInput.placeholder = 'Recipient name';
+      }
+    });
 
     async function copyLetter() {
       const text = el('letterText').value;
