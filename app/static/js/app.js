@@ -6,6 +6,43 @@ let latestLetterHtml = ""
 // Single theme for consistency
 let theme = "light"
 
+// Dropdown functionality
+function toggleDropdown(id) {
+  const dropdown = document.getElementById(id)
+  if (!dropdown) return
+  
+  const wasOpen = dropdown.classList.contains('open')
+  closeAllDropdowns()
+  
+  if (!wasOpen) {
+    dropdown.classList.add('open')
+    const btn = dropdown.querySelector('button')
+    if (btn) btn.setAttribute('aria-expanded', 'true')
+  }
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.dropdown.open').forEach(d => {
+    d.classList.remove('open')
+    const btn = d.querySelector('button')
+    if (btn) btn.setAttribute('aria-expanded', 'false')
+  })
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.dropdown')) {
+    closeAllDropdowns()
+  }
+})
+
+// Close dropdowns on escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeAllDropdowns()
+  }
+})
+
 const SETTINGS_KEY = "maneiro_settings_v1"
 const DEFAULT_SETTINGS = {
   input_language: "auto",
@@ -1197,7 +1234,7 @@ if(el("runOcrBtn")){
   })
 }
 
-el("resetBtn").addEventListener("click", clearAll)
+if(el("resetBtn")){ el("resetBtn").addEventListener("click", clearAll) }
 el("newCaseBtn").addEventListener("click", clearAll)
 
 if(el("clearCasesBtn")){

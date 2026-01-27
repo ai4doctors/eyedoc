@@ -289,19 +289,55 @@
 </head>
 <body>
   <header class="topBar">
-    <div class="brand">
-      <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
-    </div>
-    <div class="topActions">
+    <div class="topBarLeft">
+      <div class="brand">
+        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
+      </div>
       {% if user %}
-      <span class="iconBtn" style="cursor: default; opacity: 0.8;">{{ user.organization.name }}</span>
-      {% if user.role.value == 'admin' %}
-      <a class="iconBtn linkBtn" href="{{ url_for('auth.doctor') }}" title="Doctor View">Doctor View</a>
-      <a class="iconBtn linkBtn" href="{{ url_for('auth.team') }}" title="Team">Team</a>
+      <span class="orgName">{{ user.organization.name }}</span>
       {% endif %}
+    </div>
+
+    <div class="topBarRight">
+      <!-- Help button -->
+      <button class="topBtn" type="button" onclick="alert('Help documentation coming soon')">
+        <svg viewBox="0 0 24 24"><path d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
+        <span>Help</span>
+      </button>
+
+      <div class="topDivider"></div>
+
+      {% if user %}
+      <!-- User dropdown -->
+      <div class="dropdown" id="userDropdown">
+        <button class="userMenuBtn" type="button" onclick="toggleDropdown('userDropdown')" aria-expanded="false">
+          <span class="userInitials">{{ user.first_name[0] }}{{ user.last_name[0] }}</span>
+          <svg viewBox="0 0 24 24"><path d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+        </button>
+        <div class="dropdownMenu">
+          <div class="dropdownLabel">{{ user.first_name }} {{ user.last_name }}</div>
+          {% if user.role.value == 'admin' %}
+          <a class="dropdownItem" href="{{ url_for('auth.doctor') }}">
+            <svg viewBox="0 0 24 24"><path d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            Doctor View
+          </a>
+          <a class="dropdownItem" href="{{ url_for('auth.team') }}">
+            <svg viewBox="0 0 24 24"><path d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+            Team
+          </a>
+          {% endif %}
+          <a class="dropdownItem" href="{{ url_for('auth.account') }}">
+            <svg viewBox="0 0 24 24"><path d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            Account
+          </a>
+          <div class="dropdownDivider"></div>
+          <a class="dropdownItem" href="{{ url_for('auth.logout') }}">
+            <svg viewBox="0 0 24 24"><path d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+            Sign out
+          </a>
+        </div>
+      </div>
       {% endif %}
-      <a class="iconBtn linkBtn" href="{{ url_for('auth.account') }}" title="Account">Account</a>
-      <a class="iconBtn linkBtn" href="{{ url_for('auth.logout') }}" title="Logout">Logout</a>
     </div>
   </header>
 
@@ -409,6 +445,36 @@
     let jobId = '';
 
     function el(id) { return document.getElementById(id); }
+
+    // Dropdown functionality
+    function toggleDropdown(id) {
+      const dropdown = document.getElementById(id);
+      if (!dropdown) return;
+      
+      const wasOpen = dropdown.classList.contains('open');
+      closeAllDropdowns();
+      
+      if (!wasOpen) {
+        dropdown.classList.add('open');
+        const btn = dropdown.querySelector('button');
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      }
+    }
+
+    function closeAllDropdowns() {
+      document.querySelectorAll('.dropdown.open').forEach(d => {
+        d.classList.remove('open');
+        const btn = d.querySelector('button');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.dropdown')) {
+        closeAllDropdowns();
+      }
+    });
 
     function toast(msg) {
       const t = el('toast');
