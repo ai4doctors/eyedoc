@@ -431,6 +431,41 @@ document.addEventListener("keydown", (e) => {
   }
 })
 
+function openFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.remove("hidden") }
+}
+function closeFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.add("hidden") }
+}
+if(el("faqBtn")){
+  el("faqBtn").addEventListener("click", openFaq)
+}
+if(el("faqClose")){
+  el("faqClose").addEventListener("click", closeFaq)
+}
+if(el("faqModal")){
+  el("faqModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeFaq()
+    }
+  })
+}
+if(el("recordModal")){
+  el("recordModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeRecord()
+    }
+  })
+}
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeFaq()
+    closeRecord()
+  }
+})
+
 function applyTheme(){
   document.body.classList.remove("dark")
 }
@@ -490,7 +525,6 @@ function renderSummary(){
   }
   const header = (latestAnalysis.patient_block || "").trim()
   const summary = (latestAnalysis.summary_html || "").trim()
-  
   let html = ""
   if(header){
     html += `<div class="patientBlock">${header}</div>`
@@ -500,12 +534,7 @@ function renderSummary(){
   }else{
     html += "<p>No summary extracted.</p>"
   }
-  
   box.innerHTML = html
-}
-
-function escapeHtml(s) {
-  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 function renderDx(){
@@ -523,13 +552,41 @@ function renderDx(){
 
     const title = document.createElement("div")
     title.className = "itemTitle"
-    const code = item.code ? `${item.code} ` : ""
-    title.textContent = `${item.number}. ${code}${item.label || ""}`.trim()
+    // Use new icd10_code field, fallback to old code field
+    const icd10 = item.icd10_code || item.code || ""
+    title.textContent = `${item.number}. ${item.label || ""}`.trim()
     wrap.appendChild(title)
+
+    // ICD-10 code badge
+    if(icd10){
+      const icdBadge = document.createElement("div")
+      icdBadge.className = "icd10Badge"
+      icdBadge.innerHTML = `<span class="icd10Code">${icd10}</span>`
+      // Add description if available
+      if(item.icd10_description){
+        icdBadge.innerHTML += ` <span class="icd10Desc">${item.icd10_description}</span>`
+      }
+      wrap.appendChild(icdBadge)
+    }
 
     const meta = document.createElement("div")
     meta.className = "itemMeta"
+    
+    // Add severity and urgency if available
+    const metaParts = []
+    if(item.severity && item.severity !== "not specified"){
+      metaParts.push(`Severity: ${item.severity}`)
+    }
+    if(item.urgency && item.urgency !== "routine"){
+      metaParts.push(`Urgency: ${item.urgency}`)
+    }
+    
     const refs = (item.refs || []).map(n => String(n)).filter(Boolean)
+    if(metaParts.length){
+      const severity = document.createElement("span")
+      severity.textContent = metaParts.join(" | ") + "  "
+      meta.appendChild(severity)
+    }
     if(refs.length){
       const label = document.createElement("span")
       label.textContent = "Evidence "
@@ -544,7 +601,7 @@ function renderDx(){
           meta.appendChild(document.createTextNode(" "))
         }
       })
-    }else{
+    }else if(!metaParts.length){
       const label = document.createElement("span")
       label.textContent = "General reasoning"
       meta.appendChild(label)
@@ -724,18 +781,22 @@ async function startAnalyze(triedOcr){
     const res = await fetch("/analyze_start", { method:"POST", body: fd })
     json = await res.json()
   }catch(e){
-    console.error(e)
-    setAnalyzeStatus("processing","Temporary connection issue",10)
-    setTimeout(pollAnalyze, 1500)
+    setAnalyzeStatus("waiting")
+    toast("Analyze failed. Server did not return JSON")
     return
   }
-if(!json.ok){
-      const msg = String(json.error || "Status error")
-      setAnalyzeStatus("processing", msg, 10)
-      setTimeout(pollAnalyze, 1200)
-      return
-    }
-toast(json.error || "OCR failed")
+  if(!json.ok){
+    setAnalyzeStatus("waiting")
+    if(json.needs_ocr){
+      if(!triedOcr){
+        if(el("handwrittenCheck")){
+          el("handwrittenCheck").checked = true
+        }
+        toast("Running OCR")
+        await startAnalyze(true)
+        return
+      }
+      toast(json.error || "OCR failed")
       return
     }
     toast(json.error || "Analyze failed")
@@ -752,21 +813,28 @@ async function pollAnalyze(){
   try{
     const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`)
     const json = await res.json()
+    
+    // On transient errors, keep polling instead of stopping
     if(!json.ok){
-      const msg = String(json.error || "Status error")
-      setAnalyzeStatus("processing", msg, 10)
-      setTimeout(pollAnalyze, 1200)
+      // Check if it's a real error or just a transient issue
+      const errMsg = (json.error || "").toLowerCase()
+      if(errMsg.includes("unknown job") || errMsg.includes("not found")){
+        // Job may not be visible yet across workers - keep polling
+        setAnalyzeStatus("processing", "Starting...", 5)
+        setTimeout(pollAnalyze, 1500)
+        return
+      }
+      // Other errors - show but keep polling a few more times
+      setAnalyzeStatus("processing", "Retrying...", 10)
+      setTimeout(pollAnalyze, 2000)
       return
     }
-const status = json.status || "waiting"
-    const stageLabel = json.stage_label || ""
-    const progress = json.progress || 0
-    if(status === "waiting"){
-      setAnalyzeStatus("waiting")
-      setTimeout(pollAnalyze, 600)
-      return
-    }
-    if(status === "processing"){
+    
+    const status = json.status || "processing"
+    const stageLabel = json.stage_label || "Processing..."
+    const progress = json.progress || 10
+    
+    if(status === "waiting" || status === "processing"){
       setAnalyzeStatus("processing", stageLabel, progress)
       setTimeout(pollAnalyze, 1200)
       return
@@ -782,17 +850,19 @@ const status = json.status || "waiting"
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
       buildReasonOptions()
       setToPrefix()
-      try{ renderSummary() }catch(e){ console.error(e) }
-      try{ renderDx() }catch(e){ console.error(e) }
-      try{ renderPlan() }catch(e){ console.error(e) }
-      try{ renderRefs() }catch(e){ console.error(e) }
-      upsertCase(latestAnalysis)
+      // Wrap renders in try/catch so one failure doesn't break others
+      try{ renderSummary() }catch(e){ console.error("renderSummary error:", e) }
+      try{ renderDx() }catch(e){ console.error("renderDx error:", e) }
+      try{ renderPlan() }catch(e){ console.error("renderPlan error:", e) }
+      try{ renderRefs() }catch(e){ console.error("renderRefs error:", e) }
+      try{ upsertCase(latestAnalysis) }catch(e){ console.error("upsertCase error:", e) }
       toast("Analysis complete")
       return
     }
   }catch(e){
-    setAnalyzeStatus("processing", "Processing...", 50)
-    setTimeout(pollAnalyze, 1500)
+    // Network error - keep trying
+    setAnalyzeStatus("processing", "Connecting...", 5)
+    setTimeout(pollAnalyze, 2000)
   }
 }
 
@@ -1127,7 +1197,7 @@ async function saveTranscriptToAnalyze(){
   pollAnalyze()
 }
 
-if(el("uploadBtn")){ el("uploadBtn").addEventListener("click", openPicker) }
+el("uploadBtn").addEventListener("click", openPicker)
 if(el("recordBtn")){
   el("recordBtn").addEventListener("click", openRecord)
 }
@@ -1248,6 +1318,33 @@ document.addEventListener("click", (e) => {
 })
 
 
+function openFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.remove("hidden") }
+}
+function closeFaq(){
+  const m = el("faqModal")
+  if(m){ m.classList.add("hidden") }
+}
+if(el("faqBtn")){
+  el("faqBtn").addEventListener("click", openFaq)
+}
+if(el("faqClose")){
+  el("faqClose").addEventListener("click", closeFaq)
+}
+if(el("faqModal")){
+  el("faqModal").addEventListener("click", (e) => {
+    if(e.target && e.target.dataset && e.target.dataset.close){
+      closeFaq()
+    }
+  })
+}
+document.addEventListener("keydown", (e) => {
+  if(e.key === "Escape"){
+    closeFaq()
+  }
+})
+
 function openSettings(){
   const m = el("settingsModal")
   if(!m){ return }
@@ -1360,28 +1457,3 @@ document.querySelectorAll(".toolBtn").forEach((btn) => {
 applyTheme()
 setAnalyzeStatus("waiting")
 renderCaseList()
-
-// Expose all functions needed by onclick handlers to global scope
-window.toggleDropdown = toggleDropdown
-window.closeAllDropdowns = closeAllDropdowns
-window.openFaq = openFaq
-window.closeFaq = closeFaq
-window.openSettings = openSettings
-window.closeSettings = closeSettings
-window.openRecord = openRecord
-window.closeRecord = closeRecord
-window.clearAll = clearAll
-window.newCase = newCase
-window.toast = toast
-
-
-// Global exports (safe)
-window.startAnalyze = startAnalyze
-window.pollAnalyze = pollAnalyze
-window.generateReport = generateReport
-window.exportPdf = exportPdf
-window.copyRich = copyRich
-window.copyPlain = copyPlain
-window.openPicker = openPicker
-window.startTranscribeBlob = startTranscribeBlob
-window.pollTranscribe = pollTranscribe

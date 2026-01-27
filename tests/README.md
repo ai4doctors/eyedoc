@@ -18,16 +18,8 @@ pytest --cov=app tests/
 
 ```
 tests/
+├── conftest.py        # Test fixtures
 ├── test_auth.py       # Authentication tests
 ├── test_api.py        # API endpoint tests
-├── test_models.py     # Database model tests
-└── conftest.py        # Test fixtures
+└── test_models.py     # Database model tests
 ```
-
-## TODO
-
-- [ ] Add test_auth.py
-- [ ] Add test_api.py
-- [ ] Add test_models.py
-- [ ] Add conftest.py
-- [ ] Setup CI/CD with GitHub Actions

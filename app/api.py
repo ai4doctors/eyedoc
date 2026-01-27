@@ -1,10 +1,5 @@
 """
 API Blueprint - All working endpoints from original app.py
-
-Improvements in this version:
-- Jobs persisted to Postgres (survives restarts, multi-worker safe)
-- PubMed query caching (reduces latency and API calls)
-- Schema validation for LLM outputs (prevents silent failures)
 """
 import os
 import tempfile
@@ -21,12 +16,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import PyPDF2
 import requests
-from flask import Blueprint, jsonify, request, send_file, current_app, has_request_context
+from flask import Blueprint, jsonify, request, send_file, current_app
 from flask_login import login_required, current_user
-
-# Database imports for job persistence
-from app import db
-from app.models import Job, PubMedCache
 
 try:
     import boto3
@@ -486,82 +477,10 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 }
 
 
-def validate_and_repair_analysis(obj: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Validate analysis output and repair missing/malformed fields.
-    
-    This prevents silent failures when the model output drifts from expected schema.
-    Returns a repaired dict that always has required fields.
-    """
-    if not obj or not isinstance(obj, dict):
-        return dict(ANALYZE_SCHEMA)
-    
-    result = dict(ANALYZE_SCHEMA)
-    result.update(obj)
-    
-    # Ensure diagnoses is a list of properly structured items
-    if not isinstance(result.get("diagnoses"), list):
-        result["diagnoses"] = []
-    
-    repaired_diagnoses = []
-    for i, dx in enumerate(result.get("diagnoses", []), start=1):
-        if not isinstance(dx, dict):
-            continue
-        # Ensure required fields
-        repaired_dx = {
-            "number": dx.get("number", i),
-            "code": str(dx.get("code", "") or ""),
-            "label": str(dx.get("label", "") or ""),
-            "bullets": dx.get("bullets", []) if isinstance(dx.get("bullets"), list) else [],
-            "severity": str(dx.get("severity", "") or ""),
-            "urgency": str(dx.get("urgency", "") or ""),
-            "refs": dx.get("refs", []) if isinstance(dx.get("refs"), list) else [],
-        }
-        if repaired_dx["label"]:  # Only include if has a label
-            repaired_diagnoses.append(repaired_dx)
-    result["diagnoses"] = repaired_diagnoses
-    
-    # Ensure plan is a list of properly structured items
-    if not isinstance(result.get("plan"), list):
-        result["plan"] = []
-    
-    repaired_plan = []
-    for i, pl in enumerate(result.get("plan", []), start=1):
-        if not isinstance(pl, dict):
-            continue
-        repaired_pl = {
-            "number": pl.get("number", i),
-            "title": str(pl.get("title", "") or ""),
-            "bullets": pl.get("bullets", []) if isinstance(pl.get("bullets"), list) else [],
-            "aligned_dx_numbers": pl.get("aligned_dx_numbers", []) if isinstance(pl.get("aligned_dx_numbers"), list) else [],
-            "timeline": str(pl.get("timeline", "") or ""),
-            "refs": pl.get("refs", []) if isinstance(pl.get("refs"), list) else [],
-        }
-        if repaired_pl["title"]:  # Only include if has a title
-            repaired_plan.append(repaired_pl)
-    result["plan"] = repaired_plan
-    
-    # Ensure references is a list
-    if not isinstance(result.get("references"), list):
-        result["references"] = []
-    
-    # Ensure warnings is a list of strings
-    if not isinstance(result.get("warnings"), list):
-        result["warnings"] = []
-    result["warnings"] = [str(w) for w in result["warnings"] if w]
-    
-    # Ensure string fields are strings
-    for field in ["provider_name", "patient_block", "summary_html", "chief_complaint"]:
-        if not isinstance(result.get(field), str):
-            result[field] = str(result.get(field, "") or "")
-    
-    return result
-
-
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
     return f"""
-You are an expert clinical documentation analyst with deep ophthalmology knowledge. Analyze this document thoroughly.
+You are an expert clinical documentation analyst trained in all medical specialties. Analyze this document thoroughly.
 
 STEP 1 - DOCUMENT CLASSIFICATION
 Determine what type of document this is:
@@ -569,41 +488,67 @@ Determine what type of document this is:
 - Referral request (someone asking for a referral TO a specialist)
 - Consultation report (specialist reporting BACK to referring doctor)
 - Lab/imaging results
-- Prescription or eyeglass Rx
+- Prescription
 - Insurance/authorization form
 - Patient correspondence
 - Other
 
-STEP 2 - EXTRACT INFORMATION
+STEP 2 - DETECT SPECIALTY
+Identify the medical specialty based on content:
+- Ophthalmology (eyes, vision)
+- Cardiology (heart, cardiovascular)
+- Dermatology (skin)
+- Endocrinology (diabetes, thyroid, hormones)
+- Gastroenterology (GI, liver)
+- Neurology (brain, nerves)
+- Orthopedics (bones, joints, muscles)
+- Pulmonology (lungs, respiratory)
+- Rheumatology (autoimmune, joints)
+- Psychiatry (mental health)
+- Primary Care / Internal Medicine
+- Other
+
+STEP 3 - EXTRACT INFORMATION
 Extract all clinical information accurately.
 
-STEP 3 - CLINICAL REASONING (IMPORTANT)
+STEP 4 - ICD-10 CODING (CRITICAL)
+For EACH diagnosis, you MUST provide the correct ICD-10-CM code:
+- Use the most specific code available (e.g., E11.9 for Type 2 DM unspecified, E11.65 for Type 2 DM with hyperglycemia)
+- Include laterality where applicable (e.g., H40.1111 for POAG right eye mild stage)
+- For multiple conditions, code each separately
+- If uncertain, provide the most likely code with a note
+
+STEP 5 - CLINICAL REASONING
 Go BEYOND simple extraction:
-- If exam findings suggest a diagnosis that wasn't explicitly listed, note it in suggested_diagnoses
+- If findings suggest a diagnosis not explicitly listed, note it in suggested_diagnoses
 - If a finding is mentioned but not addressed in the plan, note it in unaddressed_findings
 - If clinical values are concerning, add to warnings
-- Cross-reference findings with standard clinical guidelines mentally
+- Cross-reference findings with standard clinical guidelines
 
 Output VALID JSON only:
 {{
   "document_type": "string - one of: encounter_note, referral_request, consultation_report, lab_results, prescription, insurance_form, correspondence, other",
+  "detected_specialty": "string - primary medical specialty of this document",
   "provider_name": "string - the authoring/sending clinician name and credentials",
   "provider_clinic": "string - clinic or practice name if mentioned",
   "patient_block": "string - patient demographics with <br> line breaks: name, DOB/Age, Sex, PHN/MRN, phone, address. MUST include DOB or Age if available.",
-  "summary_html": "string - EXACTLY 4 sections, NO MORE. Format: <p><b>Visit Context:</b> Reason for visit, relevant history, referral source.</p><p><b>Examination:</b></p><ul><li>VA: OD [value], OS [value]</li><li>IOP: OD [value] mmHg, OS [value] mmHg</li><li>Pupils: [all pupil findings]</li><li>Anterior segment: [lids, conjunctiva, cornea, AC, iris, lens - include ALL findings like LPI status, NSC grade, etc.]</li><li>Posterior segment: [vitreous, macula, vessels, periphery, C/D ratio - include ALL findings]</li><li>Imaging: [OCT, VF, photos, Optomap findings if any]</li></ul><p><b>Key Findings:</b> 1-2 sentences highlighting what is clinically significant. Do NOT repeat measurements.</p><p><b>Clinical Impression:</b> Brief synthesis. Do NOT list diagnoses here. STOP HERE - do not add any more sections.</p>",
+  "summary_html": "string - IMPORTANT: Write a concise clinical narrative summary in 2-4 paragraphs. DO NOT include diagnoses list or plan here - those go in separate fields. Format: <p><b>Visit Context:</b> Brief reason for visit and relevant history.</p><p><b>Key Findings:</b> Important exam findings and test results in narrative form.</p><p><b>Clinical Impression:</b> Brief assessment synthesis.</p>",
   "chief_complaint": "string - main reason for visit or referral in one sentence",
   "diagnoses": [
     {{
       "number": 1,
-      "code": "string - ICD code if available",
-      "label": "string - diagnosis with laterality/severity",
+      "icd10_code": "string - REQUIRED ICD-10-CM code (e.g., E11.9, I10, J45.20)",
+      "icd10_description": "string - official ICD-10 description for the code",
+      "label": "string - clinical diagnosis with laterality/severity as documented",
       "bullets": ["key findings supporting this diagnosis"],
       "severity": "string - mild/moderate/severe/not specified",
-      "urgency": "string - routine/soon/urgent/emergent"
+      "urgency": "string - routine/soon/urgent/emergent",
+      "coding_notes": "string - any notes about code selection (optional)"
     }}
   ],
   "suggested_diagnoses": [
     {{
+      "icd10_code": "string - suggested ICD-10-CM code",
       "label": "string - potential diagnosis suggested by findings",
       "supporting_findings": ["findings that suggest this"],
       "reasoning": "string - why this should be considered",
@@ -634,48 +579,56 @@ Output VALID JSON only:
     "reason_for_referral": "string - specific reason",
     "requested_service": "string - what they want done"
   }},
-  "clinical_values": {{
-    "visual_acuity_od": "string",
-    "visual_acuity_os": "string",
-    "iop_od": "string",
-    "iop_os": "string",
-    "refraction": "string",
-    "other_measurements": ["string - any other significant measurements"]
+  "vital_signs": {{
+    "blood_pressure": "string - systolic/diastolic if available",
+    "heart_rate": "string - bpm if available",
+    "respiratory_rate": "string - if available",
+    "temperature": "string - if available",
+    "weight": "string - if available",
+    "height": "string - if available",
+    "bmi": "string - if available",
+    "o2_saturation": "string - if available"
   }},
-  "exam_findings": [
+  "clinical_values": {{
+    "labs": ["string - any lab values mentioned with results"],
+    "imaging": ["string - any imaging findings"],
+    "specialty_measurements": ["string - specialty-specific measurements (VA, IOP, EF%, FEV1, HbA1c, etc.)"]
+  }},
+  "medications": [
     {{
-      "category": "string - e.g., Visual Acuity, Intraocular Pressure, Slit Lamp, Fundus, etc.",
-      "findings": [
-        {{
-          "label": "string - finding name with laterality if applicable",
-          "value": "string - the measurement or observation",
-          "abnormal": "boolean - true if outside normal range"
-        }}
-      ]
+      "name": "string - medication name",
+      "dose": "string - dose if specified",
+      "frequency": "string - frequency if specified",
+      "status": "string - current/new/discontinued/changed"
     }}
   ],
+  "allergies": ["string - any allergies mentioned"],
   "warnings": ["any critical findings or red flags that need immediate attention"],
   "clinical_pearls": ["brief insights that might help the receiving clinician"],
   "follow_up": "string - recommended follow-up timing"
 }}
 
-CRITICAL FORMATTING RULES FOR summary_html:
-1. EXACTLY 4 SECTIONS ONLY: Visit Context, Examination, Key Findings, Clinical Impression - NOTHING ELSE
-2. DO NOT add a second Examination section after Clinical Impression - this is a common error
-3. The ONE Examination section must be COMPREHENSIVE - include ALL exam findings in the bullet list
-4. Each measurement (VA, IOP, etc.) appears ONCE in the Examination bullets, nowhere else
-5. Key Findings describes significance in words, does NOT repeat numbers
-6. Clinical Impression synthesizes meaning, does NOT list diagnoses or add more exam data
-7. After Clinical Impression, STOP - do not add any more content to summary_html
-8. For patient_block, ALWAYS extract age or DOB if present
-9. exam_findings is a SEPARATE field for structured data - do NOT dump it into summary_html
+ICD-10 CODING RULES (CRITICAL):
+1. EVERY diagnosis MUST have an icd10_code - never leave blank
+2. Use the most specific code available:
+   - Diabetes: E11.9 (Type 2 unspecified), E11.65 (with hyperglycemia), E11.21 (with nephropathy)
+   - Hypertension: I10 (essential), I11.9 (with heart disease), I12.9 (with CKD)
+   - Heart failure: I50.9 (unspecified), I50.22 (chronic systolic), I50.32 (chronic diastolic)
+   - COPD: J44.9 (unspecified), J44.0 (with acute exacerbation), J44.1 (with acute exacerbation)
+   - Asthma: J45.20 (mild intermittent), J45.30 (mild persistent), J45.40 (moderate persistent)
+   - Depression: F32.9 (major depressive episode), F33.0 (recurrent mild)
+   - Anxiety: F41.1 (generalized), F41.0 (panic disorder)
+   - Eye conditions: Use H codes with laterality (1=right, 2=left, 3=bilateral)
+3. Include laterality codes where applicable (7th character for many injury/eye codes)
+4. For "history of" conditions, use Z codes (e.g., Z87.891 for history of nicotine dependence)
+5. For screening/prevention visits, use Z codes (e.g., Z00.00 for general exam)
 
 CLINICAL REASONING RULES:
 1. Extract facts explicitly stated in the document
-2. For suggested_diagnoses: Only suggest if there's reasonable clinical evidence (e.g., RPE changes might suggest early AMD even if not explicitly diagnosed)
+2. For suggested_diagnoses: Only suggest if there's reasonable clinical evidence
 3. For unaddressed_findings: Flag findings mentioned but with no corresponding plan item
-4. For warnings: Include values outside normal range (IOP > 21, VA worse than 20/40, etc.)
-5. For clinical_pearls: Add helpful context (e.g., "LPI patent suggests prior angle closure episode")
+4. For warnings: Include values outside normal range for the specialty
+5. For clinical_pearls: Add helpful context for the receiving clinician
 6. Be conservative with suggestions - mark confidence appropriately
 7. Never make up findings - only analyze what's actually documented
 
@@ -750,67 +703,144 @@ def is_pediatric_reference(title: str) -> bool:
     return any(kw in title_lower for kw in pediatric_keywords)
 
 
-def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: Optional[int] = None) -> List[Dict[str, str]]:
+def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: Optional[int] = None, detected_specialty: str = "") -> List[Dict[str, str]]:
     uniq_terms: List[str] = []
     for t in (terms or []):
         t = (t or "").strip()
         if t and t.lower() not in [x.lower() for x in uniq_terms]:
             uniq_terms.append(t)
 
-    if not uniq_terms:
-        return []
-    
-    # Check cache first (significantly reduces latency for repeat queries)
-    try:
-        cached = PubMedCache.get_cached(uniq_terms)
-        if cached:
-            return cached
-    except Exception:
-        pass  # Cache check failed silently - proceed with API call
-
     blob = " ".join(uniq_terms).lower()
+    specialty = (detected_specialty or "").lower()
     
     # Determine if patient is adult (age >= 18) - filter out pediatric papers
     is_adult = patient_age is not None and patient_age >= 18
     is_pediatric_patient = patient_age is not None and patient_age < 18
 
-    def add_queries_for_subspecialty(b: str) -> List[str]:
+    def add_queries_for_specialty(b: str, spec: str) -> List[str]:
         q: List[str] = []
-        if any(k in b for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-            q += ["TFOS DEWS", "dry eye disease guideline ophthalmology"]
-        if any(k in b for k in ["cornea", "keratitis", "corneal", "ulcer", "ectasia", "keratoconus"]):
-            q += ["infectious keratitis clinical guideline ophthalmology", "keratoconus global consensus"]
-        if "cataract" in b:
-            q += ["cataract preferred practice pattern ophthalmology", "cataract guideline ophthalmology"]
+        
+        # CARDIOLOGY
+        if any(k in b for k in ["hypertension", "htn", "blood pressure"]):
+            q += ["hypertension ACC AHA guideline", "blood pressure management guideline"]
+        if any(k in b for k in ["heart failure", "chf", "hfref", "hfpef"]):
+            q += ["heart failure AHA guideline", "chronic heart failure management"]
+        if any(k in b for k in ["atrial fibrillation", "afib"]):
+            q += ["atrial fibrillation AHA ACC guideline", "anticoagulation atrial fibrillation"]
+        if any(k in b for k in ["coronary", "cad", "angina", "mi", "myocardial infarction"]):
+            q += ["coronary artery disease guideline", "ACS management guideline"]
+        if any(k in b for k in ["lipid", "cholesterol", "statin"]):
+            q += ["cholesterol ACC AHA guideline", "statin therapy guideline"]
+            
+        # ENDOCRINOLOGY
+        if any(k in b for k in ["diabetes", "dm", "hba1c", "a1c"]):
+            q += ["diabetes ADA standards care", "type 2 diabetes management guideline"]
+        if any(k in b for k in ["thyroid", "hypothyroid", "hyperthyroid"]):
+            q += ["thyroid ATA guideline", "hypothyroidism management"]
+        if any(k in b for k in ["osteoporosis", "bone density"]):
+            q += ["osteoporosis AACE guideline", "bone health management"]
+            
+        # PULMONOLOGY
+        if any(k in b for k in ["copd", "chronic obstructive", "emphysema"]):
+            q += ["COPD GOLD guideline", "chronic obstructive pulmonary disease management"]
+        if any(k in b for k in ["asthma", "wheezing"]):
+            q += ["asthma GINA guideline", "asthma management guideline"]
+        if any(k in b for k in ["pulmonary embolism", "pe", "dvt"]):
+            q += ["pulmonary embolism ACCP guideline", "VTE anticoagulation guideline"]
+        if any(k in b for k in ["sleep apnea", "osa"]):
+            q += ["sleep apnea AASM guideline", "OSA CPAP management"]
+            
+        # GASTROENTEROLOGY
+        if any(k in b for k in ["gerd", "reflux", "heartburn"]):
+            q += ["GERD ACG guideline", "gastroesophageal reflux management"]
+        if any(k in b for k in ["ibs", "irritable bowel"]):
+            q += ["IBS ACG guideline", "irritable bowel syndrome management"]
+        if any(k in b for k in ["hepatitis", "cirrhosis", "liver"]):
+            q += ["liver disease AASLD guideline", "hepatitis management"]
+            
+        # NEUROLOGY
+        if any(k in b for k in ["stroke", "tia", "cva"]):
+            q += ["stroke AHA ASA guideline", "ischemic stroke management"]
+        if any(k in b for k in ["migraine", "headache"]):
+            q += ["migraine AAN guideline", "headache prevention treatment"]
+        if any(k in b for k in ["epilepsy", "seizure"]):
+            q += ["epilepsy AAN guideline", "seizure management"]
+        if any(k in b for k in ["parkinson", "tremor"]):
+            q += ["Parkinson disease AAN guideline", "movement disorder management"]
+        if any(k in b for k in ["dementia", "alzheimer", "cognitive"]):
+            q += ["dementia AAN guideline", "Alzheimer disease management"]
+            
+        # PSYCHIATRY
+        if any(k in b for k in ["depression", "mdd", "depressive"]):
+            q += ["depression APA guideline", "major depressive disorder treatment"]
+        if any(k in b for k in ["anxiety", "gad", "panic"]):
+            q += ["anxiety disorder guideline", "GAD treatment guideline"]
+            
+        # RHEUMATOLOGY
+        if any(k in b for k in ["rheumatoid", "ra ", "dmard"]):
+            q += ["rheumatoid arthritis ACR guideline", "RA DMARD management"]
+        if any(k in b for k in ["osteoarthritis", "oa ", "degenerative joint"]):
+            q += ["osteoarthritis ACR guideline", "OA management"]
+        if any(k in b for k in ["gout", "uric acid"]):
+            q += ["gout ACR guideline", "hyperuricemia management"]
+        if any(k in b for k in ["lupus", "sle"]):
+            q += ["systemic lupus ACR guideline", "SLE management"]
+            
+        # INFECTIOUS DISEASE
+        if any(k in b for k in ["pneumonia", "cap "]):
+            q += ["community acquired pneumonia IDSA guideline", "CAP antibiotic"]
+        if any(k in b for k in ["uti", "urinary tract"]):
+            q += ["urinary tract infection IDSA guideline", "UTI antibiotic"]
+        if any(k in b for k in ["cellulitis", "skin infection"]):
+            q += ["skin soft tissue infection IDSA guideline", "cellulitis management"]
+            
+        # NEPHROLOGY
+        if any(k in b for k in ["chronic kidney", "ckd", "renal insufficiency"]):
+            q += ["chronic kidney disease KDIGO guideline", "CKD management"]
+        if any(k in b for k in ["aki", "acute kidney"]):
+            q += ["acute kidney injury KDIGO guideline", "AKI management"]
+            
+        # DERMATOLOGY
+        if any(k in b for k in ["psoriasis"]):
+            q += ["psoriasis AAD guideline", "plaque psoriasis treatment"]
+        if any(k in b for k in ["eczema", "atopic dermatitis"]):
+            q += ["atopic dermatitis AAD guideline", "eczema management"]
+        if any(k in b for k in ["acne"]):
+            q += ["acne vulgaris AAD guideline", "acne treatment"]
+            
+        # OPHTHALMOLOGY
+        if any(k in b for k in ["dry eye", "meibomian", "mgd", "blepharitis"]):
+            q += ["TFOS DEWS", "dry eye disease guideline"]
         if any(k in b for k in ["glaucoma", "ocular hypertension", "iop"]):
-            q += ["glaucoma preferred practice pattern", "European Glaucoma Society guidelines"]
-        # Only include pediatric queries if patient is actually pediatric or age unknown
-        if any(k in b for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
-            if is_pediatric_patient or patient_age is None:
-                q += ["amblyopia preferred practice pattern", "strabismus clinical practice guideline"]
-            else:
-                q += ["adult strabismus guideline", "diplopia adult management"]
-        if any(k in b for k in ["pediatric", "paediatric", "child", "infant"]) and not is_adult:
-            q += ["pediatric eye evaluations preferred practice pattern", "retinopathy of prematurity guideline"]
-        if any(k in b for k in ["optic neuritis", "papilledema", "neuro", "visual field defect"]):
-            q += ["optic neuritis guideline", "papilledema evaluation guideline"]
-        if any(k in b for k in ["retina", "macular", "amd", "diabetic retinopathy", "retinal detachment", "uveitis"]):
-            q += ["diabetic retinopathy preferred practice pattern", "age related macular degeneration preferred practice pattern"]
+            q += ["glaucoma preferred practice pattern", "glaucoma guideline"]
+        if any(k in b for k in ["diabetic retinopathy", "dme"]):
+            q += ["diabetic retinopathy guideline", "DME management"]
+        if any(k in b for k in ["macular degeneration", "amd"]):
+            q += ["AMD preferred practice pattern", "macular degeneration guideline"]
+        if any(k in b for k in ["cataract"]):
+            q += ["cataract surgery guideline", "cataract management"]
+            
+        # UROLOGY
+        if any(k in b for k in ["bph", "benign prostatic", "luts"]):
+            q += ["BPH AUA guideline", "benign prostatic hyperplasia management"]
+        if any(k in b for k in ["overactive bladder", "oab"]):
+            q += ["overactive bladder AUA guideline", "OAB management"]
+            
         return q
 
-    canonical_queries = add_queries_for_subspecialty(blob)
+    canonical_queries = add_queries_for_specialty(blob, specialty)
     case_queries: List[str] = []
     for term in uniq_terms[:8]:
         # Add adult filter to queries if patient is adult
         if is_adult:
-            case_queries.append(f"({term}) ophthalmology adult")
             case_queries.append(f"({term}) (guideline OR consensus OR systematic review) NOT pediatric NOT children")
+            case_queries.append(f"({term}) clinical practice guideline adult")
         else:
-            case_queries.append(f"({term}) ophthalmology")
             case_queries.append(f"({term}) (guideline OR consensus OR systematic review)")
+            case_queries.append(f"({term}) clinical practice guideline")
 
     if not canonical_queries and not case_queries:
-        case_queries = ["ophthalmology clinical practice guideline"]
+        case_queries = ["clinical practice guideline medicine"]
 
     queries = (canonical_queries[:6] + case_queries[:10])
     pmids: List[str] = []
@@ -872,32 +902,24 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: O
                 "source": "PubMed",
             })
             num += 1
-        
-        # Cache the results for future queries
-        if out:
-            try:
-                PubMedCache.set_cached(uniq_terms, out)
-            except Exception:
-                pass  # Cache write failed silently
-        
         return out
     except Exception:
         return []
 
 
-def canonical_reference_pool(labels, patient_age: Optional[int] = None):
+def canonical_reference_pool(labels, patient_age: Optional[int] = None, detected_specialty: str = ""):
     """Build a pool of authoritative references based on diagnoses.
     
     Prioritizes:
-    - AAO Preferred Practice Patterns
-    - European/International society guidelines
+    - Society guidelines (AHA, ACC, ADA, ACCP, etc.)
     - Cochrane reviews
     - Landmark clinical trials
-    - NEJM, Lancet, JAMA Ophthalmology key papers
+    - NEJM, Lancet, JAMA key papers
     
     Filters out pediatric references if patient is adult (age >= 18).
     """
     blob = " ".join([str(x or "") for x in (labels or [])]).lower()
+    specialty = (detected_specialty or "").lower()
     pool = []
     
     is_adult = patient_age is not None and patient_age >= 18
@@ -911,91 +933,164 @@ def canonical_reference_pool(labels, patient_age: Optional[int] = None):
             "source": (source or ""),
         })
 
-    # DRY EYE / OCULAR SURFACE
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea", "tear"]):
+    # ==================== CARDIOLOGY ====================
+    if any(k in blob for k in ["hypertension", "high blood pressure", "htn", "elevated bp"]):
+        add("29133354", "2017 ACC/AHA Hypertension Guideline. J Am Coll Cardiol. 2018.", "https://pubmed.ncbi.nlm.nih.gov/29133354/", "ACC/AHA Guideline")
+        add("", "AHA Hypertension Guidelines", "https://www.heart.org/en/health-topics/high-blood-pressure", "AHA")
+    
+    if any(k in blob for k in ["heart failure", "chf", "hfref", "hfpef", "cardiomyopathy", "ef%", "ejection fraction"]):
+        add("35363499", "2022 AHA/ACC/HFSA Heart Failure Guideline. Circulation. 2022.", "https://pubmed.ncbi.nlm.nih.gov/35363499/", "ACC/AHA Guideline")
+        add("", "ACCF/AHA Heart Failure Guidelines", "https://www.acc.org/guidelines", "ACC Guideline")
+    
+    if any(k in blob for k in ["atrial fibrillation", "afib", "a-fib", "af", "flutter"]):
+        add("30686041", "2019 AHA/ACC/HRS Atrial Fibrillation Guideline. Circulation. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30686041/", "ACC/AHA Guideline")
+        add("33197159", "2020 ESC AF Guidelines. Eur Heart J. 2021.", "https://pubmed.ncbi.nlm.nih.gov/33197159/", "ESC Guideline")
+    
+    if any(k in blob for k in ["coronary artery disease", "cad", "angina", "ischemic heart", "mi", "myocardial infarction", "stemi", "nstemi"]):
+        add("34756653", "2021 ACC/AHA Chest Pain Guideline. Circulation. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34756653/", "ACC/AHA Guideline")
+        add("", "ACC/AHA Chronic Coronary Disease Guideline", "https://www.acc.org/guidelines", "ACC Guideline")
+    
+    if any(k in blob for k in ["lipid", "cholesterol", "hyperlipidemia", "ldl", "statin"]):
+        add("30586774", "2018 ACC/AHA Cholesterol Guideline. Circulation. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30586774/", "ACC/AHA Guideline")
+
+    # ==================== ENDOCRINOLOGY ====================
+    if any(k in blob for k in ["diabetes", "dm", "hba1c", "a1c", "hyperglycemia", "insulin"]):
+        add("", "ADA Standards of Care in Diabetes 2024", "https://diabetesjournals.org/care/issue/47/Supplement_1", "ADA Guideline")
+        add("36507645", "ADA Standards of Care 2023. Diabetes Care. 2023.", "https://pubmed.ncbi.nlm.nih.gov/36507645/", "ADA Guideline")
+    
+    if any(k in blob for k in ["thyroid", "hypothyroid", "hyperthyroid", "tsh", "graves", "hashimoto"]):
+        add("24243587", "ATA Guidelines for Hypothyroidism. Thyroid. 2014.", "https://pubmed.ncbi.nlm.nih.gov/24243587/", "ATA Guideline")
+        add("27521067", "ATA Guidelines for Hyperthyroidism. Thyroid. 2016.", "https://pubmed.ncbi.nlm.nih.gov/27521067/", "ATA Guideline")
+    
+    if any(k in blob for k in ["osteoporosis", "bone density", "dexa", "fracture risk"]):
+        add("", "AACE Osteoporosis Guidelines", "https://www.aace.com/disease-state-resources/bone-and-parathyroid/clinical-practice-guidelines", "AACE Guideline")
+
+    # ==================== PULMONOLOGY ====================
+    if any(k in blob for k in ["copd", "chronic obstructive", "emphysema", "chronic bronchitis"]):
+        add("", "GOLD COPD Guidelines 2024", "https://goldcopd.org/", "GOLD Guideline")
+        add("35537657", "GOLD 2023 Report. Am J Respir Crit Care Med. 2023.", "https://pubmed.ncbi.nlm.nih.gov/35537657/", "GOLD Guideline")
+    
+    if any(k in blob for k in ["asthma", "wheezing", "bronchospasm"]):
+        add("", "GINA Asthma Guidelines 2024", "https://ginasthma.org/", "GINA Guideline")
+        add("36710336", "GINA 2023 Report. Eur Respir J. 2023.", "https://pubmed.ncbi.nlm.nih.gov/36710336/", "GINA Guideline")
+    
+    if any(k in blob for k in ["pulmonary embolism", "pe", "dvt", "vte", "deep vein thrombosis"]):
+        add("27288144", "ACCP Antithrombotic Guidelines. Chest. 2016.", "https://pubmed.ncbi.nlm.nih.gov/27288144/", "ACCP Guideline")
+    
+    if any(k in blob for k in ["sleep apnea", "osa", "cpap", "ahi"]):
+        add("", "AASM Sleep Apnea Guidelines", "https://aasm.org/clinical-resources/practice-standards/", "AASM Guideline")
+
+    # ==================== GASTROENTEROLOGY ====================
+    if any(k in blob for k in ["gerd", "reflux", "heartburn", "ppi"]):
+        add("33436068", "ACG GERD Guidelines. Am J Gastroenterol. 2022.", "https://pubmed.ncbi.nlm.nih.gov/33436068/", "ACG Guideline")
+    
+    if any(k in blob for k in ["ibs", "irritable bowel", "constipation", "diarrhea"]):
+        add("32883967", "ACG IBS Guidelines. Am J Gastroenterol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/32883967/", "ACG Guideline")
+    
+    if any(k in blob for k in ["hepatitis", "cirrhosis", "liver", "fatty liver", "nafld", "nash"]):
+        add("35184914", "AASLD NAFLD Guidance. Hepatology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/35184914/", "AASLD Guidance")
+
+    # ==================== NEUROLOGY ====================
+    if any(k in blob for k in ["stroke", "tia", "cerebrovascular", "cva"]):
+        add("30879893", "AHA/ASA Stroke Guidelines. Stroke. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30879893/", "AHA/ASA Guideline")
+    
+    if any(k in blob for k in ["migraine", "headache", "tension headache"]):
+        add("33355936", "AAN Migraine Prevention Guideline. Neurology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/33355936/", "AAN Guideline")
+    
+    if any(k in blob for k in ["epilepsy", "seizure", "anticonvulsant"]):
+        add("", "AAN/AES Epilepsy Guidelines", "https://www.aan.com/Guidelines/", "AAN Guideline")
+    
+    if any(k in blob for k in ["parkinson", "tremor", "movement disorder"]):
+        add("", "AAN Parkinson Disease Guidelines", "https://www.aan.com/Guidelines/", "AAN Guideline")
+    
+    if any(k in blob for k in ["dementia", "alzheimer", "cognitive impairment", "mci"]):
+        add("", "AAN Dementia Guidelines", "https://www.aan.com/Guidelines/", "AAN Guideline")
+
+    # ==================== PSYCHIATRY ====================
+    if any(k in blob for k in ["depression", "major depressive", "mdd", "antidepressant"]):
+        add("", "APA Depression Treatment Guidelines", "https://psychiatryonline.org/guidelines", "APA Guideline")
+    
+    if any(k in blob for k in ["anxiety", "gad", "panic", "anxiolytic"]):
+        add("", "APA Anxiety Disorders Guidelines", "https://psychiatryonline.org/guidelines", "APA Guideline")
+    
+    if any(k in blob for k in ["bipolar", "mania", "mood stabilizer"]):
+        add("", "APA Bipolar Disorder Guidelines", "https://psychiatryonline.org/guidelines", "APA Guideline")
+
+    # ==================== RHEUMATOLOGY ====================
+    if any(k in blob for k in ["rheumatoid arthritis", "ra", "dmard", "methotrexate"]):
+        add("32319231", "ACR RA Treatment Guideline. Arthritis Care Res. 2021.", "https://pubmed.ncbi.nlm.nih.gov/32319231/", "ACR Guideline")
+    
+    if any(k in blob for k in ["osteoarthritis", "oa", "degenerative joint"]):
+        add("31908163", "ACR OA Guidelines. Arthritis Rheumatol. 2020.", "https://pubmed.ncbi.nlm.nih.gov/31908163/", "ACR Guideline")
+    
+    if any(k in blob for k in ["gout", "uric acid", "hyperuricemia"]):
+        add("32390306", "ACR Gout Guidelines. Arthritis Care Res. 2020.", "https://pubmed.ncbi.nlm.nih.gov/32390306/", "ACR Guideline")
+    
+    if any(k in blob for k in ["lupus", "sle", "systemic lupus"]):
+        add("", "ACR/EULAR Lupus Guidelines", "https://www.rheumatology.org/Practice-Quality/Clinical-Support/Clinical-Practice-Guidelines", "ACR Guideline")
+
+    # ==================== INFECTIOUS DISEASE ====================
+    if any(k in blob for k in ["pneumonia", "cap", "community acquired"]):
+        add("31573350", "ATS/IDSA CAP Guidelines. Am J Respir Crit Care Med. 2019.", "https://pubmed.ncbi.nlm.nih.gov/31573350/", "ATS/IDSA Guideline")
+    
+    if any(k in blob for k in ["uti", "urinary tract infection", "pyelonephritis"]):
+        add("21292654", "IDSA UTI Guidelines. Clin Infect Dis. 2011.", "https://pubmed.ncbi.nlm.nih.gov/21292654/", "IDSA Guideline")
+    
+    if any(k in blob for k in ["cellulitis", "skin infection", "abscess"]):
+        add("25091305", "IDSA Skin Infection Guidelines. Clin Infect Dis. 2014.", "https://pubmed.ncbi.nlm.nih.gov/25091305/", "IDSA Guideline")
+
+    # ==================== NEPHROLOGY ====================
+    if any(k in blob for k in ["chronic kidney", "ckd", "renal insufficiency", "egfr", "creatinine"]):
+        add("", "KDIGO CKD Guidelines", "https://kdigo.org/guidelines/", "KDIGO Guideline")
+    
+    if any(k in blob for k in ["aki", "acute kidney injury", "acute renal"]):
+        add("", "KDIGO AKI Guidelines", "https://kdigo.org/guidelines/", "KDIGO Guideline")
+
+    # ==================== DERMATOLOGY ====================
+    if any(k in blob for k in ["psoriasis", "plaque psoriasis"]):
+        add("30772098", "AAD Psoriasis Guidelines. J Am Acad Dermatol. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30772098/", "AAD Guideline")
+    
+    if any(k in blob for k in ["eczema", "atopic dermatitis", "dermatitis"]):
+        add("35183936", "AAD Atopic Dermatitis Guidelines. J Am Acad Dermatol. 2023.", "https://pubmed.ncbi.nlm.nih.gov/35183936/", "AAD Guideline")
+    
+    if any(k in blob for k in ["acne", "acne vulgaris"]):
+        add("", "AAD Acne Guidelines", "https://www.aad.org/member/clinical-quality/guidelines", "AAD Guideline")
+
+    # ==================== OPHTHALMOLOGY ====================
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "tear"]):
         add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "TFOS Guideline")
         add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS Guideline")
-        add("", "TFOS DEWS III Reports Hub - Complete Guidelines", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
-        add("28736335", "TFOS DEWS II Management and Therapy Report. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28736335/", "TFOS Guideline")
 
-    # MYOPIA
-    if "myopia" in blob:
-        add("30817826", "International Myopia Institute (IMI) White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30817826/", "IMI Consensus")
-        add("", "IMI Clinical Guidelines - Myopia Management", "https://myopiainstitute.org/", "IMI")
-
-    # GLAUCOMA
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension", "optic nerve", "cupping"]):
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
         add("34933745", "Primary Open-Angle Glaucoma PPP. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
-        add("34675001", "European Glaucoma Society Terminology and Guidelines, 5th Ed. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
-        add("", "AAO PPP: Primary Open-Angle Glaucoma", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO PPP")
-        add("19643495", "Ocular Hypertension Treatment Study. Arch Ophthalmol. 2002.", "https://pubmed.ncbi.nlm.nih.gov/12049575/", "Landmark Trial")
+        add("34675001", "European Glaucoma Society Guidelines, 5th Ed. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
 
-    # DIABETIC EYE DISEASE
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "diabetic macular", "dme"]):
+    if any(k in blob for k in ["diabetic retinopathy", "diabetic macular", "dme"]):
         add("", "AAO PPP: Diabetic Retinopathy", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO PPP")
-        add("26044954", "Diabetic Retinopathy PPP. Ophthalmology. 2020.", "https://pubmed.ncbi.nlm.nih.gov/31757496/", "AAO PPP")
-        add("", "ADA Standards of Care in Diabetes - Eye Care", "https://diabetesjournals.org/care", "ADA Guideline")
-        add("25903328", "DRCR.net Protocol T - Anti-VEGF for DME. NEJM. 2015.", "https://pubmed.ncbi.nlm.nih.gov/25692915/", "Landmark Trial")
 
-    # AMD
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd", "armd", "drusen", "choroidal neovascularization", "cnv"]):
+    if any(k in blob for k in ["macular degeneration", "amd", "drusen", "cnv"]):
         add("39918524", "Age-Related Macular Degeneration PPP. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "AAO PPP")
-        add("", "AAO PPP: Age-Related Macular Degeneration", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO PPP")
-        add("11594942", "AREDS Report No. 8 - Antioxidant Supplementation. Arch Ophthalmol. 2001.", "https://pubmed.ncbi.nlm.nih.gov/11594942/", "Landmark Trial")
-        add("23644932", "AREDS2 - Lutein/Zeaxanthin. JAMA. 2013.", "https://pubmed.ncbi.nlm.nih.gov/23644932/", "Landmark Trial")
 
-    # KERATOCONUS / ECTASIA
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia", "corneal thinning"]):
-        add("26253489", "Global Consensus on Keratoconus and Ectatic Diseases. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "Global Consensus")
-        add("", "AAO PPP: Corneal Ectasia", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-
-    # CORNEA / KERATITIS
-    if any(k in blob for k in ["cornea", "keratitis", "corneal ulcer", "corneal infection"]):
-        add("", "AAO PPP: Bacterial Keratitis", "https://www.aao.org/education/preferred-practice-pattern/bacterial-keratitis-ppp", "AAO PPP")
-        add("26253489", "Global Consensus on Keratoconus. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "Global Consensus")
-
-    # UVEITIS
-    if "uveitis" in blob:
-        add("16490958", "Standardization of Uveitis Nomenclature (SUN). Am J Ophthalmol. 2005.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "SUN Consensus")
-        add("", "AAO PPP: Uveitis", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-
-    # CATARACT
     if "cataract" in blob:
         add("34780842", "Cataract in the Adult Eye PPP. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
-        add("", "AAO PPP: Cataract in the Adult Eye", "https://www.aao.org/education/preferred-practice-pattern/cataract-in-adult-eye-ppp", "AAO PPP")
-        add("", "European Society of Cataract and Refractive Surgeons Guidelines", "https://www.escrs.org/", "ESCRS")
 
-    # STRABISMUS / AMBLYOPIA - filter for adult vs pediatric
-    if any(k in blob for k in ["strabismus", "amblyopia", "esotropia", "exotropia", "diplopia"]):
-        if is_adult:
-            # For adults, focus on adult strabismus/diplopia resources
-            add("", "AAO EyeWiki: Adult Strabismus", "https://eyewiki.aao.org/Adult_Strabismus", "AAO EyeWiki")
-            add("", "AAO PPP: Adult Strabismus", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-        else:
-            # For pediatric patients or unknown age, include pediatric resources
-            add("", "AAO PPP: Amblyopia", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO PPP")
-            add("", "AAO PPP: Esotropia and Exotropia", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO PPP")
-            add("15545803", "PEDIG - Amblyopia Treatment Studies", "https://pubmed.ncbi.nlm.nih.gov/15545803/", "Landmark Trial")
+    # ==================== ORTHOPEDICS ====================
+    if any(k in blob for k in ["low back pain", "lumbago", "lumbar"]):
+        add("", "ACP Low Back Pain Guidelines", "https://www.acponline.org/clinical-information/guidelines", "ACP Guideline")
+    
+    if any(k in blob for k in ["neck pain", "cervical"]):
+        add("", "AAFP Neck Pain Guidelines", "https://www.aafp.org/family-physician/patient-care/clinical-recommendations.html", "AAFP Guideline")
 
-    # PEDIATRIC - only include if patient is actually pediatric
-    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant", "rop"]) and not is_adult:
-        add("", "AAO PPP: Pediatric Eye Evaluations", "https://www.aao.org/education/preferred-practice-pattern/pediatric-eye-evaluations-ppp", "AAO PPP")
-        add("", "AAO PPP: Retinopathy of Prematurity", "https://www.aao.org/education/preferred-practice-pattern/retinopathy-of-prematurity-ppp", "AAO PPP")
+    # ==================== UROLOGY ====================
+    if any(k in blob for k in ["bph", "benign prostatic", "prostate enlargement", "luts"]):
+        add("", "AUA BPH Guidelines", "https://www.auanet.org/guidelines", "AUA Guideline")
+    
+    if any(k in blob for k in ["overactive bladder", "oab", "urge incontinence"]):
+        add("", "AUA OAB Guidelines", "https://www.auanet.org/guidelines", "AUA Guideline")
 
-    # NEURO-OPHTHALMOLOGY
-    if any(k in blob for k in ["optic neuritis", "papilledema", "neuro", "visual field", "third nerve", "fourth nerve", "sixth nerve", "cranial nerve"]):
-        add("", "AAO EyeWiki: Optic Neuritis", "https://eyewiki.aao.org/Optic_Neuritis", "AAO EyeWiki")
-        add("", "AAO EyeWiki: Papilledema", "https://eyewiki.aao.org/Papilledema", "AAO EyeWiki")
-        add("16105882", "Optic Neuritis Treatment Trial - 15 Year Follow-up. Ophthalmology. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18675697/", "Landmark Trial")
-
-    # RETINAL DETACHMENT / VITREOUS
-    if any(k in blob for k in ["retinal detachment", "vitreous", "floaters", "pvd", "posterior vitreous"]):
-        add("", "AAO PPP: Posterior Vitreous Detachment, Retinal Breaks, and Lattice Degeneration", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-        add("28284692", "Incidence of Retinal Detachment Following PVD. JAMA Ophthalmol. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28284692/", "Clinical Study")
-
-    # REFRACTIVE
-    if any(k in blob for k in ["myopia", "hyperopia", "astigmatism", "presbyopia", "refractive"]):
-        add("", "AAO PPP: Refractive Errors and Refractive Surgery", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
+    # ==================== PREVENTIVE CARE ====================
+    if any(k in blob for k in ["screening", "preventive", "wellness", "annual exam"]):
+        add("", "USPSTF Recommendations", "https://www.uspreventiveservicestaskforce.org/uspstf/recommendation-topics", "USPSTF")
 
     return pool[:12]  # Return top 12 most relevant
 
@@ -1084,6 +1179,18 @@ def letter_prompt(form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
     reason_label = (form.get("reason_label") or "Reason for Report").strip() or "Reason for Report"
     out_lang = (form.get("output_language") or "").strip()
     out_lang_line = f"Write the letter in {out_lang}." if out_lang and out_lang.lower() not in {"auto", "match", "match input"} else ""
+    recipient_type = (form.get("recipient_type") or "").lower()
+    include_icd10 = recipient_type in ["insurance", "physician", "specialist"]
+    
+    icd10_instruction = ""
+    if include_icd10:
+        icd10_instruction = """
+ICD-10 CODES:
+- Include ICD-10 codes in the Assessment section next to each diagnosis
+- Format as: "Diagnosis Name (ICD-10: X##.##)"
+- This is REQUIRED for insurance letters and helpful for physician letters
+"""
+    
     return f"""
 You are a senior clinician writing a professional referral or report letter. Your goal is to communicate effectively while building collegial relationships.
 
@@ -1099,6 +1206,7 @@ TONE AND RELATIONSHIP:
 - Signal willingness to comanage and collaborate
 - If recipient_type equals "Patient", write in warm, accessible language while maintaining professionalism
 - For physicians, use precise medical terminology but remain personable
+- For insurance letters, be formal, thorough, and include all relevant codes
 
 SPECIAL REQUESTS HANDLING:
 The special_requests field is an INTENT SIGNAL from the referring provider. 
@@ -1113,7 +1221,7 @@ Clinic context:
 clinic_name: {os.getenv("CLINIC_NAME","")}
 clinic_address: {os.getenv("CLINIC_ADDRESS","")}
 clinic_phone: {os.getenv("CLINIC_PHONE","")}
-
+{icd10_instruction}
 LETTER STRUCTURE:
 
 1. HEADER (one item per line):
@@ -1142,7 +1250,7 @@ Dear <recipient name or "Colleague">,
 4. CLINICAL CONTENT:
 Use headings for:
 - Exam findings (include objective measurements, key negatives, imaging results)
-- Assessment (problem list with laterality and severity)
+- Assessment (problem list with laterality, severity, AND ICD-10 codes if this is for a physician or insurance)
 - Plan (current management and what you're asking them to do)
 
 5. CLOSING PARAGRAPH (collaboration signal):
@@ -1157,6 +1265,7 @@ RULES:
 - Do NOT repeat the provider name after "Kind regards,"
 - Keep exam findings detailed but relevant to the referral
 - Make the letter feel personal and collegial, not templated
+- For insurance letters: Include ICD-10 codes, be thorough about medical necessity
 
 Form:
 {json.dumps(form, ensure_ascii=False)}
@@ -1170,21 +1279,6 @@ def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool)
     txt = (letter_plain or "").rstrip()
     if not txt:
         return ""
-    
-    # If we have a signature, remove everything after "Kind regards" 
-    # (the PDF export will add signature + name)
-    if has_signature:
-        lines = txt.splitlines()
-        result_lines = []
-        for line in lines:
-            lower = line.strip().lower()
-            if lower.startswith("kind regards"):
-                result_lines.append("Kind regards,")
-                break  # Stop here - don't include anything after
-            result_lines.append(line)
-        return "\n".join(result_lines).rstrip()
-    
-    # No signature - ensure proper signoff with provider name
     lines = txt.splitlines()
     if lines:
         last = lines[-1].strip()
@@ -1192,6 +1286,8 @@ def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool)
         if prov and last.lower() == prov.lower():
             lines = lines[:-1]
     txt = "\n".join(lines).rstrip()
+    if has_signature:
+        return txt
     prov = (provider_name or "").strip()
     if not prov:
         return txt
@@ -1207,143 +1303,83 @@ def new_job_id() -> str:
 
 
 def set_job(job_id: str, **updates: Any) -> None:
-    """Persist job state.
-
-    Priority:
-    1) Postgres when an app context is available
-    2) File fallback (always)
-    3) In-memory cache (best-effort)
-    """
+    """Update job state with guaranteed file write for cross-worker visibility."""
     _ensure_job_dir()
-
-    # Merge into in-memory cache (best-effort). Never crash if cache fails.
-    try:
-        with JOBS_LOCK:
-            job_dict = JOBS.get(job_id) or {}
-            job_dict.update(updates)
-            JOBS[job_id] = job_dict
-    except Exception:
-        job_dict = dict(updates)
-
-    # Best-effort Postgres write only when we have an app context.
-    try:
-        from flask import has_app_context
-        if has_app_context():
-            job = Job.query.get(job_id)
-            if not job:
-                job = Job(id=job_id)
-                db.session.add(job)
-
-            # Attach user and org if explicitly provided
-            if updates.get("user_id") is not None and getattr(job, "user_id", None) is None:
-                try:
-                    job.user_id = int(updates.get("user_id"))
-                except Exception:
-                    pass
-            if updates.get("organization_id") is not None and getattr(job, "organization_id", None) is None:
-                try:
-                    job.organization_id = int(updates.get("organization_id"))
-                except Exception:
-                    pass
-
-            job.update_from_dict(updates)
-            db.session.commit()
-    except Exception:
-        # Never block the request due to persistence issues
-        pass
-
-    # Always persist to file storage as a cross-worker fallback.
-    try:
-        path = _job_path(job_id)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(job_dict, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-    # Optional S3 persistence (disaster recovery)
-    try:
-        if job_s3_enabled():
-            bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-            if bucket:
-                try:
-                    s3, _ = aws_clients()
-                except Exception:
-                    s3 = None
-                if s3 is not None:
-                    body = json.dumps(job_dict, ensure_ascii=False).encode("utf-8")
-                    for key in job_s3_key_fallbacks(job_id):
-                        try:
-                            s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-                            break
-                        except Exception:
-                            continue
-    except Exception:
-        pass
-
-
-def get_job(job_id: str) -> Dict[str, Any]:
-    """
-    Get job state with durable storage as the source of truth.
-
-    Priority: Postgres -> file -> in-memory cache -> S3
-    """
-    _ensure_job_dir()
-
-    # 1) Postgres (authoritative across workers)
-    try:
-        with current_app.app_context():
-            job = Job.query.get(job_id)
-            if job:
-                job_dict = job.to_dict()
-                with JOBS_LOCK:
-                    JOBS[job_id] = job_dict
-                return job_dict
-    except Exception:
-        # No app context in background thread or DB unavailable
-        pass
-
-    # 2) File storage (cross-worker fallback)
     path = _job_path(job_id)
+    
+    with JOBS_LOCK:
+        job = JOBS.get(job_id) or {}
+        job.update(updates)
+        JOBS[job_id] = job
+    
+    # ALWAYS write to file for cross-worker visibility
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            job_dict = json.load(f) or {}
-        if isinstance(job_dict, dict):
-            with JOBS_LOCK:
-                JOBS[job_id] = job_dict
-            return dict(job_dict)
-    except Exception:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(job, f, ensure_ascii=False)
+    except Exception as e:
+        # Log but don't fail - S3 is backup
         pass
 
-    # 3) In-memory cache (same worker only)
-    with JOBS_LOCK:
-        if job_id in JOBS:
-            return dict(JOBS.get(job_id) or {})
-
-    # 4) S3 (optional fallback)
+    # Also write to S3 if enabled (async-safe, no current_user needed)
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
             s3, _ = aws_clients()
+            if s3 is not None:
+                body = json.dumps(job, ensure_ascii=False).encode("utf-8")
+                key = job_s3_key(job_id)
+                s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
         except Exception:
-            s3 = None
-        if s3 is not None:
-            for key in job_s3_key_fallbacks(job_id):
-                try:
-                    obj = s3.get_object(Bucket=bucket, Key=key)
-                    body = obj["Body"].read()
-                    job_dict = json.loads(body.decode("utf-8", errors="ignore")) or {}
-                    if isinstance(job_dict, dict):
-                        with JOBS_LOCK:
-                            JOBS[job_id] = job_dict
-                        try:
-                            with open(path, "w", encoding="utf-8") as f:
-                                json.dump(job_dict, f, ensure_ascii=False)
-                        except Exception:
-                            pass
-                        return dict(job_dict)
-                except Exception:
-                    continue
+            pass
 
+
+def get_job(job_id: str) -> Dict[str, Any]:
+    """Get job state - checks file first for cross-worker consistency, then S3, then cache."""
+    _ensure_job_dir()
+    path = _job_path(job_id)
+    
+    # 1. Check file FIRST (authoritative for cross-worker)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            job = json.load(f) or {}
+        if isinstance(job, dict) and job:
+            with JOBS_LOCK:
+                JOBS[job_id] = job
+            return dict(job)
+    except Exception:
+        pass
+
+    # 2. Check S3 if enabled (backup authoritative source)
+    if job_s3_enabled():
+        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
+        try:
+            s3, _ = aws_clients()
+            if s3 is not None:
+                for key in job_s3_key_fallbacks(job_id):
+                    try:
+                        obj = s3.get_object(Bucket=bucket, Key=key)
+                        body = obj["Body"].read()
+                        job = json.loads(body.decode("utf-8", errors="ignore")) or {}
+                        if isinstance(job, dict) and job:
+                            with JOBS_LOCK:
+                                JOBS[job_id] = job
+                            # Write to file for future local reads
+                            try:
+                                with open(path, "w", encoding="utf-8") as f:
+                                    json.dump(job, f, ensure_ascii=False)
+                            except Exception:
+                                pass
+                            return dict(job)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+    
+    # 3. Fall back to memory cache (same worker only)
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            return dict(JOBS.get(job_id) or {})
+    
     return {}
 
 
@@ -1360,8 +1396,8 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
         return
 
-    # Validate and repair the LLM output to ensure consistent schema
-    analysis = validate_and_repair_analysis(obj)
+    analysis = dict(ANALYZE_SCHEMA)
+    analysis.update(obj)
 
     pb = (analysis.get("patient_block") or "")
     pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
@@ -1390,6 +1426,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
     # Extract patient age for reference filtering
     patient_age = extract_patient_age(pb)
     analysis["patient_age"] = patient_age
+    
+    # Get detected specialty for better reference matching
+    detected_specialty = analysis.get("detected_specialty", "")
 
     # Stage 3: Fetching references
     set_job(job_id, stage="references", stage_label="Fetching references...", progress=65, heartbeat_at=now_utc_iso())
@@ -1400,9 +1439,13 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             label = (dx.get("label") or "").strip()
             if label:
                 terms.append(label)
-    # Pass patient_age to filter out irrelevant pediatric papers for adult patients
-    references = pubmed_fetch_for_terms(terms, patient_age=patient_age)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)], patient_age=patient_age)
+            # Also add ICD-10 descriptions for better search
+            icd_desc = (dx.get("icd10_description") or "").strip()
+            if icd_desc and icd_desc not in terms:
+                terms.append(icd_desc)
+    # Pass patient_age and detected_specialty to filter references appropriately
+    references = pubmed_fetch_for_terms(terms, patient_age=patient_age, detected_specialty=detected_specialty)
+    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)], patient_age=patient_age, detected_specialty=detected_specialty)
     analysis['references'] = merge_references(references, canonical)
 
     # Stage 4: Assigning citations
@@ -1528,13 +1571,15 @@ def analyze_start():
     except Exception:
         upath = ""
 
+    # Set processing immediately to avoid UI flicker between waiting/extracting
     set_job(
         job_id,
         status="processing",
         stage="received",
-        stage_label="Received file",
-        progress=1,
+        stage_label="Received file...",
+        progress=2,
         updated_at=now_utc_iso(),
+        heartbeat_at=now_utc_iso(),
         upload_path=upath,
         upload_name=filename,
         force_ocr=force_ocr,
@@ -1765,27 +1810,16 @@ def export_pdf():
 
     def find_signature_image(prov_name: str) -> Optional[str]:
         base_dir = os.getenv("SIGNATURE_DIR", "static/signatures")
-        # Try multiple possible locations
-        possible_dirs = [
-            # Relative to api.py file (app/static/signatures)
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "signatures"),
-            # Relative to project root (app/static/signatures)
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "static", "signatures"),
-            # Environment-specified directory
-            base_dir if os.path.isabs(base_dir) else os.path.join(os.path.dirname(os.path.abspath(__file__)), base_dir),
-        ]
-        
+        # Try relative to app folder
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        abs_dir = os.path.join(app_dir, "app", base_dir)
         slug = signature_slug(prov_name)
         if not slug:
             return None
-        
-        for abs_dir in possible_dirs:
-            if not os.path.isdir(abs_dir):
-                continue
-            for ext in (".png", ".jpg", ".jpeg"):
-                cand = os.path.join(abs_dir, slug + ext)
-                if os.path.exists(cand):
-                    return cand
+        for ext in (".png", ".jpg", ".jpeg"):
+            cand = os.path.join(abs_dir, slug + ext)
+            if os.path.exists(cand):
+                return cand
         return None
 
     # Get letterhead: client upload > static letterhead.png
@@ -1805,18 +1839,17 @@ def export_pdf():
         text_in = finalize_signoff(text_in, provider_name, True)
 
     styles = getSampleStyleSheet()
-    # Compact styles for single-page fit
     base = ParagraphStyle(
         "base", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=9.5, leading=12, spaceAfter=2, alignment=TA_JUSTIFY
+        fontSize=10, leading=13.5, spaceAfter=4, alignment=TA_JUSTIFY
     )
     head = ParagraphStyle(
         "head", parent=base, fontName="Helvetica-Bold",
-        spaceBefore=6, spaceAfter=3, alignment=TA_LEFT
+        spaceBefore=8, spaceAfter=5, alignment=TA_LEFT
     )
     mono = ParagraphStyle(
         "mono", parent=base, fontName="Helvetica",
-        fontSize=9.5, leading=11, alignment=TA_LEFT, spaceAfter=0
+        fontSize=10, leading=12.8, alignment=TA_LEFT, spaceAfter=0
     )
 
     def esc(s: str) -> str:
@@ -1863,10 +1896,10 @@ def export_pdf():
     if lh_path and os.path.exists(lh_path):
         try:
             img = RLImage(lh_path)
-            img.drawHeight = 45
-            img.drawWidth = 480
+            img.drawHeight = 50
+            img.drawWidth = 500
             story.append(img)
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
         except Exception:
             pass
 
@@ -1875,8 +1908,6 @@ def export_pdf():
     demo_data = {}
     demo_active = False
     demo_emitted = False
-    in_signoff = False  # Track if we're past "Kind regards"
-    provider_name_lower = provider_name.lower().strip()
 
     for raw in raw_lines:
         line = (raw or "").rstrip()
@@ -1884,23 +1915,11 @@ def export_pdf():
             if demo_active and not demo_emitted:
                 story.extend(emit_demographics(demo_data))
                 demo_emitted = True
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
             continue
 
         lower = line.strip().lower()
         key = lower.split(":", 1)[0].strip() if ":" in lower else ""
-        
-        # Skip provider name if it appears after Kind regards (avoid duplicate)
-        if in_signoff:
-            # Skip if this line is just the provider name
-            line_clean = re.sub(r'[,.\s]+', '', lower)
-            prov_clean = re.sub(r'[,.\s]+', '', provider_name_lower)
-            if line_clean == prov_clean or lower == provider_name_lower:
-                continue
-            # Also skip common name patterns
-            if lower.startswith("dr.") or lower.startswith("dr "):
-                if any(part in lower for part in provider_name_lower.split()):
-                    continue
 
         # Collect demographics for compact display
         if key in demo_keys:
@@ -1923,9 +1942,9 @@ def export_pdf():
         if lower.startswith("reason for referral") or lower.startswith("reason for report"):
             label = "Reason for Referral" if lower.startswith("reason for referral") else "Reason for Report"
             value = line.split(":", 1)[1].strip() if ":" in line else ""
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 10))
             story.append(Paragraph(f"<b>{label}:</b> {esc(value)}", base))
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 10))
             continue
 
         # Section headings
@@ -1945,38 +1964,44 @@ def export_pdf():
 
         # Salutation
         if lower.startswith("dear "):
-            story.append(Spacer(1, 6))
+            story.append(Spacer(1, 8))
             story.append(Paragraph(esc(line), base))
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 6))
             continue
 
         # Signature block
         if lower.startswith("kind regards"):
-            in_signoff = True
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 12))
             story.append(Paragraph("Kind regards,", base))
             
             if sig_path_effective and os.path.exists(sig_path_effective):
                 try:
                     sig = RLImage(sig_path_effective)
                     page_w = rl_letter[0]
-                    max_width = int(page_w * 0.22)
-                    max_height = 70
+                    max_width = int(page_w * 0.25)
+                    max_height = 90
                     iw = float(sig.imageWidth)
                     ih = float(sig.imageHeight)
                     if iw > 0 and ih > 0:
                         scale = min(max_width / iw, max_height / ih)
                         sig.drawWidth = iw * scale
                         sig.drawHeight = ih * scale
-                    story.append(Spacer(1, 4))
-                    story.append(sig)
-                    # Add provider name under signature
-                    story.append(Spacer(1, 2))
-                    story.append(Paragraph(esc(provider_name), base))
+                    story.append(Spacer(1, 6))
+                    text_w = rl_letter[0] - 54 - 54
+                    tbl = Table([[sig]], colWidths=[text_w])
+                    tbl.setStyle(TableStyle([
+                        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                        ("TOPPADDING", (0, 0), (-1, -1), 0),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ]))
+                    story.append(tbl)
                 except Exception:
                     story.append(Paragraph(esc(provider_name), base))
             else:
-                # No signature image - just add provider name
+                # No signature image - add provider name
                 story.append(Paragraph(esc(provider_name), base))
             continue
 
@@ -1990,10 +2015,10 @@ def export_pdf():
     doc = SimpleDocTemplate(
         out_path,
         pagesize=rl_letter,
-        leftMargin=50,
-        rightMargin=50,
-        topMargin=45,
-        bottomMargin=45,
+        leftMargin=54,
+        rightMargin=54,
+        topMargin=54,
+        bottomMargin=54,
         title=filename,
     )
 
@@ -2135,9 +2160,8 @@ EXAMPLE for a referral request:
 """.strip()
 
 
-def patient_letter_prompt(analysis: dict, form: dict = None) -> str:
+def patient_letter_prompt(analysis: dict) -> str:
     """Prompt for generating patient-friendly letter"""
-    form = form or {}
     diagnoses = analysis.get("diagnoses", [])
     plan = analysis.get("plan", [])
     
@@ -2153,47 +2177,16 @@ def patient_letter_prompt(analysis: dict, form: dict = None) -> str:
         if isinstance(p, dict) and p.get("title"):
             plan_summary += f"- {p.get('title')}\n"
             for bullet in (p.get("bullets") or [])[:3]:
-                plan_summary += f"  - {bullet}\n"
-    
-    # Extract form settings
-    recipient_type = form.get("recipient_type", "Patient")
-    to_whom = form.get("to_whom", "")
-    from_doctor = form.get("from_doctor", "") or analysis.get("provider_name", "")
-    reason = form.get("reason_for_referral", "")
-    focus = form.get("referral_focus", "")
-    special = form.get("special_requests", "")
-    tone = form.get("tone", "warm")
-    detail = form.get("detail", "standard")
-    out_lang = form.get("output_language", "en")
-    
-    tone_instruction = {
-        "warm": "Use warm, reassuring, empathetic language. The patient may be anxious.",
-        "professional": "Use clear, professional language while remaining approachable.",
-        "simple": "Use very simple, plain language. Avoid all medical jargon."
-    }.get(tone, "Use warm, reassuring language.")
-    
-    detail_instruction = {
-        "brief": "Keep the letter concise - 2-3 short paragraphs maximum.",
-        "standard": "Provide a balanced level of detail - about 4-5 paragraphs.",
-        "detailed": "Provide comprehensive detail with thorough explanations."
-    }.get(detail, "Provide a balanced level of detail.")
-    
-    lang_map = {"en": "", "es": "Write the letter in Spanish.", "pt": "Write the letter in Portuguese.", "fr": "Write the letter in French."}
-    lang_instruction = lang_map.get(out_lang, "")
-    
-    reason_section = f"REASON FOR LETTER: {reason}" if reason else ""
-    focus_section = f"FOCUS/PURPOSE: {focus}" if focus else ""
-    special_section = f"SPECIAL REQUESTS: {special}" if special else ""
+                plan_summary += f"  â€¢ {bullet}\n"
     
     return f"""
-You are a compassionate healthcare communicator writing a letter about a recent eye examination.
-
-RECIPIENT TYPE: {recipient_type}
-TO: {to_whom or 'the patient'}
-FROM: {from_doctor}
+You are a compassionate healthcare communicator writing a letter to a patient about their recent eye examination.
 
 PATIENT INFO:
 {analysis.get('patient_block', '')}
+
+PROVIDER:
+{analysis.get('provider_name', '')}
 
 CLINICAL SUMMARY:
 {analysis.get('summary_html', '')[:4000]}
@@ -2204,49 +2197,35 @@ DIAGNOSES FOUND:
 RECOMMENDED PLAN:
 {plan_summary}
 
-{reason_section}
-{focus_section}
-{special_section}
-
-TONE: {tone_instruction}
-DETAIL LEVEL: {detail_instruction}
-{lang_instruction}
-
 WRITING GUIDELINES:
-1. Address the letter appropriately for {recipient_type}
-2. Explain medical terms in plain English (e.g., "IOP" means "eye pressure")
+1. Use warm, reassuring language - patients may be anxious about their results
+2. Explain medical terms in plain English (e.g., "IOP" â†’ "eye pressure")
 3. If findings are normal, emphasize the good news
-4. If there are concerns, explain them clearly but without undue alarm
+4. If there are concerns, explain them clearly but without causing undue alarm
 5. List next steps clearly (appointments, medications, lifestyle changes)
 6. Include when they should return for follow-up
-7. Sign off appropriately from {from_doctor}
+7. Provide contact information for questions
+8. Sign off warmly from the provider
 
 STRUCTURE:
-- Opening: Reference their recent visit
-- Summary: What was examined and found (in plain terms)
+- Opening: Reference their recent visit and thank them
+- Summary: What we examined and found (in plain terms)
 - What this means: Explain the significance simply
-- Next steps: Clear action items
-- Closing: Appropriate sign-off from {from_doctor}
+- Next steps: Clear action items they need to take
+- Reassurance: Appropriate closing based on findings
+- Contact info: How to reach the clinic with questions
 
 Output VALID JSON only:
-{{{{
+{{
   "letter": "string - the complete letter text with proper paragraph breaks"
-}}}}
+}}
 """.strip()
 
-def insurance_letter_prompt(analysis: dict, form: dict = None) -> str:
+
+def insurance_letter_prompt(analysis: dict) -> str:
     """Prompt for generating insurance/prior authorization letter"""
-    form = form or {}
     diagnoses = analysis.get("diagnoses", [])
     plan = analysis.get("plan", [])
-    
-    # Extract form settings
-    from_doctor = form.get("from_doctor", "") or analysis.get("provider_name", "")
-    reason = form.get("reason_for_referral", "")
-    focus = form.get("referral_focus", "")
-    special = form.get("special_requests", "")
-    detail = form.get("detail", "standard")
-    out_lang = form.get("output_language", "en")
     
     # Format diagnoses with codes
     dx_formatted = ""
@@ -2257,7 +2236,7 @@ def insurance_letter_prompt(analysis: dict, form: dict = None) -> str:
             bullets = dx.get("bullets", [])
             dx_formatted += f"- {code} {label}\n"
             for b in bullets[:3]:
-                dx_formatted += f"  - {b}\n"
+                dx_formatted += f"  â€¢ {b}\n"
     
     # Format plan items
     plan_formatted = ""
@@ -2265,28 +2244,16 @@ def insurance_letter_prompt(analysis: dict, form: dict = None) -> str:
         if isinstance(p, dict):
             plan_formatted += f"- {p.get('title', '')}\n"
             for b in (p.get("bullets") or [])[:3]:
-                plan_formatted += f"  - {b}\n"
-    
-    detail_instruction = {
-        "brief": "Keep the letter concise while covering all essential points.",
-        "standard": "Provide thorough documentation with all relevant clinical details.",
-        "detailed": "Provide exhaustive documentation with comprehensive clinical justification."
-    }.get(detail, "Provide thorough documentation.")
-    
-    lang_map = {"en": "", "es": "Write the letter in Spanish.", "pt": "Write the letter in Portuguese.", "fr": "Write the letter in French."}
-    lang_instruction = lang_map.get(out_lang, "")
-    
-    reason_section = f"SPECIFIC CONDITION/PROCEDURE: {reason}" if reason else ""
-    focus_section = f"REQUESTED SERVICE: {focus}" if focus else ""
-    special_section = f"ADDITIONAL NOTES: {special}" if special else ""
+                plan_formatted += f"  â€¢ {b}\n"
     
     return f"""
 You are a medical documentation specialist writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
 
-FROM PROVIDER: {from_doctor}
-
 PATIENT INFO:
 {analysis.get('patient_block', '')}
+
+PROVIDER:
+{analysis.get('provider_name', '')}
 
 CLINICAL SUMMARY:
 {analysis.get('summary_html', '')[:4000]}
@@ -2296,13 +2263,6 @@ DIAGNOSES (with ICD codes if available):
 
 TREATMENT PLAN:
 {plan_formatted}
-
-{reason_section}
-{focus_section}
-{special_section}
-
-DETAIL LEVEL: {detail_instruction}
-{lang_instruction}
 
 LETTER REQUIREMENTS:
 1. Use formal medical terminology appropriate for insurance review
@@ -2325,7 +2285,6 @@ STRUCTURE:
 - Treatment plan: What is being requested
 - Supporting evidence: Guidelines, standards of care
 - Closing: Request for approval, contact for questions
-- Sign from {from_doctor}
 
 PERSUASION TECHNIQUES:
 - Lead with the most compelling clinical findings
@@ -2335,9 +2294,9 @@ PERSUASION TECHNIQUES:
 - Note any failed conservative treatments
 
 Output VALID JSON only:
-{{{{
+{{
   "letter": "string - the complete formal letter text"
-}}}}
+}}
 """.strip()
 
 
@@ -2385,23 +2344,10 @@ def generate_assistant_letter():
     analysis = payload.get("analysis") or {}
     letter_type = payload.get("letter_type", "patient")
     
-    # Extract form fields
-    form = {
-        "recipient_type": payload.get("recipient_type", "Patient"),
-        "to_whom": payload.get("to_whom", ""),
-        "from_doctor": payload.get("from_doctor", ""),
-        "reason_for_referral": payload.get("reason_for_referral", ""),
-        "referral_focus": payload.get("referral_focus", ""),
-        "special_requests": payload.get("special_requests", ""),
-        "tone": payload.get("tone", "warm"),
-        "detail": payload.get("detail", "standard"),
-        "output_language": payload.get("output_language", "en"),
-    }
-    
     if letter_type == "insurance":
-        prompt = insurance_letter_prompt(analysis, form)
+        prompt = insurance_letter_prompt(analysis)
     else:
-        prompt = patient_letter_prompt(analysis, form)
+        prompt = patient_letter_prompt(analysis)
     
     obj, err = llm_json(prompt, temperature=0.3)
     
