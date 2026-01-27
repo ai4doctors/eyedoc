@@ -26,6 +26,29 @@ def init_db():
         print("Creating database tables...")
         db.create_all()
         print("✅ Database tables created successfully!")
+        
+        # Run migration for existing databases (adds new columns if missing)
+        try:
+            from sqlalchemy import text
+            # Check if pubmed_cache table exists
+            result = db.session.execute(text("SELECT to_regclass('pubmed_cache')"))
+            if result.scalar() is None:
+                print("Running job persistence migration...")
+                # Import and run migration
+                migration_path = os.path.join(os.path.dirname(__file__), 'migrations', '002_job_persistence.py')
+                if os.path.exists(migration_path):
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("migration", migration_path)
+                    migration = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(migration)
+                    migration.upgrade()
+                    print("✅ Migration complete!")
+                else:
+                    print("Migration file not found, skipping...")
+            else:
+                print("Migration already applied (pubmed_cache table exists)")
+        except Exception as e:
+            print(f"Migration skipped or failed (may not be needed): {e}")
 
 if __name__ == '__main__':
     init_db()

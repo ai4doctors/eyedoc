@@ -1,8 +1,6 @@
-# Maneiro.ai
+# Maneiro.ai - Clinical Documentation Assistant
 
-**AI-Powered Clinical Documentation Assistant**
-
-Transform clinical notes into professional referral letters, patient communications, and insurance documentation with AI-powered analysis.
+🏥 Transform clinical notes into professional referral letters with AI-powered analysis
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
@@ -10,29 +8,24 @@ Transform clinical notes into professional referral letters, patient communicati
 
 ## Features
 
-- **Document Analysis** - Extract structured data from clinical notes, PDFs, and images
-- **ICD-10 Coding** - Automatic diagnosis coding across 14+ medical specialties
-- **Letter Generation** - Create professional referral letters, patient letters, and insurance documentation
-- **Voice Recording** - Record and transcribe clinical encounters with AWS Transcribe
+- **Document Analysis** - Upload PDFs, images, or audio recordings for AI-powered clinical analysis
+- **Smart Extraction** - Automatic extraction of diagnoses, treatment plans, and clinical findings
+- **Letter Generation** - Generate professional referral letters, patient letters, and insurance documentation
 - **Evidence Citations** - Automatic PubMed references and clinical guideline citations
-- **Multi-tenant** - Organization-based access control with role management
-- **PDF Export** - Professional letterhead and signature support
+- **Multi-Language** - Support for English, Spanish, Portuguese, and French
+- **OCR Support** - Extract text from scanned documents and handwritten notes
+- **Audio Transcription** - AWS Transcribe integration for voice recordings
+- **Assistant Mode** - Triage incoming faxes and generate patient communications
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.11+
-- PostgreSQL 15+ (or Docker)
-- OpenAI API key
-- AWS account (optional, for S3/Transcribe)
-
-### Local Development
-
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/yourusername/maneiro-ai.git
 cd maneiro-ai
+
+# Start database with Docker
+docker-compose up -d postgres
 
 # Create virtual environment
 python3 -m venv venv
@@ -41,9 +34,6 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Start PostgreSQL (with Docker)
-docker-compose up -d postgres
-
 # Configure environment
 cp .env.example .env
 # Edit .env with your API keys
@@ -51,25 +41,33 @@ cp .env.example .env
 # Initialize database
 python init_db.py
 
-# Run development server
+# Run the application
 flask run
 ```
 
-Visit http://localhost:5000
+Visit: http://localhost:5000
 
-### First User Setup
+## Configuration
+
+Create a `.env` file with the following variables:
 
 ```bash
-flask shell
->>> from app import db
->>> from app.models import Organization, User, OrganizationPlan, UserRole
->>> org = Organization(name="My Clinic", slug="my-clinic", email="admin@clinic.com", plan=OrganizationPlan.TRIAL)
->>> db.session.add(org)
->>> db.session.flush()
->>> user = User(organization_id=org.id, username="admin", email="admin@clinic.com", first_name="Admin", last_name="User", role=UserRole.ADMIN)
->>> user.set_password("your-password")
->>> db.session.add(user)
->>> db.session.commit()
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/maneiro
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+
+# AWS (for audio transcription and file storage)
+AWS_S3_BUCKET=your-bucket-name
+AWS_REGION=us-west-2
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+
+# Application
+SECRET_KEY=your-secret-key
+FLASK_ENV=development
 ```
 
 ## Project Structure
@@ -77,83 +75,98 @@ flask shell
 ```
 maneiro-ai/
 ├── app/
-│   ├── __init__.py      # Flask app factory
-│   ├── api.py           # API endpoints
-│   ├── auth.py          # Authentication routes
-│   ├── models.py        # Database models
-│   ├── templates/       # Jinja2 templates
-│   │   ├── index.html
-│   │   ├── assistant.html
-│   │   └── auth/
+│   ├── __init__.py          # Application factory
+│   ├── api.py               # API endpoints
+│   ├── auth.py              # Authentication routes
+│   ├── models.py            # Database models
+│   ├── templates/           # Jinja2 templates
+│   │   ├── index.html       # Doctor view
+│   │   ├── assistant.html   # Assistant/staff view
+│   │   └── auth/            # Auth templates
 │   └── static/
-│       ├── css/
-│       ├── js/
-│       └── img/
-├── docs/                # Documentation
-├── migrations/          # Database migrations
-├── tests/              # Test suite
-├── config.py           # Configuration classes
-├── wsgi.py             # WSGI entry point
-├── Dockerfile          # Container definition
-├── docker-compose.yml  # Local services
-├── render.yaml         # Render deployment
-└── requirements.txt    # Python dependencies
+│       ├── css/app.css      # Styles
+│       ├── js/app.js        # Frontend logic
+│       └── img/             # Images
+├── docs/                    # Documentation
+├── tests/                   # Test suite
+├── config.py               # Configuration classes
+├── wsgi.py                 # WSGI entry point
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Container build
+├── docker-compose.yml      # Local development
+└── render.yaml             # Render deployment
 ```
+
+## Architecture
+
+### Multi-Tenant Design
+
+```
+Organization (Clinic)
+├── Users (Doctors, Staff)
+├── Jobs (Analysis tasks)
+└── Audit Logs (Compliance)
+```
+
+### User Roles
+
+- **Admin** - Full access, team management
+- **Doctor** - Clinical analysis and letter generation
+- **Staff** - Triage and patient communications
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/analyze_start` | POST | Start document analysis |
+| `/analyze_status` | GET | Check analysis progress |
+| `/generate_report` | POST | Generate referral letter |
+| `/triage_fax` | POST | Triage incoming communication |
+| `/generate_assistant_letter` | POST | Generate patient/insurance letter |
+| `/export_pdf` | POST | Export letter as PDF |
+| `/transcribe_start` | POST | Start audio transcription |
 
 ## Deployment
 
 ### Render (Recommended)
 
-1. Fork this repository
-2. Create new Web Service on Render
-3. Connect your GitHub repo
-4. Add PostgreSQL database
-5. Set environment variables
-6. Deploy
-
-See [render.yaml](render.yaml) for infrastructure-as-code configuration.
-
-### AWS App Runner
-
-```bash
-# Build and push to ECR
-aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin YOUR_ACCOUNT.dkr.ecr.us-east-2.amazonaws.com
-docker build -t maneiro .
-docker tag maneiro:latest YOUR_ACCOUNT.dkr.ecr.us-east-2.amazonaws.com/maneiroapp:latest
-docker push YOUR_ACCOUNT.dkr.ecr.us-east-2.amazonaws.com/maneiroapp:latest
-
-# Deploy via App Runner console or CLI
-```
+1. Connect your GitHub repository to Render
+2. Add PostgreSQL database
+3. Set environment variables
+4. Deploy automatically on push
 
 ### Docker
 
 ```bash
-docker build -t maneiro .
-docker run -p 5000:5000 --env-file .env maneiro
+docker build -t maneiro-ai .
+docker run -p 5000:5000 --env-file .env maneiro-ai
 ```
 
-## Configuration
+## Development
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `SECRET_KEY` | Flask secret key | Yes |
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `OPENAI_API_KEY` | OpenAI API key | Yes |
-| `OPENAI_MODEL` | Model name (default: gpt-4.1) | No |
-| `AWS_S3_BUCKET` | S3 bucket for file storage | No |
-| `AWS_REGION` | AWS region | No |
+### Running Tests
 
-## API Endpoints
+```bash
+pytest
+pytest --cov=app tests/  # With coverage
+```
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/analyze_start` | POST | Upload and analyze document |
-| `/analyze_status` | GET | Check analysis job status |
-| `/generate_report` | POST | Generate referral letter |
-| `/export_pdf` | POST | Export letter as PDF |
-| `/triage_fax` | POST | Triage incoming fax |
-| `/transcribe_start` | POST | Start audio transcription |
-| `/healthz` | GET | Health check |
+### Database Migrations
+
+```bash
+flask db migrate -m "Description"
+flask db upgrade
+```
+
+## Tech Stack
+
+- **Backend**: Flask 3.1, SQLAlchemy, Flask-Login
+- **Database**: PostgreSQL
+- **AI**: OpenAI GPT-4
+- **OCR**: Tesseract, PyMuPDF
+- **PDF**: ReportLab, PyPDF2
+- **Cloud**: AWS S3, AWS Transcribe
+- **Deployment**: Render, Docker
 
 ## Documentation
 
@@ -163,11 +176,11 @@ docker run -p 5000:5000 --env-file .env maneiro
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) file
 
 ## Support
 
-For issues and feature requests, please use GitHub Issues.
+For support, email support@maneiro.ai
 
 ---
 

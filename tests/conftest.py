@@ -1,6 +1,7 @@
 """
-Pytest fixtures for Maneiro.ai tests
+Test Configuration and Fixtures
 """
+import os
 import pytest
 from app import create_app, db
 from app.models import Organization, User, OrganizationPlan, UserRole
@@ -8,13 +9,14 @@ from app.models import Organization, User, OrganizationPlan, UserRole
 
 @pytest.fixture(scope='session')
 def app():
-    """Create application for testing."""
+    """Create application for testing"""
+    os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
+    os.environ['SECRET_KEY'] = 'test-secret-key'
+    os.environ['FLASK_ENV'] = 'development'
+    
     app = create_app('development')
-    app.config.update({
-        'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
-        'WTF_CSRF_ENABLED': False,
-    })
+    app.config['TESTING'] = True
+    app.config['WTF_CSRF_ENABLED'] = False
     
     with app.app_context():
         db.create_all()
@@ -22,61 +24,63 @@ def app():
         db.drop_all()
 
 
-@pytest.fixture
+@pytest.fixture(scope='function')
 def client(app):
-    """Create test client."""
+    """Create test client"""
     return app.test_client()
 
 
-@pytest.fixture
-def runner(app):
-    """Create CLI runner."""
-    return app.test_cli_runner()
-
-
-@pytest.fixture
-def org(app):
-    """Create test organization."""
+@pytest.fixture(scope='function')
+def session(app):
+    """Create database session for testing"""
     with app.app_context():
-        organization = Organization(
+        yield db.session
+        db.session.rollback()
+
+
+@pytest.fixture(scope='function')
+def test_org(app):
+    """Create test organization"""
+    with app.app_context():
+        org = Organization(
             name='Test Clinic',
             slug='test-clinic',
             email='test@clinic.com',
             plan=OrganizationPlan.TRIAL,
             max_monthly_jobs=50
         )
-        db.session.add(organization)
+        db.session.add(org)
         db.session.commit()
-        yield organization
-        db.session.delete(organization)
+        yield org
+        db.session.delete(org)
         db.session.commit()
 
 
-@pytest.fixture
-def user(app, org):
-    """Create test user."""
+@pytest.fixture(scope='function')
+def test_user(app, test_org):
+    """Create test user"""
     with app.app_context():
-        test_user = User(
-            organization_id=org.id,
+        user = User(
+            organization_id=test_org.id,
             username='testuser',
             email='test@example.com',
             first_name='Test',
             last_name='User',
             role=UserRole.ADMIN
         )
-        test_user.set_password('testpassword')
-        db.session.add(test_user)
+        user.set_password('testpassword123')
+        db.session.add(user)
         db.session.commit()
-        yield test_user
-        db.session.delete(test_user)
+        yield user
+        db.session.delete(user)
         db.session.commit()
 
 
-@pytest.fixture
-def auth_client(client, user):
-    """Create authenticated test client."""
+@pytest.fixture(scope='function')
+def authenticated_client(client, test_user):
+    """Create authenticated test client"""
     client.post('/login', data={
         'username': 'testuser',
-        'password': 'testpassword'
+        'password': 'testpassword123'
     })
     return client

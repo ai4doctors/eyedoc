@@ -9,255 +9,744 @@
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
   <style>
-    .modeToggle {
-      display: flex;
-      gap: 0;
-      margin-bottom: 20px;
+    :root {
+      --bg: #f6f8ff;
+      --bgAccent: #eef7f5;
+      --panel: #ffffff;
+      --panel2: #f3f6ff;
+      --text: #0b1226;
+      --muted: #51565b;
+      --border: #d8def0;
+      --primary: #9cd0c5;
+      --accent: #9cd0c5;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --info: #3b82f6;
     }
-    .modeBtn {
-      flex: 1;
-      padding: 14px 20px;
-      border: 1px solid var(--border);
-      background: var(--panel2);
-      color: var(--text);
+
+    body {
+      background: linear-gradient(135deg, var(--bgAccent) 0%, var(--bg) 50%, #f0f4ff 100%);
+      min-height: 100vh;
+    }
+
+    .assistantLayout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      grid-template-rows: 1fr auto;
+      min-height: calc(100vh - 60px);
+    }
+
+    /* Sidebar */
+    .assistantSidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .sidebarSection {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sidebarTitle {
+      font-size: 11px;
       font-weight: 700;
-      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      padding: 0 12px;
+    }
+
+    .navItem {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 12px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      transition: all 0.15s;
+    }
+
+    .navItem:hover {
+      background: var(--panel2);
+    }
+
+    .navItem.active {
+      background: linear-gradient(135deg, rgba(156,208,197,0.15), rgba(156,208,197,0.08));
+      color: #0d7a69;
+    }
+
+    .navItem svg {
+      width: 20px;
+      height: 20px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .navBadge {
+      margin-left: auto;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--primary);
+      color: white;
+    }
+
+    /* Main Content */
+    .assistantMain {
+      padding: 24px 32px;
+      overflow-y: auto;
+    }
+
+    /* Welcome Header */
+    .welcomeHeader {
+      margin-bottom: 28px;
+    }
+
+    .welcomeTitle {
+      font-size: 28px;
+      font-weight: 900;
+      margin: 0 0 6px 0;
+    }
+
+    .welcomeSubtitle {
+      color: var(--muted);
+      font-size: 16px;
+      margin: 0;
+    }
+
+    /* Stats Grid */
+    .statsGrid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .statCard {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .statIcon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .statIcon svg {
+      width: 22px;
+      height: 22px;
+      stroke: white;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .statIcon.blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+    .statIcon.green { background: linear-gradient(135deg, #10b981, #059669); }
+    .statIcon.purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+    .statIcon.orange { background: linear-gradient(135deg, #f59e0b, #d97706); }
+
+    .statValue {
+      font-size: 32px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .statLabel {
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    /* Quick Actions */
+    .quickActionsGrid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .quickActionCard {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .quickActionCard:hover {
+      border-color: var(--primary);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(156,208,197,0.15);
+    }
+
+    .quickActionIcon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--bgAccent), var(--panel2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .quickActionIcon svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--primary);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .quickActionTitle {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .quickActionDesc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    /* Work Area */
+    .workArea {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .workHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+    }
+
+    .workTabs {
+      display: flex;
+      gap: 4px;
+    }
+
+    .workTab {
+      padding: 10px 20px;
+      border-radius: 10px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 14px;
       cursor: pointer;
       transition: all 0.15s;
     }
-    .modeBtn:first-child {
-      border-radius: 14px 0 0 14px;
-    }
-    .modeBtn:last-child {
-      border-radius: 0 14px 14px 0;
-    }
-    .modeBtn.active {
-      background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
-      color: #fff;
-      border-color: rgba(118,185,173,1);
-    }
-    .modeBtn:not(.active):hover {
+
+    .workTab:hover {
       background: var(--panel);
     }
-    .assistantMain {
-      max-width: 900px;
-      margin: 0 auto;
+
+    .workTab.active {
+      background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
+      color: white;
+    }
+
+    .workBody {
       padding: 24px;
     }
+
+    /* Upload Area */
     .uploadArea {
       border: 2px dashed var(--border);
-      border-radius: 18px;
-      padding: 40px;
+      border-radius: 16px;
+      padding: 48px 32px;
       text-align: center;
-      margin-bottom: 24px;
-      background: var(--panel);
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
+      transition: all 0.2s;
+      background: linear-gradient(135deg, rgba(156,208,197,0.03), rgba(243,246,255,0.5));
     }
+
     .uploadArea:hover {
       border-color: var(--primary);
-      background: rgba(156,208,197,0.05);
+      background: rgba(156,208,197,0.08);
     }
+
     .uploadArea.dragover {
       border-color: var(--primary);
-      background: rgba(156,208,197,0.1);
+      background: rgba(156,208,197,0.12);
+      transform: scale(1.01);
     }
+
     .uploadIcon {
-      font-size: 48px;
-      margin-bottom: 12px;
+      font-size: 56px;
+      margin-bottom: 16px;
     }
+
     .uploadText {
       font-size: 18px;
       font-weight: 700;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
+
     .uploadHint {
       color: var(--muted);
       font-size: 14px;
     }
+
+    .uploadFormats {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 16px;
+    }
+
+    .formatBadge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      background: var(--panel2);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    /* Status Bar */
+    .statusBar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 20px;
+      background: linear-gradient(135deg, var(--panel2), var(--panel));
+      border-radius: 14px;
+      margin-top: 20px;
+    }
+
+    .statusText {
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .progressBarContainer {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progressBarFill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), #76b9ad);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    /* Output Sections */
     .outputSection {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 24px;
-      margin-bottom: 20px;
+      border-radius: 16px;
+      margin-top: 20px;
+      overflow: hidden;
     }
+
+    .outputHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel2);
+    }
+
     .outputTitle {
       font-size: 14px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: var(--muted);
-      margin-bottom: 12px;
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      gap: 8px;
     }
+
+    .outputTitle svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .outputBody {
+      padding: 20px;
+    }
+
     .outputContent {
-      font-size: 16px;
+      font-size: 15px;
       line-height: 1.6;
-      white-space: pre-wrap;
       min-height: 60px;
     }
+
     .outputContent:empty::before {
       content: "Results will appear here...";
       color: var(--muted);
       font-style: italic;
     }
-    .copyBtn {
-      padding: 6px 12px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
-      background: var(--panel2);
-      color: var(--text);
+
+    /* Triage Badges */
+    .triageHeader {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .triageBadge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      border-radius: 12px;
       font-size: 13px;
       font-weight: 700;
-      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
-    .copyBtn:hover {
-      background: var(--panel);
+
+    .triageBadge svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
     }
-    .taskItem {
-      padding: 10px 0;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
+
+    .triageBadge.docType {
+      background: rgba(59,130,246,0.1);
+      color: #1d4ed8;
+      border: 1px solid rgba(59,130,246,0.2);
     }
-    .taskItem:last-child {
-      border-bottom: none;
+
+    .triageBadge.docType.referral {
+      background: rgba(168,85,247,0.1);
+      color: #7c3aed;
+      border-color: rgba(168,85,247,0.2);
     }
-    .taskBullet {
-      color: var(--primary);
-      font-weight: 900;
+
+    .triageBadge.urgency {
+      background: rgba(16,185,129,0.1);
+      color: #059669;
+      border: 1px solid rgba(16,185,129,0.2);
     }
-    .letterTypeSelect {
-      margin-bottom: 20px;
+
+    .triageBadge.urgency.urgent {
+      background: rgba(239,68,68,0.1);
+      color: #dc2626;
+      border-color: rgba(239,68,68,0.2);
+      animation: pulse 2s ease-in-out infinite;
     }
-    .statusBar {
-      padding: 12px 16px;
+
+    .triageBadge.urgency.soon {
+      background: rgba(245,158,11,0.1);
+      color: #d97706;
+      border-color: rgba(245,158,11,0.2);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    /* Info Cards */
+    .infoCard {
       background: var(--panel2);
-      border-radius: 12px;
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .statusText {
-      font-weight: 700;
-    }
-    .hidden {
-      display: none !important;
-    }
-    .fromInfo {
-      background: rgba(156,208,197,0.1);
       border-left: 4px solid var(--primary);
-      padding: 16px;
+      padding: 16px 20px;
       border-radius: 0 12px 12px 0;
-      margin-bottom: 20px;
+      margin-bottom: 16px;
     }
-    .fromLabel {
-      font-size: 12px;
+
+    .infoCard.highlight {
+      background: rgba(245,158,11,0.08);
+      border-left-color: var(--warning);
+    }
+
+    .infoLabel {
+      font-size: 11px;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: var(--muted);
       margin-bottom: 4px;
     }
-    .fromValue {
+
+    .infoValue {
       font-size: 18px;
       font-weight: 700;
     }
+
+    .infoSubValue {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* Task Items */
+    .taskList {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .taskItem {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px 16px;
+      background: var(--panel2);
+      border-radius: 10px;
+      transition: all 0.15s;
+    }
+
+    .taskItem:hover {
+      background: rgba(156,208,197,0.1);
+    }
+
+    .taskItem.priority {
+      background: rgba(245,158,11,0.08);
+      border-left: 3px solid var(--warning);
+    }
+
+    .taskCheck {
+      width: 20px;
+      height: 20px;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      cursor: pointer;
+      flex-shrink: 0;
+      margin-top: 2px;
+      transition: all 0.15s;
+    }
+
+    .taskCheck:hover {
+      border-color: var(--primary);
+    }
+
+    .taskCheck.checked {
+      background: var(--primary);
+      border-color: var(--primary);
+    }
+
+    .taskText {
+      flex: 1;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Letter Generation Step 2 Controls */
+    .letterControls {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .letterControls.threeCol {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    /* Step 2 Section Styles */
+    .step2Section {
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(243,246,255,0.95));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 16px;
+    }
+
+    .step2Title {
+      font-size: 14px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      color: var(--text);
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .step2Grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .step2Grid .fullWidth {
+      grid-column: span 2;
+    }
+
+    @media (max-width: 1100px) {
+      .step2Grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .step2Grid .fullWidth {
+        grid-column: span 2;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .step2Grid {
+        grid-template-columns: 1fr;
+      }
+      .step2Grid .fullWidth {
+        grid-column: span 1;
+      }
+    }
+
+    .statusHint {
+      font-size: 14px;
+      color: var(--muted);
+      margin-left: 12px;
+    }
+
+    .controlGroup {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .controlLabel {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+    }
+
+    .ctrl {
+      height: 44px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      font-size: 15px;
+      color: var(--text);
+      outline: none;
+      transition: all 0.15s;
+    }
+
+    .ctrl:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(156,208,197,0.2);
+    }
+
+    /* Letter Output */
     .letterOutput {
       width: 100%;
-      min-height: 300px;
+      min-height: 360px;
       border-radius: 14px;
       border: 1px solid var(--border);
       background: var(--panel);
-      padding: 18px;
-      font-size: 16px;
-      line-height: 1.65;
+      padding: 20px;
+      font-size: 15px;
+      line-height: 1.7;
       font-family: inherit;
       resize: vertical;
     }
+
     .letterOutput:focus {
       outline: none;
-      box-shadow: 0 0 0 3px rgba(156,208,197,0.35);
-      border-color: rgba(156,208,197,0.75);
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(156,208,197,0.2);
     }
+
+    /* Action Buttons */
     .actionBar {
       display: flex;
       gap: 10px;
       justify-content: flex-end;
       margin-top: 16px;
     }
-    /* Enhanced triage styles */
-    .triageHeader {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .triageBadge {
-      display: inline-flex;
-      align-items: center;
-      padding: 8px 14px;
+
+    .btn {
+      padding: 10px 18px;
       border-radius: 10px;
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .triageBadge.docType {
-      background: rgba(59,130,246,0.12);
-      color: #1d4ed8;
-      border: 1px solid rgba(59,130,246,0.25);
-    }
-    .triageBadge.docType.referral { background: rgba(168,85,247,0.12); color: #7c3aed; border-color: rgba(168,85,247,0.25); }
-    .triageBadge.urgency {
-      background: rgba(156,208,197,0.15);
-      color: #0d7a69;
-      border: 1px solid rgba(156,208,197,0.3);
-    }
-    .triageBadge.urgency.urgent {
-      background: rgba(239,68,68,0.12);
-      color: #dc2626;
-      border-color: rgba(239,68,68,0.25);
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-    .triageBadge.urgency.soon {
-      background: rgba(245,158,11,0.12);
-      color: #d97706;
-      border-color: rgba(245,158,11,0.25);
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-    .fromSubValue {
-      font-size: 14px;
-      color: var(--muted);
-      margin-top: 4px;
-    }
-    .clinicalHighlight {
-      background: rgba(245,158,11,0.08);
-      border: 1px solid rgba(245,158,11,0.25);
-    }
-    .clinicalHighlight .outputTitle {
-      color: #d97706;
-    }
-    .clinicalContent {
+      border: 1px solid var(--border);
+      background: var(--panel);
       color: var(--text);
-      font-weight: 500;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
     }
-    .reasoningSection {
-      margin-bottom: 20px;
+
+    .btn:hover {
+      background: var(--panel2);
     }
-    .reasoningToggle {
+
+    .btn.primary {
+      background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
+      color: white;
+      border: none;
+      box-shadow: 0 4px 12px rgba(156,208,197,0.3);
+    }
+
+    .btn.primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(156,208,197,0.35);
+    }
+
+    .copyBtn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .copyBtn:hover {
+      background: var(--panel2);
+      color: var(--text);
+    }
+
+    /* Collapsible Sections */
+    .collapsibleToggle {
       display: flex;
       align-items: center;
       justify-content: space-between;
       width: 100%;
-      padding: 12px 16px;
+      padding: 14px 20px;
       background: var(--panel2);
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -265,25 +754,216 @@
       font-size: 14px;
       font-weight: 700;
       color: var(--muted);
+      margin-bottom: 12px;
     }
-    .reasoningToggle:hover {
+
+    .collapsibleToggle:hover {
       background: var(--panel);
     }
-    .reasoningContent {
-      padding: 16px;
+
+    .collapsibleContent {
+      padding: 16px 20px;
       background: var(--panel);
       border: 1px solid var(--border);
       border-top: none;
       border-radius: 0 0 12px 12px;
-      font-size: 14px;
-      color: var(--muted);
-      line-height: 1.5;
+      margin-top: -12px;
+      margin-bottom: 16px;
     }
-    .taskItem.priority {
-      background: rgba(245,158,11,0.05);
-      margin: 0 -12px;
-      padding: 10px 12px;
-      border-radius: 8px;
+
+    /* Recent Activity */
+    .recentList {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .recentItem {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      background: var(--panel2);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .recentItem:hover {
+      background: rgba(156,208,197,0.1);
+    }
+
+    .recentIcon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .recentIcon svg {
+      width: 20px;
+      height: 20px;
+      stroke: var(--muted);
+      stroke-width: 2;
+      fill: none;
+    }
+
+    .recentInfo {
+      flex: 1;
+    }
+
+    .recentTitle {
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    .recentMeta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .recentTime {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--text);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      display: none;
+      z-index: 100;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+
+    /* Hidden utility */
+    .hidden {
+      display: none !important;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .assistantLayout {
+        grid-template-columns: 1fr;
+      }
+      .assistantSidebar {
+        display: none;
+      }
+      .statsGrid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .quickActionsGrid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .statsGrid {
+        grid-template-columns: 1fr;
+      }
+      .quickActionsGrid {
+        grid-template-columns: 1fr;
+      }
+      .letterControls {
+        grid-template-columns: 1fr;
+      }
+      .assistantMain {
+        padding: 16px;
+      }
+    }
+    
+    /* Footer styles */
+    .assistantFooter {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--border);
+      padding: 12px 26px;
+      background: var(--panel);
+    }
+    .footerRow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+    }
+    .footerBrand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .footerLogo {
+      height: 22px;
+      width: auto;
+      opacity: 0.6;
+    }
+    .footerVersion {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .footerLinks {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .footerLink {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+      transition: color 0.15s;
+    }
+    .footerLink:hover {
+      color: var(--text);
+    }
+    .footerBtn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      font-family: inherit;
+    }
+    .footerDot {
+      color: var(--border);
+    }
+    .footerDisclaimer {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.3;
+      text-align: center;
+      flex: 1;
+    }
+    .footerCopyright {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      opacity: 0.7;
     }
   </style>
 </head>
@@ -291,7 +971,7 @@
   <header class="topBar">
     <div class="topBarLeft">
       <div class="brand">
-        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
+        <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" style="background:transparent !important" /></div>
       </div>
       {% if user %}
       <span class="orgName">{{ user.organization.name }}</span>
@@ -299,8 +979,7 @@
     </div>
 
     <div class="topBarRight">
-      <!-- Help button -->
-      <button class="topBtn" type="button" onclick="alert('Help documentation coming soon')">
+      <button class="topBtn" type="button" onclick="showHelp()">
         <svg viewBox="0 0 24 24"><path d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
         <span>Help</span>
       </button>
@@ -308,7 +987,6 @@
       <div class="topDivider"></div>
 
       {% if user %}
-      <!-- User dropdown -->
       <div class="dropdown" id="userDropdown">
         <button class="userMenuBtn" type="button" onclick="toggleDropdown('userDropdown')" aria-expanded="false">
           <span class="userInitials">{{ user.first_name[0] }}{{ user.last_name[0] }}</span>
@@ -341,140 +1019,485 @@
     </div>
   </header>
 
-  <div class="assistantMain">
-    <div class="modeToggle">
-      <button id="modeTriageBtn" class="modeBtn active" type="button">Triage Incoming Fax</button>
-      <button id="modeLetterBtn" class="modeBtn" type="button">Generate Letter</button>
-    </div>
-
-    <!-- Upload Area -->
-    <div id="uploadArea" class="uploadArea">
-      <div class="uploadIcon">ðŸ“„</div>
-      <div class="uploadText">Drop file here or click to upload</div>
-      <div class="uploadHint">PDF or image file</div>
-      <input type="file" id="fileInput" accept="application/pdf,image/*" style="display:none" />
-    </div>
-
-    <!-- Status -->
-    <div id="statusBar" class="statusBar hidden">
-      <span class="spinner"></span>
-      <span id="statusText" class="statusText">Processing...</span>
-    </div>
-
-    <!-- TRIAGE MODE OUTPUT -->
-    <div id="triageOutput" class="hidden">
-      <!-- Document type and urgency badges -->
-      <div class="triageHeader">
-        <span id="triageDocType" class="triageBadge docType">â€”</span>
-        <span id="triageUrgency" class="triageBadge urgency">â€”</span>
-      </div>
-
-      <div class="fromInfo">
-        <div class="fromLabel">From</div>
-        <div id="triageFrom" class="fromValue">â€”</div>
-        <div id="triageFromClinic" class="fromSubValue"></div>
-      </div>
-      
-      <div class="fromInfo" style="background: rgba(243,246,255,0.8); border-left-color: var(--border);">
-        <div class="fromLabel">Regarding</div>
-        <div id="triageRe" class="fromValue" style="font-size: 16px; font-weight: 600;">â€”</div>
-        <div id="triagePatientInfo" class="fromSubValue"></div>
-      </div>
-
-      <!-- Key clinical info (if any) -->
-      <div id="triageClinicalWrapper" class="outputSection clinicalHighlight hidden">
-        <div class="outputTitle">
-          <span>âš ï¸ Key Clinical Information</span>
-        </div>
-        <div id="triageClinicalInfo" class="outputContent clinicalContent"></div>
-      </div>
-
-      <!-- Reasoning (collapsible) -->
-      <div class="reasoningSection">
-        <button class="reasoningToggle" onclick="toggleReasoning()">
-          <span>AI Reasoning</span>
-          <span id="reasoningArrow">â–¸</span>
+  <div class="assistantLayout">
+    <!-- Sidebar Navigation -->
+    <aside class="assistantSidebar">
+      <div class="sidebarSection">
+        <div class="sidebarTitle">Workflows</div>
+        <button class="navItem active" onclick="showView('dashboard')">
+          <svg viewBox="0 0 24 24"><path d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></svg>
+          Dashboard
         </button>
-        <div id="triageReasoning" class="reasoningContent hidden"></div>
+        <button class="navItem" onclick="showView('triage')">
+          <svg viewBox="0 0 24 24"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/></svg>
+          Triage Fax
+          <span class="navBadge" id="triageCount">0</span>
+        </button>
+        <button class="navItem" onclick="showView('letter')">
+          <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+          Patient Letter
+        </button>
+        <button class="navItem" onclick="showView('insurance')">
+          <svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+          Insurance Letter
+        </button>
       </div>
 
-      <div class="outputSection">
-        <div class="outputTitle">
-          <span>Front Desk Actions</span>
-          <button class="copyBtn" onclick="copySection('triageFrontDesk')">Copy</button>
+      <div class="sidebarSection">
+        <div class="sidebarTitle">Templates</div>
+        <button class="navItem" onclick="useTemplate('soap')">
+          <svg viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          SOAP Note
+        </button>
+        <button class="navItem" onclick="useTemplate('referral')">
+          <svg viewBox="0 0 24 24"><path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
+          Referral Letter
+        </button>
+        <button class="navItem" onclick="useTemplate('followup')">
+          <svg viewBox="0 0 24 24"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+          Follow-up Note
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="assistantMain">
+      <!-- Dashboard View (Default) -->
+      <div id="dashboardView">
+        <div class="welcomeHeader">
+          <h1 class="welcomeTitle">Welcome back{% if user %}, {{ user.first_name }}{% endif %}</h1>
+          <p class="welcomeSubtitle">Here's what's happening with your clinical documentation today.</p>
         </div>
-        <div id="triageFrontDesk" class="outputContent"></div>
+
+        <!-- Stats -->
+        <div class="statsGrid">
+          <div class="statCard">
+            <div class="statIcon blue">
+              <svg viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+            </div>
+            <div class="statValue" id="statDocsToday">0</div>
+            <div class="statLabel">Documents Today</div>
+          </div>
+          <div class="statCard">
+            <div class="statIcon green">
+              <svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div class="statValue" id="statCompleted">0</div>
+            <div class="statLabel">Completed</div>
+          </div>
+          <div class="statCard">
+            <div class="statIcon purple">
+              <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+            </div>
+            <div class="statValue" id="statLetters">0</div>
+            <div class="statLabel">Letters Generated</div>
+          </div>
+          <div class="statCard">
+            <div class="statIcon orange">
+              <svg viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </div>
+            <div class="statValue" id="statAvgTime">--</div>
+            <div class="statLabel">Avg. Time Saved</div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quickActionsGrid">
+          <div class="quickActionCard" onclick="showView('triage')">
+            <div class="quickActionIcon">
+              <svg viewBox="0 0 24 24"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"/></svg>
+            </div>
+            <div class="quickActionTitle">Triage Incoming Fax</div>
+            <div class="quickActionDesc">Automatically classify and create action items from incoming faxes and documents.</div>
+          </div>
+          <div class="quickActionCard" onclick="showView('letter')">
+            <div class="quickActionIcon">
+              <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+            </div>
+            <div class="quickActionTitle">Patient Letter</div>
+            <div class="quickActionDesc">Generate warm, patient-friendly letters explaining exam findings and next steps.</div>
+          </div>
+          <div class="quickActionCard" onclick="showView('insurance')">
+            <div class="quickActionIcon">
+              <svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>
+            </div>
+            <div class="quickActionTitle">Insurance Letter</div>
+            <div class="quickActionDesc">Create prior authorization and medical necessity letters with proper clinical language.</div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="workArea">
+          <div class="workHeader">
+            <span style="font-weight: 700;">Recent Activity</span>
+            <button class="btn" onclick="clearRecent()">Clear All</button>
+          </div>
+          <div class="workBody">
+            <div id="recentActivity" class="recentList">
+              <div style="text-align: center; color: var(--muted); padding: 40px;">
+                <svg viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border); stroke-width: 1.5; fill: none; margin-bottom: 12px;"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+                <p style="margin: 0;">No recent activity yet.<br>Upload a document to get started.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="outputSection">
-        <div class="outputTitle">
-          <span>Doctor Actions</span>
-          <button class="copyBtn" onclick="copySection('triageDoctor')">Copy</button>
+      <!-- Triage View -->
+      <div id="triageView" class="hidden">
+        <div class="welcomeHeader">
+          <h1 class="welcomeTitle">Triage Incoming Fax</h1>
+          <p class="welcomeSubtitle">Upload a fax or document to automatically classify and create action items.</p>
         </div>
-        <div id="triageDoctor" class="outputContent"></div>
-      </div>
-    </div>
 
-    <!-- LETTER MODE OUTPUT -->
-    <div id="letterOutput" class="hidden">
-      <div class="letterTypeSelect">
-        <label class="fieldLabel" for="letterType">Letter Type</label>
-        <select id="letterType" class="ctrl">
-          <option value="patient">Patient Letter</option>
-          <option value="insurance">Insurance Letter</option>
-        </select>
+        <div class="workArea">
+          <div class="workBody">
+            <div id="triageUpload" class="uploadArea">
+              <div class="uploadIcon">📄</div>
+              <div class="uploadText">Drop file here or click to upload</div>
+              <div class="uploadHint">PDF or image file from your fax machine or scanner</div>
+              <div class="uploadFormats">
+                <span class="formatBadge">PDF</span>
+                <span class="formatBadge">PNG</span>
+                <span class="formatBadge">JPG</span>
+                <span class="formatBadge">TIFF</span>
+              </div>
+              <input type="file" id="triageFileInput" accept="application/pdf,image/*" style="display:none" />
+            </div>
+
+            <div id="triageStatusBar" class="statusBar hidden">
+              <span class="spinner"></span>
+              <span id="triageStatusText" class="statusText">Processing...</span>
+              <div class="progressBarContainer">
+                <div id="triageProgressFill" class="progressBarFill" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div id="triageResults" class="hidden">
+              <!-- Badges -->
+              <div class="triageHeader">
+                <span id="triageDocType" class="triageBadge docType">
+                  <svg viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+                  Document
+                </span>
+                <span id="triageUrgency" class="triageBadge urgency">
+                  <svg viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  Routine
+                </span>
+              </div>
+
+              <!-- From/Regarding Info -->
+              <div class="infoCard">
+                <div class="infoLabel">From</div>
+                <div id="triageFrom" class="infoValue">—</div>
+                <div id="triageFromClinic" class="infoSubValue"></div>
+              </div>
+
+              <div class="infoCard" style="border-left-color: var(--info);">
+                <div class="infoLabel">Regarding</div>
+                <div id="triageRe" class="infoValue">—</div>
+                <div id="triagePatientInfo" class="infoSubValue"></div>
+              </div>
+
+              <!-- Clinical Info (if present) -->
+              <div id="triageClinicalWrapper" class="infoCard highlight hidden">
+                <div class="infoLabel">⚠️ Key Clinical Information</div>
+                <div id="triageClinicalInfo" class="infoValue" style="font-size: 15px; font-weight: 500;"></div>
+              </div>
+
+              <!-- AI Reasoning (collapsible) -->
+              <button class="collapsibleToggle" onclick="toggleReasoning()">
+                <span>🤖 AI Reasoning</span>
+                <span id="reasoningArrow">▸</span>
+              </button>
+              <div id="triageReasoning" class="collapsibleContent hidden"></div>
+
+              <!-- Action Items -->
+              <div class="outputSection">
+                <div class="outputHeader">
+                  <span class="outputTitle">
+                    <svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Front Desk Actions
+                  </span>
+                  <button class="copyBtn" onclick="copySection('triageFrontDesk')">Copy</button>
+                </div>
+                <div class="outputBody">
+                  <div id="triageFrontDesk" class="taskList"></div>
+                </div>
+              </div>
+
+              <div class="outputSection">
+                <div class="outputHeader">
+                  <span class="outputTitle">
+                    <svg viewBox="0 0 24 24"><path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+                    Doctor Actions
+                  </span>
+                  <button class="copyBtn" onclick="copySection('triageDoctor')">Copy</button>
+                </div>
+                <div class="outputBody">
+                  <div id="triageDoctor" class="taskList"></div>
+                </div>
+              </div>
+
+              <div class="actionBar">
+                <button class="btn" onclick="resetTriage()">New Document</button>
+                <button class="btn primary" onclick="printTriage()">Print Summary</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="outputSection">
-        <div class="outputTitle">
-          <span>Generated Letter</span>
+      <!-- Letter View -->
+      <div id="letterView" class="hidden">
+        <div class="welcomeHeader">
+          <h1 class="welcomeTitle">Patient Letter</h1>
+          <p class="welcomeSubtitle">Generate a warm, patient-friendly letter explaining their visit and care plan.</p>
         </div>
-        <textarea id="letterText" class="letterOutput" placeholder="Letter will appear here after processing..."></textarea>
-        <div class="actionBar">
-          <button class="btn" onclick="copyLetter()">Copy</button>
-          <button class="btn" onclick="exportLetterPdf()">Export PDF</button>
+
+        <div class="workArea">
+          <div class="workBody">
+            <div id="letterUpload" class="uploadArea">
+              <div class="uploadIcon">📋</div>
+              <div class="uploadText">Upload exam notes or clinical document</div>
+              <div class="uploadHint">We'll extract the information and generate a personalized patient letter</div>
+              <div class="uploadFormats">
+                <span class="formatBadge">PDF</span>
+                <span class="formatBadge">PNG</span>
+                <span class="formatBadge">JPG</span>
+              </div>
+              <input type="file" id="letterFileInput" accept="application/pdf,image/*" style="display:none" />
+            </div>
+
+            <div id="letterStatusBar" class="statusBar hidden">
+              <span class="spinner"></span>
+              <span id="letterStatusText" class="statusText">Processing...</span>
+              <div class="progressBarContainer">
+                <div id="letterProgressFill" class="progressBarFill" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div id="letterControls" class="hidden">
+              <!-- Step 2 Controls (matching doctor view) -->
+              <div class="step2Section">
+                <div class="step2Title">STEP 2: CUSTOMIZE LETTER</div>
+                
+                <div class="step2Grid">
+                  <div class="controlGroup">
+                    <label class="controlLabel">Document Type</label>
+                    <select id="letterRecipientType" class="ctrl">
+                      <option value="Patient" selected>Patient</option>
+                      <option value="Family physician">Family Physician</option>
+                      <option value="Specialist">Specialist</option>
+                      <option value="Insurance">Insurance</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Output Language</label>
+                    <select id="letterLang" class="ctrl">
+                      <option value="en">English</option>
+                      <option value="es">Spanish</option>
+                      <option value="pt">Portuguese</option>
+                      <option value="fr">French</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">To</label>
+                    <input id="letterTo" class="ctrl" placeholder="Recipient name" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">From</label>
+                    <input id="letterFrom" class="ctrl" placeholder="Provider name" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Reason</label>
+                    <select id="letterReasonDx" class="ctrl">
+                      <option value="">Select diagnosis...</option>
+                    </select>
+                    <input id="letterReasonOther" class="ctrl hidden" placeholder="Other reason" style="margin-top:8px" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Referral Focus</label>
+                    <select id="letterReasonFocus" class="ctrl" disabled>
+                      <option value="">Select focus...</option>
+                    </select>
+                    <input id="letterFocusOther" class="ctrl hidden" placeholder="Other focus" style="margin-top:8px" />
+                  </div>
+                  
+                  <div class="controlGroup fullWidth">
+                    <label class="controlLabel">Special Requests</label>
+                    <input id="letterInstructions" class="ctrl" placeholder="e.g., Emphasize importance of follow-up, include specific instructions" />
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Tone</label>
+                    <select id="letterTone" class="ctrl">
+                      <option value="warm">Warm & Reassuring</option>
+                      <option value="professional">Professional</option>
+                      <option value="simple">Simple & Clear</option>
+                    </select>
+                  </div>
+                  
+                  <div class="controlGroup">
+                    <label class="controlLabel">Detail Level</label>
+                    <select id="letterDetail" class="ctrl">
+                      <option value="brief">Brief Summary</option>
+                      <option value="standard" selected>Standard</option>
+                      <option value="detailed">Detailed Explanation</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="actionBar" style="justify-content: flex-start; margin-top: 20px;">
+                  <button class="btn primary" onclick="generatePatientLetter()">Generate Letter</button>
+                  <span id="letterGenerateStatus" class="statusHint"></span>
+                </div>
+              </div>
+            </div>
+
+            <div id="letterOutput" class="hidden">
+              <div class="outputSection">
+                <div class="outputHeader">
+                  <span class="outputTitle">Generated Letter</span>
+                  <button class="copyBtn" onclick="copyLetter()">Copy</button>
+                </div>
+                <div class="outputBody">
+                  <textarea id="letterText" class="letterOutput" placeholder="Letter will appear here..."></textarea>
+                </div>
+              </div>
+              <div class="actionBar">
+                <button class="btn" onclick="resetLetter()">Start Over</button>
+                <button class="btn" onclick="copyLetter()">Copy to Clipboard</button>
+                <button class="btn primary" onclick="exportLetterPdf()">Export PDF</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+
+      <!-- Insurance View -->
+      <div id="insuranceView" class="hidden">
+        <div class="welcomeHeader">
+          <h1 class="welcomeTitle">Insurance Letter</h1>
+          <p class="welcomeSubtitle">Generate prior authorization and medical necessity letters.</p>
+        </div>
+
+        <div class="workArea">
+          <div class="workBody">
+            <div id="insuranceUpload" class="uploadArea">
+              <div class="uploadIcon">🛡️</div>
+              <div class="uploadText">Upload clinical documentation</div>
+              <div class="uploadHint">We'll extract diagnoses and create a medical necessity letter</div>
+              <div class="uploadFormats">
+                <span class="formatBadge">PDF</span>
+                <span class="formatBadge">PNG</span>
+                <span class="formatBadge">JPG</span>
+              </div>
+              <input type="file" id="insuranceFileInput" accept="application/pdf,image/*" style="display:none" />
+            </div>
+
+            <div id="insuranceStatusBar" class="statusBar hidden">
+              <span class="spinner"></span>
+              <span id="insuranceStatusText" class="statusText">Processing...</span>
+              <div class="progressBarContainer">
+                <div id="insuranceProgressFill" class="progressBarFill" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div id="insuranceControls" class="hidden">
+              <div class="letterControls threeCol">
+                <div class="controlGroup">
+                  <label class="controlLabel">Letter Type</label>
+                  <select id="insuranceType" class="ctrl">
+                    <option value="prior_auth">Prior Authorization</option>
+                    <option value="medical_necessity">Medical Necessity</option>
+                    <option value="appeal">Appeal Letter</option>
+                  </select>
+                </div>
+                <div class="controlGroup">
+                  <label class="controlLabel">Treatment/Procedure</label>
+                  <input id="insuranceProcedure" class="ctrl" placeholder="e.g., Cataract surgery" />
+                </div>
+                <div class="controlGroup">
+                  <label class="controlLabel">Insurance Company</label>
+                  <input id="insuranceCompany" class="ctrl" placeholder="e.g., Blue Cross" />
+                </div>
+              </div>
+
+              <div class="letterControls">
+                <div class="controlGroup">
+                  <label class="controlLabel">From (Provider)</label>
+                  <input id="insuranceFrom" class="ctrl" placeholder="Dr. Smith, MD" />
+                </div>
+                <div class="controlGroup">
+                  <label class="controlLabel">Additional Clinical Justification</label>
+                  <input id="insuranceJustification" class="ctrl" placeholder="e.g., Previous treatments failed" />
+                </div>
+              </div>
+
+              <div class="actionBar" style="justify-content: flex-start; margin-bottom: 20px;">
+                <button class="btn primary" onclick="generateInsuranceLetter()">Generate Letter</button>
+              </div>
+            </div>
+
+            <div id="insuranceOutput" class="hidden">
+              <div class="outputSection">
+                <div class="outputHeader">
+                  <span class="outputTitle">Generated Letter</span>
+                  <button class="copyBtn" onclick="copyInsurance()">Copy</button>
+                </div>
+                <div class="outputBody">
+                  <textarea id="insuranceText" class="letterOutput" placeholder="Letter will appear here..."></textarea>
+                </div>
+              </div>
+              <div class="actionBar">
+                <button class="btn" onclick="resetInsurance()">Start Over</button>
+                <button class="btn" onclick="copyInsurance()">Copy to Clipboard</button>
+                <button class="btn primary" onclick="exportInsurancePdf()">Export PDF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+    
+    <!-- Footer -->
+    <footer class="assistantFooter">
+      <div class="footerRow">
+        <div class="footerBrand">
+          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" />
+          <span class="footerVersion">v2026.8</span>
+        </div>
+        <div class="footerDisclaimer">
+          Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
+        </div>
+        <div class="footerLinks">
+          <a href="/cdn-cgi/l/email-protection#691a1c1919061b1d290408070c001b06470800" class="footerLink">Contact Support</a>
+        </div>
+      </div>
+    </footer>
   </div>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast"></div>
 
   <script>
-    let currentMode = 'triage';
-    let jobId = '';
+    // State
+    let currentView = 'dashboard';
+    let triageJobId = '';
+    let letterJobId = '';
+    let insuranceJobId = '';
+    let triageAnalysis = null;
+    let letterAnalysis = null;
+    let insuranceAnalysis = null;
+    let stats = { docsToday: 0, completed: 0, letters: 0 };
 
     function el(id) { return document.getElementById(id); }
-
-    // Dropdown functionality
-    function toggleDropdown(id) {
-      const dropdown = document.getElementById(id);
-      if (!dropdown) return;
-      
-      const wasOpen = dropdown.classList.contains('open');
-      closeAllDropdowns();
-      
-      if (!wasOpen) {
-        dropdown.classList.add('open');
-        const btn = dropdown.querySelector('button');
-        if (btn) btn.setAttribute('aria-expanded', 'true');
-      }
-    }
-
-    function closeAllDropdowns() {
-      document.querySelectorAll('.dropdown.open').forEach(d => {
-        d.classList.remove('open');
-        const btn = d.querySelector('button');
-        if (btn) btn.setAttribute('aria-expanded', 'false');
-      });
-    }
-
-    // Close dropdowns when clicking outside
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('.dropdown')) {
-        closeAllDropdowns();
-      }
-    });
 
     function toast(msg) {
       const t = el('toast');
@@ -483,60 +1506,68 @@
       setTimeout(() => { t.style.display = 'none'; }, 2400);
     }
 
-    function showStatus(msg) {
-      el('statusBar').classList.remove('hidden');
-      el('statusText').textContent = msg;
+    // Dropdown
+    function toggleDropdown(id) {
+      const dropdown = document.getElementById(id);
+      if (!dropdown) return;
+      const wasOpen = dropdown.classList.contains('open');
+      closeAllDropdowns();
+      if (!wasOpen) {
+        dropdown.classList.add('open');
+      }
     }
 
-    function hideStatus() {
-      el('statusBar').classList.add('hidden');
+    function closeAllDropdowns() {
+      document.querySelectorAll('.dropdown.open').forEach(d => d.classList.remove('open'));
     }
 
-    // Mode toggle
-    el('modeTriageBtn').addEventListener('click', () => {
-      currentMode = 'triage';
-      el('modeTriageBtn').classList.add('active');
-      el('modeLetterBtn').classList.remove('active');
-      el('triageOutput').classList.add('hidden');
-      el('letterOutput').classList.add('hidden');
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.dropdown')) closeAllDropdowns();
     });
 
-    el('modeLetterBtn').addEventListener('click', () => {
-      currentMode = 'letter';
-      el('modeLetterBtn').classList.add('active');
-      el('modeTriageBtn').classList.remove('active');
-      el('triageOutput').classList.add('hidden');
-      el('letterOutput').classList.add('hidden');
-    });
+    // View Management
+    function showView(view) {
+      currentView = view;
+      
+      // Update nav
+      document.querySelectorAll('.navItem').forEach(n => n.classList.remove('active'));
+      const navMap = { 'dashboard': 0, 'triage': 1, 'letter': 2, 'insurance': 3 };
+      document.querySelectorAll('.sidebarSection')[0].querySelectorAll('.navItem')[navMap[view]]?.classList.add('active');
 
-    // File upload
-    el('uploadArea').addEventListener('click', () => el('fileInput').click());
-    
-    el('uploadArea').addEventListener('dragover', (e) => {
-      e.preventDefault();
-      el('uploadArea').classList.add('dragover');
-    });
+      // Show/hide views
+      ['dashboardView', 'triageView', 'letterView', 'insuranceView'].forEach(v => {
+        el(v).classList.add('hidden');
+      });
+      el(view + 'View').classList.remove('hidden');
+    }
 
-    el('uploadArea').addEventListener('dragleave', () => {
-      el('uploadArea').classList.remove('dragover');
-    });
+    // Upload handling
+    function setupUpload(uploadId, fileInputId, onFile) {
+      const upload = el(uploadId);
+      const input = el(fileInputId);
+      
+      upload.addEventListener('click', () => input.click());
+      upload.addEventListener('dragover', (e) => { e.preventDefault(); upload.classList.add('dragover'); });
+      upload.addEventListener('dragleave', () => upload.classList.remove('dragover'));
+      upload.addEventListener('drop', (e) => {
+        e.preventDefault();
+        upload.classList.remove('dragover');
+        if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);
+      });
+      input.addEventListener('change', (e) => {
+        if (e.target.files[0]) onFile(e.target.files[0]);
+      });
+    }
 
-    el('uploadArea').addEventListener('drop', (e) => {
-      e.preventDefault();
-      el('uploadArea').classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
-    });
+    // Triage
+    setupUpload('triageUpload', 'triageFileInput', handleTriageFile);
 
-    el('fileInput').addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) handleFile(file);
-    });
-
-    async function handleFile(file) {
-      showStatus('Uploading...');
-      el('triageOutput').classList.add('hidden');
-      el('letterOutput').classList.add('hidden');
+    async function handleTriageFile(file) {
+      el('triageUpload').classList.add('hidden');
+      el('triageStatusBar').classList.remove('hidden');
+      el('triageResults').classList.add('hidden');
+      el('triageStatusText').textContent = 'Uploading...';
+      el('triageProgressFill').style.width = '10%';
 
       const fd = new FormData();
       fd.append('file', file);
@@ -544,156 +1575,152 @@
       try {
         const res = await fetch('/analyze_start', { method: 'POST', body: fd });
         const json = await res.json();
-        
-        if (!json.ok) {
-          hideStatus();
-          toast(json.error || 'Upload failed');
-          return;
-        }
-
-        jobId = json.job_id;
-        showStatus('Analyzing...');
-        pollAnalysis();
+        if (!json.ok) throw new Error(json.error);
+        triageJobId = json.job_id;
+        pollTriageAnalysis();
       } catch (e) {
-        hideStatus();
-        toast('Upload failed');
+        toast(e.message || 'Upload failed');
+        resetTriage();
       }
     }
 
-    async function pollAnalysis() {
+    async function pollTriageAnalysis() {
       try {
-        const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`);
+        const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(triageJobId)}`);
         const json = await res.json();
 
-        if (!json.ok) {
-          hideStatus();
-          toast(json.error || 'Analysis failed');
+        if (json.status === 'processing' || json.status === 'waiting') {
+          el('triageStatusText').textContent = json.stage_label || 'Processing...';
+          el('triageProgressFill').style.width = (json.progress || 20) + '%';
+          setTimeout(pollTriageAnalysis, 1000);
           return;
         }
 
-        const status = json.status || 'waiting';
+        if (json.status === 'error') throw new Error(json.error);
 
-        if (status === 'processing' || status === 'waiting') {
-          setTimeout(pollAnalysis, 1200);
-          return;
-        }
-
-        if (status === 'error') {
-          hideStatus();
-          toast(json.error || 'Analysis failed');
-          return;
-        }
-
-        if (status === 'complete') {
-          const analysis = json.data || {};
-          
-          if (currentMode === 'triage') {
-            await runTriage(analysis);
-          } else {
-            await runLetterGeneration(analysis);
-          }
+        if (json.status === 'complete') {
+          triageAnalysis = json.data;
+          el('triageProgressFill').style.width = '100%';
+          el('triageStatusText').textContent = 'Running triage...';
+          await runTriage();
         }
       } catch (e) {
-        setTimeout(pollAnalysis, 2000);
+        toast(e.message || 'Analysis failed');
+        resetTriage();
       }
     }
 
-    async function runTriage(analysis) {
-      showStatus('Generating triage...');
-
+    async function runTriage() {
       try {
         const res = await fetch('/triage_fax', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ analysis })
+          body: JSON.stringify({ analysis: triageAnalysis })
         });
         const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
 
-        hideStatus();
+        // Update stats
+        stats.docsToday++;
+        stats.completed++;
+        updateStats();
 
-        if (!json.ok) {
-          toast(json.error || 'Triage failed');
-          return;
-        }
-
-        // Document type badge
-        const docTypeEl = el('triageDocType');
-        const docType = json.document_type || 'UNKNOWN';
-        docTypeEl.textContent = formatDocType(docType);
-        docTypeEl.className = 'triageBadge docType' + (docType.includes('REFERRAL') ? ' referral' : '');
-        
-        // Urgency badge
-        const urgencyEl = el('triageUrgency');
-        const urgency = (json.urgency || 'ROUTINE').toUpperCase();
-        urgencyEl.textContent = urgency;
-        urgencyEl.className = 'triageBadge urgency ' + urgency.toLowerCase();
-        
-        // From info
-        el('triageFrom').textContent = json.from_provider || json.from || 'â€”';
-        const fromClinic = el('triageFromClinic');
-        if (json.from_clinic) {
-          fromClinic.textContent = json.from_clinic;
-          fromClinic.style.display = 'block';
-        } else {
-          fromClinic.style.display = 'none';
-        }
-        
-        // Regarding
-        el('triageRe').textContent = json.regarding || 'â€”';
-        const patientInfo = el('triagePatientInfo');
-        if (json.patient_name || json.patient_dob) {
-          let info = '';
-          if (json.patient_name) info += json.patient_name;
-          if (json.patient_dob) info += (info ? ' Â· DOB: ' : 'DOB: ') + json.patient_dob;
-          patientInfo.textContent = info;
-          patientInfo.style.display = 'block';
-        } else {
-          patientInfo.style.display = 'none';
-        }
-        
-        // Clinical info (show only if present)
-        const clinicalWrapper = el('triageClinicalWrapper');
-        const clinicalInfo = el('triageClinicalInfo');
-        if (json.key_clinical_info && json.key_clinical_info.trim()) {
-          clinicalInfo.textContent = json.key_clinical_info;
-          clinicalWrapper.classList.remove('hidden');
-        } else {
-          clinicalWrapper.classList.add('hidden');
-        }
-        
-        // Reasoning (collapsed by default)
-        const reasoningEl = el('triageReasoning');
-        if (json.reasoning) {
-          reasoningEl.textContent = json.reasoning;
-          reasoningEl.classList.add('hidden');
-          el('reasoningArrow').textContent = 'â–¸';
-        }
-        
-        // Tasks
-        el('triageFrontDesk').innerHTML = formatTasks(json.front_desk_tasks || [], docType.includes('REFERRAL'));
-        el('triageDoctor').innerHTML = formatTasks(json.doctor_tasks || [], false);
-        el('triageOutput').classList.remove('hidden');
-        
-        toast('Triage complete');
+        // Display results
+        displayTriageResults(json);
       } catch (e) {
-        hideStatus();
-        toast('Triage failed');
+        toast(e.message || 'Triage failed');
+        resetTriage();
       }
     }
 
-    function formatDocType(docType) {
-      const map = {
-        'REFERRAL_REQUEST': 'ðŸ“¨ Referral Request',
-        'CONSULTATION_REPORT': 'ðŸ“‹ Consultation Report',
-        'LAB_RESULTS': 'ðŸ”¬ Lab Results',
-        'INSURANCE': 'ðŸ“„ Insurance',
-        'RECORDS_REQUEST': 'ðŸ“ Records Request',
-        'PRESCRIPTION': 'ðŸ’Š Prescription',
-        'CORRESPONDENCE': 'âœ‰ï¸ Correspondence',
-        'MARKETING': 'ðŸ“° Marketing',
-        'OTHER': 'ðŸ“„ Document'
+    function displayTriageResults(data) {
+      el('triageStatusBar').classList.add('hidden');
+      el('triageResults').classList.remove('hidden');
+
+      // Doc type badge
+      const docTypeEl = el('triageDocType');
+      const docType = data.document_type || 'DOCUMENT';
+      docTypeEl.innerHTML = formatDocTypeIcon(docType) + ' ' + formatDocType(docType);
+      docTypeEl.className = 'triageBadge docType' + (docType.includes('REFERRAL') ? ' referral' : '');
+
+      // Urgency badge
+      const urgencyEl = el('triageUrgency');
+      const urgency = (data.urgency || 'ROUTINE').toUpperCase();
+      urgencyEl.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${urgency}`;
+      urgencyEl.className = 'triageBadge urgency ' + urgency.toLowerCase();
+
+      // From info
+      el('triageFrom').textContent = data.from_provider || data.from || '—';
+      el('triageFromClinic').textContent = data.from_clinic || '';
+
+      // Regarding
+      el('triageRe').textContent = data.regarding || '—';
+      const patientInfo = [];
+      if (data.patient_name) patientInfo.push(data.patient_name);
+      if (data.patient_dob) patientInfo.push('DOB: ' + data.patient_dob);
+      el('triagePatientInfo').textContent = patientInfo.join(' · ');
+
+      // Clinical info
+      if (data.key_clinical_info) {
+        el('triageClinicalWrapper').classList.remove('hidden');
+        el('triageClinicalInfo').textContent = data.key_clinical_info;
+      } else {
+        el('triageClinicalWrapper').classList.add('hidden');
+      }
+
+      // Reasoning
+      if (data.reasoning) {
+        el('triageReasoning').textContent = data.reasoning;
+      }
+
+      // Tasks
+      el('triageFrontDesk').innerHTML = formatTasks(data.front_desk_tasks || [], docType.includes('REFERRAL'));
+      el('triageDoctor').innerHTML = formatTasks(data.doctor_tasks || [], false);
+
+      // Add to recent
+      addRecentActivity('triage', data.regarding || 'Document triaged', data.urgency);
+    }
+
+    function formatDocTypeIcon(type) {
+      const icons = {
+        'REFERRAL_REQUEST': '<svg viewBox="0 0 24 24"><path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>',
+        'CONSULTATION_REPORT': '<svg viewBox="0 0 24 24"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08"/></svg>',
+        'LAB_RESULTS': '<svg viewBox="0 0 24 24"><path d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg>'
       };
-      return map[docType] || docType;
+      return icons[type] || '<svg viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>';
+    }
+
+    function formatDocType(type) {
+      const map = {
+        'REFERRAL_REQUEST': 'Referral Request',
+        'CONSULTATION_REPORT': 'Consultation Report',
+        'LAB_RESULTS': 'Lab Results',
+        'INSURANCE': 'Insurance',
+        'RECORDS_REQUEST': 'Records Request',
+        'PRESCRIPTION': 'Prescription',
+        'CORRESPONDENCE': 'Correspondence',
+        'MARKETING': 'Marketing',
+        'OTHER': 'Document'
+      };
+      return map[type] || type;
+    }
+
+    function formatTasks(tasks, highlightFirst) {
+      if (!tasks.length) return '<div style="color: var(--muted); padding: 12px;">No actions required</div>';
+      return tasks.map((t, i) => `
+        <div class="taskItem${highlightFirst && i === 0 ? ' priority' : ''}">
+          <div class="taskCheck" onclick="toggleTask(this)"></div>
+          <div class="taskText">${escapeHtml(t)}</div>
+        </div>
+      `).join('');
+    }
+
+    function toggleTask(el) {
+      el.classList.toggle('checked');
+    }
+
+    function escapeHtml(s) {
+      return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     function toggleReasoning() {
@@ -701,94 +1728,548 @@
       const arrow = el('reasoningArrow');
       if (content.classList.contains('hidden')) {
         content.classList.remove('hidden');
-        arrow.textContent = 'â–¾';
+        arrow.textContent = '▾';
       } else {
         content.classList.add('hidden');
-        arrow.textContent = 'â–¸';
+        arrow.textContent = '▸';
       }
     }
 
-    function formatTasks(tasks, highlightFirst) {
-      if (!tasks.length) return '<span style="color: var(--muted)">No actions required</span>';
-      return tasks.map((t, i) => {
-        const priorityClass = (highlightFirst && i === 0) ? ' priority' : '';
-        return `<div class="taskItem${priorityClass}"><span class="taskBullet">â€¢</span><span>${escapeHtml(t)}</span></div>`;
-      }).join('');
+    function resetTriage() {
+      triageJobId = '';
+      triageAnalysis = null;
+      el('triageUpload').classList.remove('hidden');
+      el('triageStatusBar').classList.add('hidden');
+      el('triageResults').classList.add('hidden');
+      el('triageFileInput').value = '';
     }
 
-    function escapeHtml(s) {
-      return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Letter generation
+    setupUpload('letterUpload', 'letterFileInput', handleLetterFile);
+
+    async function handleLetterFile(file) {
+      el('letterUpload').classList.add('hidden');
+      el('letterStatusBar').classList.remove('hidden');
+      el('letterControls').classList.add('hidden');
+      el('letterOutput').classList.add('hidden');
+      el('letterStatusText').textContent = 'Uploading...';
+      el('letterProgressFill').style.width = '10%';
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      try {
+        const res = await fetch('/analyze_start', { method: 'POST', body: fd });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        letterJobId = json.job_id;
+        pollLetterAnalysis();
+      } catch (e) {
+        toast(e.message || 'Upload failed');
+        resetLetter();
+      }
     }
 
-    async function runLetterGeneration(analysis) {
-      const letterType = el('letterType').value;
-      showStatus(`Generating ${letterType} letter...`);
+    async function pollLetterAnalysis() {
+      try {
+        const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(letterJobId)}`);
+        const json = await res.json();
+
+        if (json.status === 'processing' || json.status === 'waiting') {
+          el('letterStatusText').textContent = json.stage_label || 'Processing...';
+          el('letterProgressFill').style.width = (json.progress || 20) + '%';
+          setTimeout(pollLetterAnalysis, 1000);
+          return;
+        }
+
+        if (json.status === 'error') throw new Error(json.error);
+
+        if (json.status === 'complete') {
+          letterAnalysis = json.data;
+          el('letterStatusBar').classList.add('hidden');
+          el('letterControls').classList.remove('hidden');
+          
+          // Pre-fill provider
+          if (letterAnalysis.provider_name) {
+            el('letterFrom').value = letterAnalysis.provider_name;
+          }
+          
+          // Pre-fill patient name for patient letters
+          if (letterAnalysis.patient_name) {
+            el('letterTo').value = letterAnalysis.patient_name;
+          }
+          
+          // Populate diagnoses dropdown
+          populateLetterDiagnoses();
+          
+          toast('Document analyzed! Configure your letter below.');
+        }
+      } catch (e) {
+        toast(e.message || 'Analysis failed');
+        resetLetter();
+      }
+    }
+
+    async function generatePatientLetter() {
+      if (!letterAnalysis) { toast('Upload a document first'); return; }
+
+      el('letterControls').classList.add('hidden');
+      el('letterStatusBar').classList.remove('hidden');
+      el('letterStatusText').textContent = 'Generating letter...';
+      el('letterProgressFill').style.width = '50%';
+
+      // Build the form data with all fields
+      const reasonDx = el('letterReasonDx').value;
+      const reasonOther = el('letterReasonOther').value;
+      const reason = (reasonDx === 'Other') ? reasonOther : reasonDx;
+      
+      const focusSel = el('letterReasonFocus').value;
+      const focusOther = el('letterFocusOther').value;
+      const focus = (focusSel === 'Other') ? focusOther : focusSel;
 
       try {
         const res = await fetch('/generate_assistant_letter', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ analysis, letter_type: letterType })
+          body: JSON.stringify({
+            analysis: letterAnalysis,
+            letter_type: el('letterRecipientType').value === 'Insurance' ? 'insurance' : 'patient',
+            recipient_type: el('letterRecipientType').value,
+            to_whom: el('letterTo').value,
+            from_doctor: el('letterFrom').value,
+            reason_for_referral: reason,
+            referral_focus: focus,
+            special_requests: el('letterInstructions').value,
+            tone: el('letterTone').value,
+            detail: el('letterDetail').value,
+            output_language: el('letterLang').value
+          })
         });
         const json = await res.json();
-
-        hideStatus();
-
-        if (!json.ok) {
-          toast(json.error || 'Letter generation failed');
-          return;
-        }
+        if (!json.ok) throw new Error(json.error);
 
         el('letterText').value = json.letter || '';
+        el('letterStatusBar').classList.add('hidden');
         el('letterOutput').classList.remove('hidden');
         
-        toast('Letter generated');
+        stats.letters++;
+        updateStats();
+        addRecentActivity('letter', 'Patient letter generated');
+        toast('Letter generated!');
       } catch (e) {
-        hideStatus();
-        toast('Letter generation failed');
+        toast(e.message || 'Generation failed');
+        el('letterStatusBar').classList.add('hidden');
+        el('letterControls').classList.remove('hidden');
       }
     }
 
-    function copySection(id) {
-      const elem = document.getElementById(id);
-      const text = elem.innerText || elem.textContent;
-      navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(() => toast('Copy failed'));
+    function resetLetter() {
+      letterJobId = '';
+      letterAnalysis = null;
+      el('letterUpload').classList.remove('hidden');
+      el('letterStatusBar').classList.add('hidden');
+      el('letterControls').classList.add('hidden');
+      el('letterOutput').classList.add('hidden');
+      el('letterFileInput').value = '';
+      el('letterText').value = '';
+      el('letterReasonDx').innerHTML = '<option value="">Select diagnosis...</option>';
+      el('letterReasonFocus').innerHTML = '<option value="">Select focus...</option>';
+      el('letterReasonFocus').disabled = true;
     }
 
-    function copyLetter() {
+    function populateLetterDiagnoses() {
+      const sel = el('letterReasonDx');
+      sel.innerHTML = '<option value="">Select diagnosis...</option>';
+      
+      const dx = (letterAnalysis && letterAnalysis.diagnoses) ? letterAnalysis.diagnoses : [];
+      dx.forEach(item => {
+        const opt = document.createElement('option');
+        const code = item.code ? `${item.code} ` : '';
+        const val = `${code}${item.label || ''}`.trim();
+        opt.value = val;
+        opt.textContent = `${item.number}. ${val}`;
+        sel.appendChild(opt);
+      });
+      
+      const otherOpt = document.createElement('option');
+      otherOpt.value = 'Other';
+      otherOpt.textContent = 'Other';
+      sel.appendChild(otherOpt);
+    }
+
+    function getFocusOptionsForDx(dxLabel) {
+      const d = (dxLabel || '').toLowerCase();
+      if (d.includes('glaucoma')) {
+        return ['Consult and management recommendations', 'Laser evaluation', 'LPI evaluation', 'Gonioscopy and angle assessment', 'Surgical opinion', 'Other'];
+      }
+      if (d.includes('dry eye') || d.includes('mgd') || d.includes('blephar') || d.includes('meibomian')) {
+        return ['Confirm diagnosis and stage severity', 'Advanced therapy recommendations', 'Procedure consideration', 'Medication options', 'Other'];
+      }
+      if (d.includes('cataract')) {
+        return ['Surgical consultation', 'Pre operative evaluation', 'Co management plan', 'Other'];
+      }
+      if (d.includes('retina') || d.includes('macula') || d.includes('amd') || d.includes('diabetic')) {
+        return ['Urgent assessment', 'Treatment options and follow up plan', 'Imaging review', 'Other'];
+      }
+      return ['Consultation', 'Management recommendations', 'Second opinion', 'Co management', 'Other'];
+    }
+
+    // Letter reason change handler
+    el('letterReasonDx').addEventListener('change', function() {
+      const v = this.value;
+      const otherInput = el('letterReasonOther');
+      const focusSel = el('letterReasonFocus');
+      const focusOther = el('letterFocusOther');
+      
+      if (v === 'Other') {
+        otherInput.classList.remove('hidden');
+        focusSel.disabled = true;
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+      } else if (v) {
+        otherInput.classList.add('hidden');
+        otherInput.value = '';
+        focusSel.disabled = false;
+        
+        // Populate focus options
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+        const opts = getFocusOptionsForDx(v);
+        opts.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o;
+          opt.textContent = o;
+          focusSel.appendChild(opt);
+        });
+      } else {
+        otherInput.classList.add('hidden');
+        otherInput.value = '';
+        focusSel.disabled = true;
+        focusSel.innerHTML = '<option value="">Select focus...</option>';
+      }
+      focusOther.classList.add('hidden');
+      focusOther.value = '';
+    });
+
+    // Focus change handler
+    el('letterReasonFocus').addEventListener('change', function() {
+      const focusOther = el('letterFocusOther');
+      if (this.value === 'Other') {
+        focusOther.classList.remove('hidden');
+      } else {
+        focusOther.classList.add('hidden');
+        focusOther.value = '';
+      }
+    });
+
+    // Recipient type change - adjust "To" field
+    el('letterRecipientType').addEventListener('change', function() {
+      const toInput = el('letterTo');
+      const v = this.value;
+      if (v === 'Patient' && letterAnalysis && letterAnalysis.patient_name) {
+        toInput.value = letterAnalysis.patient_name;
+        toInput.placeholder = 'Patient name';
+      } else if (v === 'Family physician' || v === 'Specialist') {
+        toInput.value = toInput.value.startsWith('Dr.') ? toInput.value : 'Dr. ';
+        toInput.placeholder = 'Dr. Lastname';
+      } else {
+        toInput.placeholder = 'Recipient name';
+      }
+    });
+
+    async function copyLetter() {
       const text = el('letterText').value;
-      if (!text.trim()) { toast('Nothing to copy'); return; }
-      navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(() => toast('Copy failed'));
+      if (!text) { toast('Nothing to copy'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Copied!');
+      } catch (e) {
+        toast('Copy failed');
+      }
     }
 
     async function exportLetterPdf() {
       const text = el('letterText').value;
-      if (!text.trim()) { toast('Nothing to export'); return; }
+      if (!text) { toast('Nothing to export'); return; }
 
       try {
         const res = await fetch('/export_pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, provider_name: 'Provider', patient_token: '', recipient_type: el('letterType').value })
+          body: JSON.stringify({
+            text,
+            provider_name: el('letterFrom').value,
+            patient_token: '',
+            recipient_type: 'Patient'
+          })
         });
-
-        if (!res.ok) {
-          toast('Export failed');
-          return;
-        }
-
+        if (!res.ok) throw new Error('Export failed');
+        
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'letter.pdf';
+        a.download = 'patient_letter.pdf';
         a.click();
         URL.revokeObjectURL(url);
-        toast('Downloaded');
+        toast('Downloaded!');
       } catch (e) {
-        toast('Export failed');
+        toast(e.message || 'Export failed');
       }
     }
+
+    // Insurance letters (similar pattern)
+    setupUpload('insuranceUpload', 'insuranceFileInput', handleInsuranceFile);
+
+    async function handleInsuranceFile(file) {
+      el('insuranceUpload').classList.add('hidden');
+      el('insuranceStatusBar').classList.remove('hidden');
+      el('insuranceControls').classList.add('hidden');
+      el('insuranceOutput').classList.add('hidden');
+      el('insuranceStatusText').textContent = 'Uploading...';
+      el('insuranceProgressFill').style.width = '10%';
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      try {
+        const res = await fetch('/analyze_start', { method: 'POST', body: fd });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+        insuranceJobId = json.job_id;
+        pollInsuranceAnalysis();
+      } catch (e) {
+        toast(e.message || 'Upload failed');
+        resetInsurance();
+      }
+    }
+
+    async function pollInsuranceAnalysis() {
+      try {
+        const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(insuranceJobId)}`);
+        const json = await res.json();
+
+        if (json.status === 'processing' || json.status === 'waiting') {
+          el('insuranceStatusText').textContent = json.stage_label || 'Processing...';
+          el('insuranceProgressFill').style.width = (json.progress || 20) + '%';
+          setTimeout(pollInsuranceAnalysis, 1000);
+          return;
+        }
+
+        if (json.status === 'error') throw new Error(json.error);
+
+        if (json.status === 'complete') {
+          insuranceAnalysis = json.data;
+          el('insuranceStatusBar').classList.add('hidden');
+          el('insuranceControls').classList.remove('hidden');
+          
+          if (insuranceAnalysis.provider_name) {
+            el('insuranceFrom').value = insuranceAnalysis.provider_name;
+          }
+          
+          toast('Document analyzed! Configure your letter below.');
+        }
+      } catch (e) {
+        toast(e.message || 'Analysis failed');
+        resetInsurance();
+      }
+    }
+
+    async function generateInsuranceLetter() {
+      if (!insuranceAnalysis) { toast('Upload a document first'); return; }
+
+      el('insuranceControls').classList.add('hidden');
+      el('insuranceStatusBar').classList.remove('hidden');
+      el('insuranceStatusText').textContent = 'Generating letter...';
+      el('insuranceProgressFill').style.width = '50%';
+
+      try {
+        const res = await fetch('/generate_assistant_letter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            analysis: insuranceAnalysis,
+            letter_type: 'insurance',
+            insurance_type: el('insuranceType').value,
+            procedure: el('insuranceProcedure').value,
+            company: el('insuranceCompany').value,
+            from: el('insuranceFrom').value,
+            justification: el('insuranceJustification').value
+          })
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error);
+
+        el('insuranceText').value = json.letter || '';
+        el('insuranceStatusBar').classList.add('hidden');
+        el('insuranceOutput').classList.remove('hidden');
+        
+        stats.letters++;
+        updateStats();
+        addRecentActivity('insurance', 'Insurance letter generated');
+        toast('Letter generated!');
+      } catch (e) {
+        toast(e.message || 'Generation failed');
+        el('insuranceStatusBar').classList.add('hidden');
+        el('insuranceControls').classList.remove('hidden');
+      }
+    }
+
+    function resetInsurance() {
+      insuranceJobId = '';
+      insuranceAnalysis = null;
+      el('insuranceUpload').classList.remove('hidden');
+      el('insuranceStatusBar').classList.add('hidden');
+      el('insuranceControls').classList.add('hidden');
+      el('insuranceOutput').classList.add('hidden');
+      el('insuranceFileInput').value = '';
+      el('insuranceText').value = '';
+    }
+
+    async function copyInsurance() {
+      const text = el('insuranceText').value;
+      if (!text) { toast('Nothing to copy'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Copied!');
+      } catch (e) {
+        toast('Copy failed');
+      }
+    }
+
+    async function exportInsurancePdf() {
+      const text = el('insuranceText').value;
+      if (!text) { toast('Nothing to export'); return; }
+
+      try {
+        const res = await fetch('/export_pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            provider_name: el('insuranceFrom').value,
+            patient_token: '',
+            recipient_type: 'Insurance'
+          })
+        });
+        if (!res.ok) throw new Error('Export failed');
+        
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'insurance_letter.pdf';
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('Downloaded!');
+      } catch (e) {
+        toast(e.message || 'Export failed');
+      }
+    }
+
+    // Utility functions
+    function copySection(id) {
+      const elem = el(id);
+      const text = elem.innerText || elem.textContent;
+      navigator.clipboard.writeText(text).then(() => toast('Copied!')).catch(() => toast('Copy failed'));
+    }
+
+    function printTriage() {
+      window.print();
+    }
+
+    function updateStats() {
+      el('statDocsToday').textContent = stats.docsToday;
+      el('statCompleted').textContent = stats.completed;
+      el('statLetters').textContent = stats.letters;
+      el('statAvgTime').textContent = stats.completed > 0 ? '~3m' : '--';
+    }
+
+    function addRecentActivity(type, title, urgency) {
+      const list = el('recentActivity');
+      const icons = {
+        'triage': '<svg viewBox="0 0 24 24"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08"/></svg>',
+        'letter': '<svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>',
+        'insurance': '<svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751"/></svg>'
+      };
+
+      // Remove empty state if exists
+      if (list.querySelector('div[style*="text-align: center"]')) {
+        list.innerHTML = '';
+      }
+
+      const item = document.createElement('div');
+      item.className = 'recentItem';
+      item.innerHTML = `
+        <div class="recentIcon">${icons[type] || icons.triage}</div>
+        <div class="recentInfo">
+          <div class="recentTitle">${escapeHtml(title)}</div>
+          <div class="recentMeta">${type.charAt(0).toUpperCase() + type.slice(1)}${urgency ? ' · ' + urgency : ''}</div>
+        </div>
+        <div class="recentTime">Just now</div>
+      `;
+      list.insertBefore(item, list.firstChild);
+
+      // Keep only last 5
+      while (list.children.length > 5) {
+        list.removeChild(list.lastChild);
+      }
+    }
+
+    function clearRecent() {
+      el('recentActivity').innerHTML = `
+        <div style="text-align: center; color: var(--muted); padding: 40px;">
+          <svg viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border); stroke-width: 1.5; fill: none; margin-bottom: 12px;"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          <p style="margin: 0;">No recent activity yet.<br>Upload a document to get started.</p>
+        </div>
+      `;
+    }
+
+    function useTemplate(type) {
+      toast('Template feature coming soon!');
+    }
+
+    function showHelp() {
+      toast('Help documentation coming soon!');
+    }
+
+    function showShortcuts() {
+      toast('Keyboard shortcuts: Ctrl+U = Upload, Ctrl+T = Triage, Ctrl+L = Letter');
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'u') {
+          e.preventDefault();
+          document.getElementById('triageFileInput')?.click();
+        }
+      }
+    });
+
+    // Expose all functions to global scope for onclick handlers
+    window.toggleDropdown = toggleDropdown;
+    window.closeAllDropdowns = closeAllDropdowns;
+    window.showView = showView;
+    window.toast = toast;
+    window.resetTriage = resetTriage;
+    window.copyLetter = copyLetter;
+    window.resetLetter = resetLetter;
+    window.exportLetterPdf = exportLetterPdf;
+    window.copyInsurance = copyInsurance;
+    window.resetInsurance = resetInsurance;
+    window.exportInsurancePdf = exportInsurancePdf;
+    window.useTemplate = useTemplate;
+    window.showHelp = showHelp;
+    window.showShortcuts = showShortcuts;
+    window.copySection = copySection;
+    window.printTriage = printTriage;
+    window.toggleReasoning = toggleReasoning;
+    window.toggleTask = toggleTask;
+    window.generatePatientLetter = generatePatientLetter;
+    window.generateInsuranceLetter = generateInsuranceLetter;
+    window.clearRecent = clearRecent;
+
+    // Initialize
+    updateStats();
   </script>
 </body>
 </html>
