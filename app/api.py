@@ -509,7 +509,7 @@ Output VALID JSON only:
   "provider_name": "string - the authoring/sending clinician name and credentials",
   "provider_clinic": "string - clinic or practice name if mentioned",
   "patient_block": "string - patient demographics with <br> line breaks: name, DOB/Age, Sex, PHN/MRN, phone, address. MUST include DOB or Age if available.",
-  "summary_html": "string - IMPORTANT: Write a concise clinical narrative summary in 2-4 paragraphs. DO NOT include diagnoses list or plan here - those go in separate fields. Format: <p><b>Visit Context:</b> Brief reason for visit and relevant history.</p><p><b>Key Findings:</b> Important exam findings and test results in narrative form.</p><p><b>Clinical Impression:</b> Brief assessment synthesis.</p>",
+  "summary_html": "string - IMPORTANT: Write a concise clinical summary in 2-4 sections. Format: <p><b>Visit Context:</b> Brief reason for visit and relevant history.</p><p><b>Key Findings:</b> Important exam findings in narrative form.</p><p><b>Tests &amp; Measurements:</b></p><ul><li>VA: OD 20/xx, OS 20/xx</li><li>IOP: OD xx, OS xx</li><li>Other relevant tests with values</li></ul><p><b>Clinical Impression:</b> Brief assessment synthesis.</p>",
   "chief_complaint": "string - main reason for visit or referral in one sentence",
   "diagnoses": [
     {{
@@ -579,9 +579,9 @@ Output VALID JSON only:
 }}
 
 CRITICAL FORMATTING RULES:
-1. summary_html should be a NARRATIVE overview, NOT a bulleted list
+1. summary_html should have narrative sections PLUS a bulleted list for Tests & Measurements
 2. DO NOT repeat diagnoses or plan in summary_html - they have their own fields
-3. summary_html should read like a clinical note paragraph, not a data dump
+3. Use <ul><li>...</li></ul> for the Tests & Measurements section to list VA, IOP, and other key values
 4. Include ALL tests/findings mentioned in the document in clinical_values or in diagnosis bullets
 5. For patient_block, ALWAYS extract age or DOB if present - this is critical for reference selection
 6. exam_findings should list EVERY measurable exam component found (VA, IOP, pupils, slit lamp, fundus, OCT, visual field, etc.)
@@ -1068,6 +1068,21 @@ def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool)
     txt = (letter_plain or "").rstrip()
     if not txt:
         return ""
+    
+    # If we have a signature, remove everything after "Kind regards" 
+    # (the PDF export will add signature + name)
+    if has_signature:
+        lines = txt.splitlines()
+        result_lines = []
+        for line in lines:
+            lower = line.strip().lower()
+            if lower.startswith("kind regards"):
+                result_lines.append("Kind regards,")
+                break  # Stop here - don't include anything after
+            result_lines.append(line)
+        return "\n".join(result_lines).rstrip()
+    
+    # No signature - ensure proper signoff with provider name
     lines = txt.splitlines()
     if lines:
         last = lines[-1].strip()
@@ -1075,8 +1090,6 @@ def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool)
         if prov and last.lower() == prov.lower():
             lines = lines[:-1]
     txt = "\n".join(lines).rstrip()
-    if has_signature:
-        return txt
     prov = (provider_name or "").strip()
     if not prov:
         return txt
@@ -1617,17 +1630,18 @@ def export_pdf():
         text_in = finalize_signoff(text_in, provider_name, True)
 
     styles = getSampleStyleSheet()
+    # Compact styles for single-page fit
     base = ParagraphStyle(
         "base", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=13.5, spaceAfter=4, alignment=TA_JUSTIFY
+        fontSize=9.5, leading=12, spaceAfter=2, alignment=TA_JUSTIFY
     )
     head = ParagraphStyle(
         "head", parent=base, fontName="Helvetica-Bold",
-        spaceBefore=8, spaceAfter=5, alignment=TA_LEFT
+        spaceBefore=6, spaceAfter=3, alignment=TA_LEFT
     )
     mono = ParagraphStyle(
         "mono", parent=base, fontName="Helvetica",
-        fontSize=10, leading=12.8, alignment=TA_LEFT, spaceAfter=0
+        fontSize=9.5, leading=11, alignment=TA_LEFT, spaceAfter=0
     )
 
     def esc(s: str) -> str:
@@ -1674,10 +1688,10 @@ def export_pdf():
     if lh_path and os.path.exists(lh_path):
         try:
             img = RLImage(lh_path)
-            img.drawHeight = 50
-            img.drawWidth = 500
+            img.drawHeight = 45
+            img.drawWidth = 480
             story.append(img)
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 6))
         except Exception:
             pass
 
@@ -1686,6 +1700,8 @@ def export_pdf():
     demo_data = {}
     demo_active = False
     demo_emitted = False
+    in_signoff = False  # Track if we're past "Kind regards"
+    provider_name_lower = provider_name.lower().strip()
 
     for raw in raw_lines:
         line = (raw or "").rstrip()
@@ -1693,11 +1709,23 @@ def export_pdf():
             if demo_active and not demo_emitted:
                 story.extend(emit_demographics(demo_data))
                 demo_emitted = True
-            story.append(Spacer(1, 8))
+            story.append(Spacer(1, 6))
             continue
 
         lower = line.strip().lower()
         key = lower.split(":", 1)[0].strip() if ":" in lower else ""
+        
+        # Skip provider name if it appears after Kind regards (avoid duplicate)
+        if in_signoff:
+            # Skip if this line is just the provider name
+            line_clean = re.sub(r'[,.\s]+', '', lower)
+            prov_clean = re.sub(r'[,.\s]+', '', provider_name_lower)
+            if line_clean == prov_clean or lower == provider_name_lower:
+                continue
+            # Also skip common name patterns
+            if lower.startswith("dr.") or lower.startswith("dr "):
+                if any(part in lower for part in provider_name_lower.split()):
+                    continue
 
         # Collect demographics for compact display
         if key in demo_keys:
@@ -1720,9 +1748,9 @@ def export_pdf():
         if lower.startswith("reason for referral") or lower.startswith("reason for report"):
             label = "Reason for Referral" if lower.startswith("reason for referral") else "Reason for Report"
             value = line.split(":", 1)[1].strip() if ":" in line else ""
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 6))
             story.append(Paragraph(f"<b>{label}:</b> {esc(value)}", base))
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 6))
             continue
 
         # Section headings
@@ -1742,44 +1770,38 @@ def export_pdf():
 
         # Salutation
         if lower.startswith("dear "):
-            story.append(Spacer(1, 8))
-            story.append(Paragraph(esc(line), base))
             story.append(Spacer(1, 6))
+            story.append(Paragraph(esc(line), base))
+            story.append(Spacer(1, 4))
             continue
 
         # Signature block
         if lower.startswith("kind regards"):
-            story.append(Spacer(1, 12))
+            in_signoff = True
+            story.append(Spacer(1, 8))
             story.append(Paragraph("Kind regards,", base))
             
             if sig_path_effective and os.path.exists(sig_path_effective):
                 try:
                     sig = RLImage(sig_path_effective)
                     page_w = rl_letter[0]
-                    max_width = int(page_w * 0.25)
-                    max_height = 90
+                    max_width = int(page_w * 0.22)
+                    max_height = 70
                     iw = float(sig.imageWidth)
                     ih = float(sig.imageHeight)
                     if iw > 0 and ih > 0:
                         scale = min(max_width / iw, max_height / ih)
                         sig.drawWidth = iw * scale
                         sig.drawHeight = ih * scale
-                    story.append(Spacer(1, 6))
-                    text_w = rl_letter[0] - 54 - 54
-                    tbl = Table([[sig]], colWidths=[text_w])
-                    tbl.setStyle(TableStyle([
-                        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                        ("TOPPADDING", (0, 0), (-1, -1), 0),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                    ]))
-                    story.append(tbl)
+                    story.append(Spacer(1, 4))
+                    story.append(sig)
+                    # Add provider name under signature
+                    story.append(Spacer(1, 2))
+                    story.append(Paragraph(esc(provider_name), base))
                 except Exception:
                     story.append(Paragraph(esc(provider_name), base))
             else:
-                # No signature image - add provider name
+                # No signature image - just add provider name
                 story.append(Paragraph(esc(provider_name), base))
             continue
 
@@ -1793,10 +1815,10 @@ def export_pdf():
     doc = SimpleDocTemplate(
         out_path,
         pagesize=rl_letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
+        leftMargin=50,
+        rightMargin=50,
+        topMargin=45,
+        bottomMargin=45,
         title=filename,
     )
 

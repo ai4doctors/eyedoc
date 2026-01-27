@@ -895,6 +895,69 @@
         padding: 16px;
       }
     }
+    
+    /* Footer styles */
+    .assistantFooter {
+      border-top: 1px solid var(--border);
+      padding: 20px 26px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      text-align: center;
+      margin-top: auto;
+    }
+    .footerContent {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .footerBrand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .footerLogo {
+      height: 24px;
+      width: auto;
+      opacity: 0.7;
+    }
+    .footerVersion {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .footerLinks {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .footerLink {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: color 0.15s;
+    }
+    .footerLink:hover {
+      color: var(--text);
+    }
+    .footerDot {
+      color: var(--border);
+    }
+    .footerDisclaimer {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+    .footerCopyright {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
@@ -1408,6 +1471,25 @@
         </div>
       </div>
     </main>
+    
+    <!-- Footer -->
+    <footer class="assistantFooter">
+      <div class="footerContent">
+        <div class="footerBrand">
+          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" />
+          <span class="footerVersion">v2026.8</span>
+        </div>
+        <div class="footerLinks">
+          <a href="mailto:support@maneiro.ai" class="footerLink">Contact Support</a>
+          <span class="footerDot">·</span>
+          <button onclick="showHelp()" class="footerLink" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;">Help & FAQ</button>
+        </div>
+      </div>
+      <div class="footerDisclaimer">
+        Maneiro is a clinical documentation aid. All outputs require physician review before use.
+      </div>
+      <div class="footerCopyright">© 2026 Maneiro.ai · All rights reserved</div>
+    </footer>
   </div>
 
   <div id="toast" class="toast"></div>
