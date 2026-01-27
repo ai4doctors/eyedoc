@@ -1147,7 +1147,7 @@ async function saveTranscriptToAnalyze(){
   pollAnalyze()
 }
 
-el("uploadBtn").addEventListener("click", openPicker)
+if(el("uploadBtn")){ el("uploadBtn").addEventListener("click", openPicker) }
 if(el("recordBtn")){
   el("recordBtn").addEventListener("click", openRecord)
 }
@@ -1393,3 +1393,15 @@ window.closeRecord = closeRecord
 window.clearAll = clearAll
 window.newCase = newCase
 window.toast = toast
+
+
+// Global exports (safe)
+window.startAnalyze = startAnalyze
+window.pollAnalyze = pollAnalyze
+window.generateReport = generateReport
+window.exportPdf = exportPdf
+window.copyRich = copyRich
+window.copyPlain = copyPlain
+window.openPicker = openPicker
+window.startTranscribeBlob = startTranscribeBlob
+window.pollTranscribe = pollTranscribe

@@ -417,8 +417,8 @@
       <div class="modalBody">
         <div class="settingsGrid">
           <div class="field">
-            <label class="fieldLabel" for="settingInputLang">Input language</label>
-            <select id="settingInputLang" class="ctrl">
+            <label class="fieldLabel" for="settingsInputLang">Input language</label>
+            <select id="settingsInputLang" class="ctrl">
               <option value="auto">Auto detect</option>
               <option value="en-US">English</option>
               <option value="pt-BR">Portuguese</option>
@@ -427,8 +427,8 @@
             </select>
           </div>
           <div class="field">
-            <label class="fieldLabel" for="settingOutputLang">Output language</label>
-            <select id="settingOutputLang" class="ctrl">
+            <label class="fieldLabel" for="settingsOutputLang">Output language</label>
+            <select id="settingsOutputLang" class="ctrl">
               <option value="auto">Match input</option>
               <option value="en">English</option>
               <option value="pt">Portuguese</option>
@@ -437,25 +437,24 @@
             </select>
           </div>
           <div class="field">
-            <label class="fieldLabel" for="settingLetterhead">Upload letterhead</label>
-            <input id="settingLetterhead" class="ctrl" type="file" accept="image/*" />
-            <div id="letterheadHint" class="smallHint"></div>
+            <label class="fieldLabel" for="settingsLetterhead">Upload letterhead</label>
+            <input id="settingsLetterhead" class="ctrl" type="file" accept="image/*" />
+            <div id="settingsLetterheadHint" class="smallHint"></div>
           </div>
           <div class="field">
-            <label class="fieldLabel" for="settingSignature">Upload signature</label>
-            <input id="settingSignature" class="ctrl" type="file" accept="image/*" />
-            <div id="signatureHint" class="smallHint"></div>
+            <label class="fieldLabel" for="settingsSignature">Upload signature</label>
+            <input id="settingsSignature" class="ctrl" type="file" accept="image/*" />
+            <div id="settingsSignatureHint" class="smallHint"></div>
           </div>
         </div>
         <div class="settingsActions">
           <button id="settingsSave" class="btnPrimary" type="button">Save</button>
-          <button id="settingsClear" class="btnSecondary" type="button">Clear uploads</button>
+          <button id="settingsClearUploads" class="btnSecondary" type="button">Clear uploads</button>
         </div>
       </div>
     </div>
   </div>
 
-  
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
