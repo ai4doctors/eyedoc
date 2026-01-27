@@ -339,13 +339,14 @@ function setAnalyzeStatus(state, stageLabel, progress){
   const box = el("analyzeStatus")
   if(state === "processing"){
     let label = stageLabel || "Processing document..."
+    let pct = typeof progress === "number" ? Math.min(progress, 95) : 0
     // Better stage messages
     const stageMessages = {
       "Uploading document...": "Uploading your document",
       "Extracting text...": "Extracting text from document",
       "Analyzing document...": "AI is analyzing the content",
       "Building analysis...": "Building clinical analysis",
-      "Fetching references...": "Finding relevant guidelines",
+      "Fetching references...": "Finding relevant references",
       "Assigning citations...": "Linking citations to findings",
       "Processing...": "Processing document..."
     }
@@ -353,8 +354,9 @@ function setAnalyzeStatus(state, stageLabel, progress){
     box.innerHTML = `<div class="progressContainer">
       <div class="progressHeader">
         <div class="progressLabel">${label}</div>
+        <div class="progressPct">${pct}%</div>
       </div>
-      <div class="progressBar"><div class="progressFill"></div></div>
+      <div class="progressBar"><div class="progressFill" style="width:${pct}%"></div></div>
       <div class="progressHint">This usually takes 20-30 seconds</div>
     </div>`
     return

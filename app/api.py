@@ -873,39 +873,22 @@ def canonical_reference_pool(labels, patient_age: Optional[int] = None, detected
         add("", "AAD Acne Guidelines", "https://www.aad.org/member/clinical-quality/guidelines", "AAD Guideline")
 
     # ==================== OPHTHALMOLOGY ====================
-    # Dry eye and ocular surface - TFOS DEWS is THE canonical guideline
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "tear", "keratoconjunctivitis sicca", "dryness", "aqueous deficient"]):
-        add("39680594", "TFOS DEWS III Report. Ocul Surf. 2025;35:1-257.", "https://pubmed.ncbi.nlm.nih.gov/39680594/", "TFOS DEWS III")
-        add("28797892", "TFOS DEWS II Report. Ocul Surf. 2017;15(3):269-649.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS DEWS II")
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "tear"]):
+        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "TFOS Guideline")
+        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS Guideline")
 
-    # Glaucoma - AAO PPP and EGS are canonical
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension", "optic nerve", "rnfl", "visual field", "cup disc"]):
-        add("34933745", "AAO PPP: Primary Open-Angle Glaucoma. Ophthalmology. 2021;128(1):P51-P124.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
-        add("34675001", "European Glaucoma Society Guidelines, 5th Ed. Br J Ophthalmol. 2021;105(Suppl 1):1-169.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
+        add("34933745", "Primary Open-Angle Glaucoma PPP. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
+        add("34675001", "European Glaucoma Society Guidelines, 5th Ed. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
 
-    # Diabetic retinopathy - AAO PPP
-    if any(k in blob for k in ["diabetic retinopathy", "diabetic macular", "dme", "diabetic eye", "proliferative", "npdr", "pdr"]):
-        add("", "AAO PPP: Diabetic Retinopathy. Ophthalmology. 2020;127(1):P66-P145.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO PPP")
+    if any(k in blob for k in ["diabetic retinopathy", "diabetic macular", "dme"]):
+        add("", "AAO PPP: Diabetic Retinopathy", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO PPP")
 
-    # AMD - AAO PPP
-    if any(k in blob for k in ["macular degeneration", "amd", "drusen", "cnv", "geographic atrophy", "wet amd", "dry amd", "anti-vegf"]):
-        add("", "AAO PPP: Age-Related Macular Degeneration. Ophthalmology. 2020;127(1):P1-P65.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO PPP")
+    if any(k in blob for k in ["macular degeneration", "amd", "drusen", "cnv"]):
+        add("39918524", "Age-Related Macular Degeneration PPP. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "AAO PPP")
 
-    # Cataract - AAO PPP
-    if any(k in blob for k in ["cataract", "lens opacity", "phacoemulsification", "iol", "posterior capsule"]):
-        add("34780842", "AAO PPP: Cataract in the Adult Eye. Ophthalmology. 2022;129(4):P52-P142.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
-
-    # Refractive error
-    if any(k in blob for k in ["myopia", "hyperopia", "astigmatism", "refractive error", "presbyopia"]):
-        add("", "AAO PPP: Refractive Errors & Refractive Surgery. Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-    
-    # Uveitis
-    if any(k in blob for k in ["uveitis", "iritis", "anterior uveitis", "posterior uveitis", "panuveitis"]):
-        add("", "SUN Working Group: Classification of Uveitis.", "https://pubmed.ncbi.nlm.nih.gov/15652825/", "SUN Classification")
-
-    # Cornea
-    if any(k in blob for k in ["keratitis", "corneal ulcer", "corneal abrasion", "keratoconus", "fuchs", "corneal dystrophy"]):
-        add("", "AAO PPP: Bacterial Keratitis. Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
+    if "cataract" in blob:
+        add("34780842", "Cataract in the Adult Eye PPP. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
 
     # ==================== ORTHOPEDICS ====================
     if any(k in blob for k in ["low back pain", "lumbago", "lumbar"]):
@@ -1109,78 +1092,25 @@ Analysis:
 
 
 def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool) -> str:
-    """Clean up the letter signoff.
-    
-    If has_signature is True: Remove any provider name after "Kind regards," 
-    since the signature image already contains the name.
-    
-    If has_signature is False: Ensure the letter ends with "Kind regards," 
-    followed by the provider name.
-    """
     txt = (letter_plain or "").rstrip()
     if not txt:
         return ""
-    
-    prov = (provider_name or "").strip()
-    prov_lower = prov.lower()
-    
-    # Split into lines to work with the ending
     lines = txt.splitlines()
-    
+    if lines:
+        last = lines[-1].strip()
+        prov = (provider_name or "").strip()
+        if prov and last.lower() == prov.lower():
+            lines = lines[:-1]
+    txt = "\n".join(lines).rstrip()
     if has_signature:
-        # Remove provider name if LLM added it after "Kind regards,"
-        # Check last 3 lines for variations of the provider name
-        cleaned_lines = []
-        skip_remaining = False
-        
-        for i, line in enumerate(lines):
-            line_stripped = line.strip()
-            line_lower = line_stripped.lower()
-            
-            # Skip empty lines at the end
-            if not line_stripped and i > len(lines) - 4:
-                continue
-            
-            # Check if this line is just the provider name (or close variation)
-            # Remove titles like Dr., MD, OD, etc.
-            name_variations = [prov_lower]
-            clean_prov = re.sub(r"\b(dr\.?|md|od|mba|phd|do|np|pa)\b", "", prov_lower, flags=re.IGNORECASE)
-            clean_prov = re.sub(r"[,\s]+", " ", clean_prov).strip()
-            if clean_prov:
-                name_variations.append(clean_prov)
-            
-            # Also check line without titles
-            clean_line = re.sub(r"\b(dr\.?|md|od|mba|phd|do|np|pa)\b", "", line_lower, flags=re.IGNORECASE)
-            clean_line = re.sub(r"[,\s]+", " ", clean_line).strip()
-            
-            is_provider_name = any(
-                clean_line == v or 
-                line_lower == v or 
-                (clean_line and clean_prov and clean_line == clean_prov)
-                for v in name_variations
-            )
-            
-            if is_provider_name and i > len(lines) - 5:
-                # Skip this line - it's the provider name that shouldn't be there
-                continue
-            
-            cleaned_lines.append(line)
-        
-        return "\n".join(cleaned_lines).rstrip()
-    
-    # No signature - ensure proper signoff with provider name
+        return txt
+    prov = (provider_name or "").strip()
     if not prov:
         return txt
-    
-    # Check if already ends with Kind regards + name
-    if txt.lower().rstrip().endswith(prov_lower):
-        return txt
-    
-    # Check if ends with "Kind regards," - add name
-    if re.search(r"kind regards,?\s*$", txt, flags=re.IGNORECASE):
-        return txt.rstrip(",").rstrip() + ",\n" + prov
-    
-    # No signoff - add full signoff
+    if txt.lower().endswith("kind regards,"):
+        return txt + "\n" + prov
+    if re.search(r"\bkind regards\b", txt, flags=re.IGNORECASE):
+        return txt + "\n" + prov
     return txt + "\n\nKind regards,\n" + prov
 
 
