@@ -873,22 +873,35 @@ def canonical_reference_pool(labels, patient_age: Optional[int] = None, detected
         add("", "AAD Acne Guidelines", "https://www.aad.org/member/clinical-quality/guidelines", "AAD Guideline")
 
     # ==================== OPHTHALMOLOGY ====================
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "tear"]):
-        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "TFOS Guideline")
-        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS Guideline")
+    # Dry eye - TFOS DEWS is THE canonical guideline
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "tear", "keratoconjunctivitis sicca", "aqueous deficient", "evaporative", "lid wiper"]):
+        add("39680594", "TFOS DEWS III Report. Ocul Surf. 2024;35:1-257.", "https://pubmed.ncbi.nlm.nih.gov/39680594/", "TFOS DEWS III")
+        add("28797892", "TFOS DEWS II Report. Ocul Surf. 2017;15(3):269-649.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS DEWS II")
 
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
-        add("34933745", "Primary Open-Angle Glaucoma PPP. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
-        add("34675001", "European Glaucoma Society Guidelines, 5th Ed. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
+    # Glaucoma - AAO PPP and EGS are canonical
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension", "optic nerve", "rnfl", "visual field", "cup to disc", "c/d ratio", "trabeculectomy", "slt", "migs"]):
+        add("34933745", "AAO PPP: Primary Open-Angle Glaucoma. Ophthalmology. 2021;128(1):P51-P124.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
+        add("34675001", "European Glaucoma Society Guidelines, 5th Ed. Br J Ophthalmol. 2021;105(Suppl 1):1-169.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
 
-    if any(k in blob for k in ["diabetic retinopathy", "diabetic macular", "dme"]):
-        add("", "AAO PPP: Diabetic Retinopathy", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO PPP")
+    # Diabetic retinopathy - AAO PPP
+    if any(k in blob for k in ["diabetic retinopathy", "diabetic macular", "dme", "npdr", "pdr", "proliferative", "anti-vegf", "panretinal"]):
+        add("34023436", "AAO PPP: Diabetic Retinopathy. Ophthalmology. 2020;127(1):P66-P145.", "https://pubmed.ncbi.nlm.nih.gov/34023436/", "AAO PPP")
 
-    if any(k in blob for k in ["macular degeneration", "amd", "drusen", "cnv"]):
-        add("39918524", "Age-Related Macular Degeneration PPP. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "AAO PPP")
+    # AMD - AAO PPP  
+    if any(k in blob for k in ["macular degeneration", "amd", "drusen", "cnv", "geographic atrophy", "wet amd", "dry amd", "anti-vegf"]):
+        add("29716768", "AAO PPP: Age-Related Macular Degeneration. Ophthalmology. 2020;127(1):P1-P65.", "https://pubmed.ncbi.nlm.nih.gov/29716768/", "AAO PPP")
 
-    if "cataract" in blob:
-        add("34780842", "Cataract in the Adult Eye PPP. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
+    # Cataract - AAO PPP
+    if any(k in blob for k in ["cataract", "lens opacity", "phacoemulsification", "iol", "posterior capsule", "nuclear sclerosis"]):
+        add("34780842", "AAO PPP: Cataract in the Adult Eye. Ophthalmology. 2022;129(4):P52-P142.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
+
+    # Uveitis
+    if any(k in blob for k in ["uveitis", "iritis", "anterior uveitis", "posterior uveitis", "panuveitis", "vitritis"]):
+        add("15652825", "SUN Working Group: Classification of Uveitis. Am J Ophthalmol. 2005;140(3):509-516.", "https://pubmed.ncbi.nlm.nih.gov/15652825/", "SUN Classification")
+
+    # Cornea
+    if any(k in blob for k in ["keratitis", "corneal ulcer", "keratoconus", "fuchs", "corneal dystrophy", "pterygium"]):
+        add("", "AAO PPP: Bacterial Keratitis. Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
 
     # ==================== ORTHOPEDICS ====================
     if any(k in blob for k in ["low back pain", "lumbago", "lumbar"]):

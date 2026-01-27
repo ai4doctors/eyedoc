@@ -339,30 +339,30 @@ function setAnalyzeStatus(state, stageLabel, progress){
   const box = el("analyzeStatus")
   if(state === "processing"){
     let label = stageLabel || "Processing document..."
-    let pct = typeof progress === "number" ? Math.min(progress, 95) : 0
-    // Better stage messages
     const stageMessages = {
       "Uploading document...": "Uploading your document",
       "Extracting text...": "Extracting text from document",
       "Analyzing document...": "AI is analyzing the content",
       "Building analysis...": "Building clinical analysis",
-      "Fetching references...": "Finding relevant references",
+      "Fetching references...": "Finding relevant guidelines",
       "Assigning citations...": "Linking citations to findings",
-      "Processing...": "Processing document..."
+      "Processing...": "Processing document...",
+      "Starting...": "Starting analysis...",
+      "Retrying...": "Connecting...",
+      "Connecting...": "Connecting..."
     }
     label = stageMessages[label] || label
     box.innerHTML = `<div class="progressContainer">
       <div class="progressHeader">
         <div class="progressLabel">${label}</div>
-        <div class="progressPct">${pct}%</div>
       </div>
-      <div class="progressBar"><div class="progressFill" style="width:${pct}%"></div></div>
+      <div class="progressBar"><div class="progressFill"></div></div>
       <div class="progressHint">This usually takes 20-30 seconds</div>
     </div>`
     return
   }
   if(state === "analysis complete"){
-    box.innerHTML = '<div class="progressContainer" style="background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05))"><div class="progressHeader"><div class="progressLabel" style="color:#059669">✓ Analysis complete</div></div></div>'
+    box.innerHTML = '<div class="progressContainer progressComplete"><div class="progressHeader"><div class="progressLabel">✓ Analysis complete</div></div></div>'
     return
   }
   box.innerHTML = '<span class="muted" style="font-size:12px">Ready to analyze</span>'

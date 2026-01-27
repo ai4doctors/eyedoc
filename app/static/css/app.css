@@ -896,20 +896,21 @@ body{
   border-radius:12px;
   margin-top:12px;
 }
+.progressContainer.progressComplete{
+  background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05));
+}
+.progressComplete .progressLabel{
+  color:#059669;
+}
 .progressHeader{
   display:flex;
   align-items:center;
-  justify-content:space-between;
+  justify-content:flex-start;
 }
 .progressLabel{
   font-size:14px;
   font-weight:700;
   color:var(--text);
-}
-.progressPct{
-  font-size:12px;
-  color:var(--muted);
-  font-weight:600;
 }
 .progressBar{
   width:100%;
@@ -917,28 +918,18 @@ body{
   background:var(--border);
   border-radius:4px;
   overflow:hidden;
-  position:relative;
 }
 .progressFill{
   height:100%;
-  background:linear-gradient(90deg, var(--primary), #76b9ad);
+  width:100%;
+  background:linear-gradient(90deg, var(--primary), #76b9ad, var(--primary), #76b9ad);
+  background-size:300% 100%;
   border-radius:4px;
-  transition:width 0.5s ease-out;
-  position:relative;
+  animation:progressWave 1.5s linear infinite;
 }
-.progressFill::after{
-  content:'';
-  position:absolute;
-  top:0;
-  left:0;
-  right:0;
-  bottom:0;
-  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-  animation:progressShine 1.5s ease-in-out infinite;
-}
-@keyframes progressShine{
-  0%{transform:translateX(-100%)}
-  100%{transform:translateX(100%)}
+@keyframes progressWave{
+  0%{background-position:100% 0}
+  100%{background-position:0% 0}
 }
 .progressHint{
   font-size:11px;

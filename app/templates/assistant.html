@@ -338,35 +338,50 @@
       color: var(--muted);
     }
 
-    /* Status Bar */
+    /* Status Bar - matches doctor UI */
     .statusBar {
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 8px;
-      padding: 10px 14px;
+      padding: 12px 16px;
       background: linear-gradient(135deg, var(--panel2), var(--panel));
-      border-radius: 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
       margin-top: 14px;
     }
 
     .statusText {
       font-weight: 700;
-      font-size: 11px;
+      font-size: 14px;
+      color: var(--text);
     }
 
     .progressBarContainer {
-      flex: 1;
-      height: 4px;
+      width: 100%;
+      height: 8px;
       background: var(--border);
-      border-radius: 2px;
+      border-radius: 4px;
       overflow: hidden;
     }
 
     .progressBarFill {
       height: 100%;
-      background: linear-gradient(90deg, var(--primary), #76b9ad);
-      border-radius: 2px;
-      transition: width 0.3s ease;
+      width: 100%;
+      background: linear-gradient(90deg, var(--primary), #76b9ad, var(--primary), #76b9ad);
+      background-size: 300% 100%;
+      border-radius: 4px;
+      animation: progressWave 1.5s linear infinite;
+    }
+    
+    @keyframes progressWave {
+      0% { background-position: 100% 0; }
+      100% { background-position: 0% 0; }
+    }
+    
+    .statusHint {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
     }
 
     /* Output Sections */
@@ -1151,11 +1166,11 @@
             </div>
 
             <div id="triageStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="triageStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="triageProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="triageProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="triageResults" class="hidden">
@@ -1255,11 +1270,11 @@
             </div>
 
             <div id="letterStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="letterStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="letterProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="letterProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="letterControls" class="hidden">
@@ -1388,11 +1403,11 @@
             </div>
 
             <div id="insuranceStatusBar" class="statusBar hidden">
-              <span class="spinner"></span>
               <span id="insuranceStatusText" class="statusText">Processing...</span>
               <div class="progressBarContainer">
-                <div id="insuranceProgressFill" class="progressBarFill" style="width: 0%"></div>
+                <div id="insuranceProgressFill" class="progressBarFill"></div>
               </div>
+              <div class="statusHint">This usually takes 20-30 seconds</div>
             </div>
 
             <div id="insuranceControls" class="hidden">
@@ -1457,13 +1472,13 @@
       <div class="footerRow">
         <div class="footerBrand">
           <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" style="background:transparent !important" />
-          <span class="footerVersion">v2026.8</span>
+          <span class="footerVersion">v{{ version }}</span>
         </div>
         <div class="footerDisclaimer">
           Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
         </div>
         <div class="footerLinks">
-          <a href="mailto:support@maneiro.ai" class="footerLink footerBtn">Contact Support</a>
+          <a href="/cdn-cgi/l/email-protection#681b1d1818071a1c280509060d011a07460901" class="footerLink footerBtn">Contact Support</a>
           <span class="footerDot">·</span>
           <span class="footerCopyright">© 2026 Maneiro. All rights reserved.</span>
         </div>
@@ -1473,7 +1488,7 @@
 
   <div id="toast" class="toast"></div>
 
-  <script>
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     // State
     let currentView = 'dashboard';
     let triageJobId = '';
@@ -1567,7 +1582,6 @@
       el('triageStatusBar').classList.remove('hidden');
       el('triageResults').classList.add('hidden');
       el('triageStatusText').textContent = 'Uploading...';
-      el('triageProgressFill').style.width = '10%';
 
       const fd = new FormData();
       fd.append('file', file);
@@ -1591,7 +1605,6 @@
 
         if (json.status === 'processing' || json.status === 'waiting') {
           el('triageStatusText').textContent = json.stage_label || 'Processing...';
-          el('triageProgressFill').style.width = (json.progress || 20) + '%';
           setTimeout(pollTriageAnalysis, 1000);
           return;
         }
@@ -1600,7 +1613,6 @@
 
         if (json.status === 'complete') {
           triageAnalysis = json.data;
-          el('triageProgressFill').style.width = '100%';
           el('triageStatusText').textContent = 'Running triage...';
           await runTriage();
         }
@@ -1677,8 +1689,8 @@
       el('triageFrontDesk').innerHTML = formatTasks(data.front_desk_tasks || [], docType.includes('REFERRAL'));
       el('triageDoctor').innerHTML = formatTasks(data.doctor_tasks || [], false);
 
-      // Add to recent
-      addRecentActivity('triage', data.regarding || 'Document triaged', data.urgency);
+      // Add to recent - pass data for recall
+      addRecentActivity('triage', data.regarding || 'Document triaged', data.urgency, data);
     }
 
     function formatDocTypeIcon(type) {
@@ -1753,7 +1765,6 @@
       el('letterControls').classList.add('hidden');
       el('letterOutput').classList.add('hidden');
       el('letterStatusText').textContent = 'Uploading...';
-      el('letterProgressFill').style.width = '10%';
 
       const fd = new FormData();
       fd.append('file', file);
@@ -1777,7 +1788,6 @@
 
         if (json.status === 'processing' || json.status === 'waiting') {
           el('letterStatusText').textContent = json.stage_label || 'Processing...';
-          el('letterProgressFill').style.width = (json.progress || 20) + '%';
           setTimeout(pollLetterAnalysis, 1000);
           return;
         }
@@ -1816,7 +1826,6 @@
       el('letterControls').classList.add('hidden');
       el('letterStatusBar').classList.remove('hidden');
       el('letterStatusText').textContent = 'Generating letter...';
-      el('letterProgressFill').style.width = '50%';
 
       // Build the form data with all fields
       const reasonDx = el('letterReasonDx').value;
@@ -1854,7 +1863,7 @@
         
         stats.letters++;
         updateStats();
-        addRecentActivity('letter', 'Patient letter generated');
+        addRecentActivity('letter', 'Patient letter generated', null, { analysis: letterAnalysis, letter: json.letter });
         toast('Letter generated!');
       } catch (e) {
         toast(e.message || 'Generation failed');
@@ -2025,7 +2034,6 @@
       el('insuranceControls').classList.add('hidden');
       el('insuranceOutput').classList.add('hidden');
       el('insuranceStatusText').textContent = 'Uploading...';
-      el('insuranceProgressFill').style.width = '10%';
 
       const fd = new FormData();
       fd.append('file', file);
@@ -2049,7 +2057,6 @@
 
         if (json.status === 'processing' || json.status === 'waiting') {
           el('insuranceStatusText').textContent = json.stage_label || 'Processing...';
-          el('insuranceProgressFill').style.width = (json.progress || 20) + '%';
           setTimeout(pollInsuranceAnalysis, 1000);
           return;
         }
@@ -2079,7 +2086,6 @@
       el('insuranceControls').classList.add('hidden');
       el('insuranceStatusBar').classList.remove('hidden');
       el('insuranceStatusText').textContent = 'Generating letter...';
-      el('insuranceProgressFill').style.width = '50%';
 
       try {
         const res = await fetch('/generate_assistant_letter', {
@@ -2104,7 +2110,7 @@
         
         stats.letters++;
         updateStats();
-        addRecentActivity('insurance', 'Insurance letter generated');
+        addRecentActivity('insurance', 'Insurance letter generated', null, { analysis: insuranceAnalysis, letter: json.letter });
         toast('Letter generated!');
       } catch (e) {
         toast(e.message || 'Generation failed');
@@ -2184,14 +2190,63 @@
       saveStats();
     }
 
-    function addRecentActivity(type, title, urgency) {
-      // Add to stored array
-      recentActivityItems.unshift({ type, title, urgency, time: Date.now() });
+    function addRecentActivity(type, title, urgency, analysisData) {
+      // Add to stored array with full analysis data for recall
+      const item = { 
+        id: 'activity_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        type, 
+        title, 
+        urgency, 
+        time: Date.now(),
+        data: analysisData || null
+      };
+      recentActivityItems.unshift(item);
       // Keep only last 10
       recentActivityItems = recentActivityItems.slice(0, 10);
       saveRecentActivity();
       
       renderRecentActivity();
+    }
+    
+    function loadRecentItem(itemId) {
+      const item = recentActivityItems.find(i => i.id === itemId);
+      if (!item || !item.data) {
+        toast('Cannot recall this item - data not available');
+        return;
+      }
+      
+      if (item.type === 'triage') {
+        triageAnalysis = item.data.analysis || item.data;
+        showView('triage');
+        setTimeout(() => {
+          el('triageUpload').classList.add('hidden');
+          el('triageStatusBar').classList.add('hidden');
+          el('triageResults').classList.remove('hidden');
+          displayTriageResults(item.data);
+        }, 100);
+      } else if (item.type === 'letter') {
+        letterAnalysis = item.data.analysis || null;
+        showView('letter');
+        setTimeout(() => {
+          el('letterUpload').classList.add('hidden');
+          el('letterStatusBar').classList.add('hidden');
+          el('letterControls').classList.add('hidden');
+          el('letterOutput').classList.remove('hidden');
+          if (item.data.letter) el('letterText').value = item.data.letter;
+        }, 100);
+      } else if (item.type === 'insurance') {
+        insuranceAnalysis = item.data.analysis || null;
+        showView('insurance');
+        setTimeout(() => {
+          el('insuranceUpload').classList.add('hidden');
+          el('insuranceStatusBar').classList.add('hidden');
+          el('insuranceControls').classList.add('hidden');
+          el('insuranceOutput').classList.remove('hidden');
+          if (item.data.letter) el('insuranceText').value = item.data.letter;
+        }, 100);
+      }
+      
+      toast('Loaded: ' + item.title);
     }
     
     function renderRecentActivity() {
@@ -2214,8 +2269,10 @@
       
       list.innerHTML = recentActivityItems.map(item => {
         const timeAgo = getTimeAgo(item.time);
+        const hasData = item.data ? 'cursor:pointer;' : 'opacity:0.6;cursor:default;';
+        const clickAttr = item.data ? `onclick="loadRecentItem('${item.id}')"` : '';
         return `
-          <div class="recentItem">
+          <div class="recentItem" style="${hasData}" ${clickAttr}>
             <div class="recentIcon">${icons[item.type] || icons.triage}</div>
             <div class="recentInfo">
               <div class="recentTitle">${escapeHtml(item.title)}</div>
@@ -2292,6 +2349,7 @@
     window.generatePatientLetter = generatePatientLetter;
     window.generateInsuranceLetter = generateInsuranceLetter;
     window.clearRecent = clearRecent;
+     window.loadRecentItem = loadRecentItem;
     window.renderRecentActivity = renderRecentActivity;
 
     // Initialize
