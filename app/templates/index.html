@@ -23,7 +23,10 @@
       <button id="faqBtn" class="iconBtn" type="button" title="FAQ">FAQ</button>
       <button id="settingsBtn" class="iconBtn" type="button" title="Settings">Settings</button>
       {% if user %}
+      {% if user.role.value == 'admin' %}
       <a class="iconBtn linkBtn" href="{{ url_for('auth.assistant') }}" title="Assistant View">Assistant</a>
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.team') }}" title="Team">Team</a>
+      {% endif %}
       <a class="iconBtn linkBtn" href="{{ url_for('auth.account') }}" title="Account">Account</a>
       <a class="iconBtn linkBtn" href="{{ url_for('auth.logout') }}" title="Logout">Logout</a>
       {% endif %}

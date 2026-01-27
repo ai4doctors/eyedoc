@@ -396,7 +396,7 @@ def client_ready() -> Tuple[bool, str]:
 
 
 def model_name() -> str:
-    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4o")
+    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4.1")
 
 
 def get_client():
@@ -410,13 +410,29 @@ def get_client():
 def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
     if not s:
         return None, "Empty model output"
+    
+    # Strip markdown code blocks if present
+    text = s.strip()
+    if text.startswith("```"):
+        # Remove opening fence (```json or ```)
+        lines = text.split("\n", 1)
+        if len(lines) > 1:
+            text = lines[1]
+        # Remove closing fence
+        if text.endswith("```"):
+            text = text[:-3].strip()
+        elif "```" in text:
+            text = text.rsplit("```", 1)[0].strip()
+    
     try:
-        obj = json.loads(s)
+        obj = json.loads(text)
         if isinstance(obj, dict):
             return obj, ""
     except Exception:
         pass
-    m = re.search(r"\{.*\}", s, flags=re.DOTALL)
+    
+    # Fallback: extract first JSON object from text
+    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
     if m:
         try:
             obj = json.loads(m.group(0))
@@ -436,7 +452,7 @@ def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, 
         res = client.chat.completions.create(
             model=model_name(),
             messages=[
-                {"role": "system", "content": "Return strict JSON only. No markdown. No extra text."},
+                {"role": "system", "content": "You are a JSON API. Return ONLY valid JSON with no markdown formatting, no code fences, no explanations. Start your response with { and end with }."},
                 {"role": "user", "content": prompt},
             ],
             temperature=temperature,
@@ -589,6 +605,135 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         return out
     except Exception:
         return []
+
+
+def canonical_reference_pool(labels):
+    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
+    pool = []
+
+    def add(pmid, citation, url="", source=""):
+        pool.append({
+            "pmid": (pmid or ""),
+            "citation": (citation or ""),
+            "url": (url or ""),
+            "source": (source or ""),
+        })
+
+    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
+        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "PubMed")
+        add("", "TFOS DEWS III reports hub. Tear Film and Ocular Surface Society.", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
+        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "PubMed")
+        add("", "TFOS DEWS II Executive Summary PDF. TearFilm.org.", "https://www.tearfilm.org/public/TFOSDEWSII-Executive.pdf", "TFOS")
+
+    if "myopia" in blob:
+        add("", "International Myopia Institute. IMI White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://iovs.arvojournals.org/article.aspx?articleid=2738327", "ARVO")
+
+    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension"]):
+        add("34933745", "Primary Open Angle Glaucoma Preferred Practice Pattern. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "PubMed")
+        add("", "AAO PPP: Primary Open Angle Glaucoma. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO")
+        add("34675001", "European Glaucoma Society Terminology and Guidelines for Glaucoma, 5th Edition. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "PubMed")
+        add("", "EGS Guidelines download page. European Glaucoma Society.", "https://eugs.org/educational_materials/6", "EGS")
+
+    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "retinopathy"]):
+        add("", "Standards of Care in Diabetes. American Diabetes Association.", "https://diabetesjournals.org/care/issue", "ADA")
+        add("", "AAO PPP: Diabetic Retinopathy. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO")
+
+    if any(k in blob for k in ["macular degeneration", "age related macular", "amd"]):
+        add("39918524", "Age Related Macular Degeneration Preferred Practice Pattern. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "PubMed")
+        add("", "AAO PPP: Age Related Macular Degeneration. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO")
+        add("18550876", "Age related macular degeneration. N Engl J Med. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18550876/", "PubMed")
+
+    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia"]):
+        add("", "Global Consensus on Keratoconus and Ectatic Diseases. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+
+    if any(k in blob for k in ["cornea", "keratitis", "corneal", "ulcer"]):
+        add("26253489", "Global Consensus on Keratoconus and Ectatic Diseases. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "PubMed")
+        add("", "AAO PPP: Bacterial Keratitis. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/bacterial-keratitis-ppp", "AAO")
+        add("", "AAO PPP: Corneal Ectasia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+
+    if "uveitis" in blob:
+        add("", "Standardization of Uveitis Nomenclature. Key consensus publications.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "PubMed")
+
+    if "cataract" in blob:
+        add("34780842", "Cataract in the Adult Eye Preferred Practice Pattern. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "PubMed")
+        add("", "AAO PPP PDF: Cataract in the Adult Eye. American Academy of Ophthalmology.", "https://www.aao.org/Assets/1d1ddbad-c41c-43fc-b5d3-3724fadc5434/637723154868200000/cataract-in-the-adult-eye-ppp-pdf", "AAO")
+
+    if any(k in blob for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
+        add("", "AAO PPP: Amblyopia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO")
+        add("", "AAO PPP: Esotropia and Exotropia. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO")
+
+    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant"]):
+        add("", "AAO PPP: Pediatric Eye Evaluations. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/pediatric-eye-evaluations-ppp", "AAO")
+        add("", "AAO PPP: Retinopathy of Prematurity. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern/retinopathy-of-prematurity-ppp", "AAO")
+
+    if any(k in blob for k in ["optic neuritis", "papilledema", "neuro", "visual field", "third nerve", "fourth nerve", "sixth nerve"]):
+        add("", "AAO EyeWiki: Optic Neuritis overview and evidence links. American Academy of Ophthalmology.", "https://eyewiki.aao.org/Optic_Neuritis", "EyeWiki")
+        add("", "AAO EyeWiki: Papilledema overview and workup. American Academy of Ophthalmology.", "https://eyewiki.aao.org/Papilledema", "EyeWiki")
+
+    if any(k in blob for k in ["retina", "macular", "amd", "diabetic retinopathy", "retinal detachment"]):
+        add("", "AAO PPP: Retina and Vitreous. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+
+    if any(k in blob for k in ["retinal detachment", "rhegmatogenous", "rd"]):
+        add("", "AAO PPP: Posterior Segment and Retina guidelines hub. American Academy of Ophthalmology.", "https://www.aao.org/education/preferred-practice-pattern", "AAO")
+
+    return pool[:10]
+
+
+def merge_references(pubmed_refs, canonical_refs, max_total=18):
+    seen = set()
+    merged = []
+
+    def norm_cit(s):
+        return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+    def key_for(r):
+        pmid = (r.get("pmid") or "").strip()
+        if pmid:
+            return "pmid:" + pmid
+        return "cit:" + norm_cit(r.get("citation"))
+
+    for r in (pubmed_refs or []):
+        if not isinstance(r, dict):
+            continue
+        k = key_for(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append({
+            "pmid": (r.get("pmid") or ""),
+            "citation": (r.get("citation") or ""),
+            "url": (r.get("url") or ""),
+            "source": (r.get("source") or ""),
+        })
+
+    for r in (canonical_refs or []):
+        if not isinstance(r, dict):
+            continue
+        k = key_for(r)
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append({
+            "pmid": (r.get("pmid") or ""),
+            "citation": (r.get("citation") or ""),
+            "url": (r.get("url") or ""),
+            "source": (r.get("source") or ""),
+        })
+
+    numbered = []
+    for i, r in enumerate(merged[:max_total], start=1):
+        pmid = (r.get("pmid") or "").strip()
+        url = (r.get("url") or "").strip()
+        if (not url) and pmid:
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        numbered.append({
+            "number": str(i),
+            "pmid": pmid,
+            "citation": (r.get("citation") or ""),
+            "url": url,
+            "source": (r.get("source") or ("PubMed" if pmid else "")),
+        })
+    return numbered
 
 
 def assign_citations_prompt(analysis: Dict[str, Any]) -> str:
@@ -816,12 +961,13 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             if label:
                 terms.append(label)
     references = pubmed_fetch_for_terms(terms)
-    analysis['references'] = references
+    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
+    analysis['references'] = merge_references(references, canonical)
 
     # Heartbeat before citation assignment
     set_job(job_id, heartbeat_at=now_utc_iso())
 
-    if references:
+    if analysis.get('references'):
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
         if not cites_err and cites_obj:
             dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}

@@ -200,8 +200,11 @@
     <div class="topActions">
       {% if user %}
       <span class="iconBtn" style="cursor: default; opacity: 0.8;">{{ user.organization.name }}</span>
+      {% if user.role.value == 'admin' %}
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.doctor') }}" title="Doctor View">Doctor View</a>
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.team') }}" title="Team">Team</a>
       {% endif %}
-      <a class="iconBtn linkBtn" href="{{ url_for('auth.index') }}" title="Doctor View">Doctor View</a>
+      {% endif %}
       <a class="iconBtn linkBtn" href="{{ url_for('auth.account') }}" title="Account">Account</a>
       <a class="iconBtn linkBtn" href="{{ url_for('auth.logout') }}" title="Logout">Logout</a>
     </div>

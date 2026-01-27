@@ -131,7 +131,7 @@ body{
   gap:14px;
 }
 .brandMark{display:flex; align-items:center}
-.brandLogo{height:46px; width:auto; display:block}
+.brandLogo{height:46px; width:auto; display:block; background:transparent; border-radius:8px}
 .brandName{
   font-weight:900;
 }
