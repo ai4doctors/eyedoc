@@ -508,8 +508,8 @@ Output VALID JSON only:
   "document_type": "string - one of: encounter_note, referral_request, consultation_report, lab_results, prescription, insurance_form, correspondence, other",
   "provider_name": "string - the authoring/sending clinician name and credentials",
   "provider_clinic": "string - clinic or practice name if mentioned",
-  "patient_block": "string - patient demographics with <br> line breaks: name, DOB, PHN/MRN, phone, address",
-  "summary_html": "string - structured HTML summary with <b> headings and <p> paragraphs",
+  "patient_block": "string - patient demographics with <br> line breaks: name, DOB/Age, Sex, PHN/MRN, phone, address. MUST include DOB or Age if available.",
+  "summary_html": "string - IMPORTANT: Write a concise clinical narrative summary in 2-4 paragraphs. DO NOT include diagnoses list or plan here - those go in separate fields. Format: <p><b>Visit Context:</b> Brief reason for visit and relevant history.</p><p><b>Key Findings:</b> Important exam findings and test results in narrative form.</p><p><b>Clinical Impression:</b> Brief assessment synthesis.</p>",
   "chief_complaint": "string - main reason for visit or referral in one sentence",
   "diagnoses": [
     {{
@@ -566,6 +566,13 @@ Output VALID JSON only:
   "follow_up": "string - recommended follow-up timing"
 }}
 
+CRITICAL FORMATTING RULES:
+1. summary_html should be a NARRATIVE overview, NOT a bulleted list
+2. DO NOT repeat diagnoses or plan in summary_html - they have their own fields
+3. summary_html should read like a clinical note paragraph, not a data dump
+4. Include ALL tests/findings mentioned in the document in clinical_values or in diagnosis bullets
+5. For patient_block, ALWAYS extract age or DOB if present - this is critical for reference selection
+
 CLINICAL REASONING RULES:
 1. Extract facts explicitly stated in the document
 2. For suggested_diagnoses: Only suggest if there's reasonable clinical evidence (e.g., RPE changes might suggest early AMD even if not explicitly diagnosed)
@@ -580,7 +587,73 @@ Document to analyze:
 """.strip()
 
 
-def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
+def extract_patient_age(patient_block: str) -> Optional[int]:
+    """Extract patient age from patient_block text.
+    
+    Looks for patterns like:
+    - DOB: 1965-05-12 (calculates age)
+    - Age: 58
+    - 58 y/o, 58yo, 58 years old
+    - (58) after name
+    """
+    if not patient_block:
+        return None
+    
+    text = patient_block.lower()
+    
+    # Try explicit age patterns first
+    age_patterns = [
+        r'\bage[:\s]+(\d{1,3})\b',  # Age: 58
+        r'(\d{1,3})\s*(?:y/?o|years?\s*old|yr)',  # 58 y/o, 58yo, 58 years old
+        r'\((\d{1,3})\)',  # (58) - age in parentheses
+    ]
+    
+    for pattern in age_patterns:
+        match = re.search(pattern, text)
+        if match:
+            age = int(match.group(1))
+            if 0 < age < 120:  # Sanity check
+                return age
+    
+    # Try to calculate from DOB
+    dob_patterns = [
+        r'dob[:\s]+(\d{4})[-/](\d{1,2})[-/](\d{1,2})',  # DOB: 1965-05-12
+        r'dob[:\s]+(\d{1,2})[-/](\d{1,2})[-/](\d{4})',  # DOB: 05/12/1965
+        r'born[:\s]+(\d{4})[-/](\d{1,2})[-/](\d{1,2})',  # Born: 1965-05-12
+    ]
+    
+    for pattern in dob_patterns:
+        match = re.search(pattern, text)
+        if match:
+            groups = match.groups()
+            try:
+                if len(groups[0]) == 4:  # YYYY-MM-DD
+                    year = int(groups[0])
+                else:  # MM/DD/YYYY
+                    year = int(groups[2])
+                current_year = datetime.now().year
+                age = current_year - year
+                if 0 < age < 120:
+                    return age
+            except (ValueError, IndexError):
+                continue
+    
+    return None
+
+
+def is_pediatric_reference(title: str) -> bool:
+    """Check if a reference title indicates pediatric content."""
+    title_lower = (title or "").lower()
+    pediatric_keywords = [
+        'pediatric', 'paediatric', 'child', 'children', 'infant', 
+        'neonatal', 'neonate', 'newborn', 'adolescent', 'juvenile',
+        'retinopathy of prematurity', 'rop', 'amblyopia', 'strabismus',
+        'congenital', 'childhood'
+    ]
+    return any(kw in title_lower for kw in pediatric_keywords)
+
+
+def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: Optional[int] = None) -> List[Dict[str, str]]:
     uniq_terms: List[str] = []
     for t in (terms or []):
         t = (t or "").strip()
@@ -588,6 +661,10 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
             uniq_terms.append(t)
 
     blob = " ".join(uniq_terms).lower()
+    
+    # Determine if patient is adult (age >= 18) - filter out pediatric papers
+    is_adult = patient_age is not None and patient_age >= 18
+    is_pediatric_patient = patient_age is not None and patient_age < 18
 
     def add_queries_for_subspecialty(b: str) -> List[str]:
         q: List[str] = []
@@ -599,9 +676,13 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
             q += ["cataract preferred practice pattern ophthalmology", "cataract guideline ophthalmology"]
         if any(k in b for k in ["glaucoma", "ocular hypertension", "iop"]):
             q += ["glaucoma preferred practice pattern", "European Glaucoma Society guidelines"]
+        # Only include pediatric queries if patient is actually pediatric or age unknown
         if any(k in b for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
-            q += ["amblyopia preferred practice pattern", "strabismus clinical practice guideline"]
-        if any(k in b for k in ["pediatric", "paediatric", "child", "infant"]):
+            if is_pediatric_patient or patient_age is None:
+                q += ["amblyopia preferred practice pattern", "strabismus clinical practice guideline"]
+            else:
+                q += ["adult strabismus guideline", "diplopia adult management"]
+        if any(k in b for k in ["pediatric", "paediatric", "child", "infant"]) and not is_adult:
             q += ["pediatric eye evaluations preferred practice pattern", "retinopathy of prematurity guideline"]
         if any(k in b for k in ["optic neuritis", "papilledema", "neuro", "visual field defect"]):
             q += ["optic neuritis guideline", "papilledema evaluation guideline"]
@@ -612,8 +693,13 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
     canonical_queries = add_queries_for_subspecialty(blob)
     case_queries: List[str] = []
     for term in uniq_terms[:8]:
-        case_queries.append(f"({term}) ophthalmology")
-        case_queries.append(f"({term}) (guideline OR consensus OR systematic review)")
+        # Add adult filter to queries if patient is adult
+        if is_adult:
+            case_queries.append(f"({term}) ophthalmology adult")
+            case_queries.append(f"({term}) (guideline OR consensus OR systematic review) NOT pediatric NOT children")
+        else:
+            case_queries.append(f"({term}) ophthalmology")
+            case_queries.append(f"({term}) (guideline OR consensus OR systematic review)")
 
     if not canonical_queries and not case_queries:
         case_queries = ["ophthalmology clinical practice guideline"]
@@ -654,27 +740,36 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[s
         result = data.get("result") or {}
 
         out: List[Dict[str, str]] = []
-        for i, pid in enumerate(pmids[:max_items], start=1):
+        num = 1
+        for pid in pmids:
+            if len(out) >= max_items:
+                break
             item = result.get(pid) or {}
             title = (item.get("title") or "").strip().rstrip(".")
+            
+            # Filter out pediatric papers for adult patients
+            if is_adult and is_pediatric_reference(title):
+                continue
+                
             source = (item.get("source") or "").strip()
             pubdate = (item.get("pubdate") or "").strip()
             authors = item.get("authors") or []
             first_author = (authors[0].get("name") if authors else "") or ""
             citation = " ".join([x for x in [first_author, title, source, pubdate] if x]).strip()
             out.append({
-                "number": str(i),
+                "number": str(num),
                 "pmid": pid,
                 "citation": citation,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{pid}/",
                 "source": "PubMed",
             })
+            num += 1
         return out
     except Exception:
         return []
 
 
-def canonical_reference_pool(labels):
+def canonical_reference_pool(labels, patient_age: Optional[int] = None):
     """Build a pool of authoritative references based on diagnoses.
     
     Prioritizes:
@@ -683,9 +778,14 @@ def canonical_reference_pool(labels):
     - Cochrane reviews
     - Landmark clinical trials
     - NEJM, Lancet, JAMA Ophthalmology key papers
+    
+    Filters out pediatric references if patient is adult (age >= 18).
     """
     blob = " ".join([str(x or "") for x in (labels or [])]).lower()
     pool = []
+    
+    is_adult = patient_age is not None and patient_age >= 18
+    is_pediatric_patient = patient_age is not None and patient_age < 18
 
     def add(pmid, citation, url="", source=""):
         pool.append({
@@ -749,14 +849,20 @@ def canonical_reference_pool(labels):
         add("", "AAO PPP: Cataract in the Adult Eye", "https://www.aao.org/education/preferred-practice-pattern/cataract-in-adult-eye-ppp", "AAO PPP")
         add("", "European Society of Cataract and Refractive Surgeons Guidelines", "https://www.escrs.org/", "ESCRS")
 
-    # STRABISMUS / AMBLYOPIA
+    # STRABISMUS / AMBLYOPIA - filter for adult vs pediatric
     if any(k in blob for k in ["strabismus", "amblyopia", "esotropia", "exotropia", "diplopia"]):
-        add("", "AAO PPP: Amblyopia", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO PPP")
-        add("", "AAO PPP: Esotropia and Exotropia", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO PPP")
-        add("15545803", "PEDIG - Amblyopia Treatment Studies", "https://pubmed.ncbi.nlm.nih.gov/15545803/", "Landmark Trial")
+        if is_adult:
+            # For adults, focus on adult strabismus/diplopia resources
+            add("", "AAO EyeWiki: Adult Strabismus", "https://eyewiki.aao.org/Adult_Strabismus", "AAO EyeWiki")
+            add("", "AAO PPP: Adult Strabismus", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
+        else:
+            # For pediatric patients or unknown age, include pediatric resources
+            add("", "AAO PPP: Amblyopia", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO PPP")
+            add("", "AAO PPP: Esotropia and Exotropia", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO PPP")
+            add("15545803", "PEDIG - Amblyopia Treatment Studies", "https://pubmed.ncbi.nlm.nih.gov/15545803/", "Landmark Trial")
 
-    # PEDIATRIC
-    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant", "rop"]):
+    # PEDIATRIC - only include if patient is actually pediatric
+    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant", "rop"]) and not is_adult:
         add("", "AAO PPP: Pediatric Eye Evaluations", "https://www.aao.org/education/preferred-practice-pattern/pediatric-eye-evaluations-ppp", "AAO PPP")
         add("", "AAO PPP: Retinopathy of Prematurity", "https://www.aao.org/education/preferred-practice-pattern/retinopathy-of-prematurity-ppp", "AAO PPP")
 
@@ -945,58 +1051,24 @@ Analysis:
 
 
 def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool) -> str:
-    """Clean up the signoff area, removing duplicate provider names if we have a signature."""
     txt = (letter_plain or "").rstrip()
     if not txt:
         return ""
-    
+    lines = txt.splitlines()
+    if lines:
+        last = lines[-1].strip()
+        prov = (provider_name or "").strip()
+        if prov and last.lower() == prov.lower():
+            lines = lines[:-1]
+    txt = "\n".join(lines).rstrip()
+    if has_signature:
+        return txt
     prov = (provider_name or "").strip()
     if not prov:
-        if has_signature:
-            return txt
         return txt
-    
-    # Normalize provider name for matching (remove titles, etc.)
-    prov_lower = prov.lower()
-    prov_words = set(re.split(r'[,.\s]+', prov_lower))
-    prov_words.discard('')
-    
-    lines = txt.splitlines()
-    
-    # Check last few lines for provider name and remove if present
-    lines_to_check = min(3, len(lines))
-    new_lines = list(lines)
-    
-    for i in range(len(lines) - 1, max(len(lines) - lines_to_check - 1, -1), -1):
-        if i < 0:
-            break
-        line = new_lines[i].strip()
-        line_lower = line.lower()
-        
-        # Check if this line contains the provider name
-        if prov_lower in line_lower:
-            new_lines.pop(i)
-            continue
-        
-        # Check if this line is mostly the provider's name words
-        line_words = set(re.split(r'[,.\s]+', line_lower))
-        line_words.discard('')
-        if line_words and prov_words and len(line_words & prov_words) >= len(prov_words) * 0.5:
-            # Line contains significant portion of provider name
-            if len(line_words) <= len(prov_words) + 2:  # Allow for title like "Dr." or credentials
-                new_lines.pop(i)
-                continue
-    
-    txt = "\n".join(new_lines).rstrip()
-    
-    if has_signature:
-        # With signature image, we don't add the name - it will be shown with the signature
-        return txt
-    
-    # Without signature, add provider name if not already present at end
-    if txt.lower().rstrip().endswith("kind regards,"):
+    if txt.lower().endswith("kind regards,"):
         return txt + "\n" + prov
-    if re.search(r"\bkind regards\b", txt[-100:], flags=re.IGNORECASE):
+    if re.search(r"\bkind regards\b", txt, flags=re.IGNORECASE):
         return txt + "\n" + prov
     return txt + "\n\nKind regards,\n" + prov
 
@@ -1077,13 +1149,13 @@ def get_job(job_id: str) -> Dict[str, Any]:
 
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    # Stage 2: Analyzing document (after extraction)
-    set_job(job_id, status="processing", stage="analyzing", stage_label="Analyzing clinical content...", progress=20, stage_num=2, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
+    # Stage 1: Starting analysis
+    set_job(job_id, status="processing", stage="analyzing", stage_label="Analyzing document...", progress=15, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
     
     obj, err = llm_json(analyze_prompt(note_text))
     
-    # Stage 3: Identifying diagnoses
-    set_job(job_id, stage="diagnoses", stage_label="Identifying diagnoses...", progress=45, stage_num=3, heartbeat_at=now_utc_iso())
+    # Stage 2: Structuring results
+    set_job(job_id, stage="structuring", stage_label="Structuring results...", progress=50, heartbeat_at=now_utc_iso())
     
     if err or not obj:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
@@ -1091,9 +1163,6 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
 
     analysis = dict(ANALYZE_SCHEMA)
     analysis.update(obj)
-
-    # Stage 4: Extracting patient info
-    set_job(job_id, stage="patient_info", stage_label="Extracting patient info...", progress=55, stage_num=4, heartbeat_at=now_utc_iso())
 
     pb = (analysis.get("patient_block") or "")
     pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
@@ -1119,8 +1188,12 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
-    # Stage 5: Fetching references
-    set_job(job_id, stage="references", stage_label="Fetching medical references...", progress=65, stage_num=5, heartbeat_at=now_utc_iso())
+    # Extract patient age for reference filtering
+    patient_age = extract_patient_age(pb)
+    analysis["patient_age"] = patient_age
+
+    # Stage 3: Fetching references
+    set_job(job_id, stage="references", stage_label="Fetching references...", progress=65, heartbeat_at=now_utc_iso())
     
     terms = []
     for dx in analysis.get("diagnoses") or []:
@@ -1128,12 +1201,13 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             label = (dx.get("label") or "").strip()
             if label:
                 terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
+    # Pass patient_age to filter out irrelevant pediatric papers for adult patients
+    references = pubmed_fetch_for_terms(terms, patient_age=patient_age)
+    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)], patient_age=patient_age)
     analysis['references'] = merge_references(references, canonical)
 
-    # Stage 6: Cross-referencing citations
-    set_job(job_id, stage="citations", stage_label="Cross-referencing citations...", progress=80, stage_num=6, heartbeat_at=now_utc_iso())
+    # Stage 4: Assigning citations
+    set_job(job_id, stage="citations", stage_label="Assigning citations...", progress=80, heartbeat_at=now_utc_iso())
 
     if analysis.get('references'):
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
@@ -1147,16 +1221,13 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(pl, dict) and isinstance(pl.get("number"), int):
                     pl["refs"] = pl_map.get(pl["number"], [])
 
-    # Stage 7: Finalizing
-    set_job(job_id, stage="finalizing", stage_label="Finalizing report...", progress=95, stage_num=7, heartbeat_at=now_utc_iso())
-
-    # Stage 8: Complete
-    set_job(job_id, status="complete", stage="complete", stage_label="Analysis complete", progress=100, stage_num=8, data=analysis, updated_at=now_utc_iso())
+    # Stage 5: Complete
+    set_job(job_id, status="complete", stage="complete", stage_label="Complete", progress=100, data=analysis, updated_at=now_utc_iso())
 
 
 def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False) -> None:
-    # Stage 1: Reading document
-    set_job(job_id, status="processing", stage="reading", stage_label="Reading document...", progress=5, stage_num=1, updated_at=now_utc_iso())
+    # Stage 0: Extracting text
+    set_job(job_id, status="processing", stage="extracting", stage_label="Extracting text...", progress=5, updated_at=now_utc_iso())
     set_job(job_id, heartbeat_at=now_utc_iso())
 
     try:
@@ -1188,8 +1259,6 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
                 return
 
         if name.endswith(".pdf"):
-            # Update to extracting stage
-            set_job(job_id, stage="extracting", stage_label="Extracting text from PDF...", progress=10, stage_num=1, heartbeat_at=now_utc_iso())
             try:
                 note_text = extract_pdf_text(io.BytesIO(data))
             except Exception:
@@ -1197,7 +1266,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
 
             if force_ocr or (not text_is_meaningful(note_text)):
                 # Stage: OCR in progress
-                set_job(job_id, stage="ocr", stage_label="Running optical character recognition...", progress=12, stage_num=1, heartbeat_at=now_utc_iso())
+                set_job(job_id, stage="ocr", stage_label="Running OCR...", progress=8, heartbeat_at=now_utc_iso())
                 ocr_attempted = True
                 ocr_text, ocr_err = ocr_pdf_bytes(data)
                 if ocr_err:
@@ -1209,7 +1278,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
             set_job(job_id, heartbeat_at=now_utc_iso())
 
         elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            set_job(job_id, stage="ocr", stage_label="Processing image with OCR...", progress=12, stage_num=1, heartbeat_at=now_utc_iso())
+            set_job(job_id, stage="ocr", stage_label="Running OCR on image...", progress=8, heartbeat_at=now_utc_iso())
             ocr_attempted = True
             if Image is None or pytesseract is None:
                 set_job(job_id, status="error", error="Image OCR dependencies missing", updated_at=now_utc_iso())
@@ -1861,7 +1930,7 @@ def patient_letter_prompt(analysis: dict) -> str:
         if isinstance(p, dict) and p.get("title"):
             plan_summary += f"- {p.get('title')}\n"
             for bullet in (p.get("bullets") or [])[:3]:
-                plan_summary += f"  • {bullet}\n"
+                plan_summary += f"  â€¢ {bullet}\n"
     
     return f"""
 You are a compassionate healthcare communicator writing a letter to a patient about their recent eye examination.
@@ -1883,7 +1952,7 @@ RECOMMENDED PLAN:
 
 WRITING GUIDELINES:
 1. Use warm, reassuring language - patients may be anxious about their results
-2. Explain medical terms in plain English (e.g., "IOP" → "eye pressure")
+2. Explain medical terms in plain English (e.g., "IOP" â†’ "eye pressure")
 3. If findings are normal, emphasize the good news
 4. If there are concerns, explain them clearly but without causing undue alarm
 5. List next steps clearly (appointments, medications, lifestyle changes)
@@ -1920,7 +1989,7 @@ def insurance_letter_prompt(analysis: dict) -> str:
             bullets = dx.get("bullets", [])
             dx_formatted += f"- {code} {label}\n"
             for b in bullets[:3]:
-                dx_formatted += f"  • {b}\n"
+                dx_formatted += f"  â€¢ {b}\n"
     
     # Format plan items
     plan_formatted = ""
@@ -1928,7 +1997,7 @@ def insurance_letter_prompt(analysis: dict) -> str:
         if isinstance(p, dict):
             plan_formatted += f"- {p.get('title', '')}\n"
             for b in (p.get("bullets") or [])[:3]:
-                plan_formatted += f"  • {b}\n"
+                plan_formatted += f"  â€¢ {b}\n"
     
     return f"""
 You are a medical documentation specialist writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).

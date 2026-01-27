@@ -97,13 +97,6 @@ def doctor():
     return render_template('index.html', user=current_user)
 
 
-@auth_bp.route('/documentation')
-@login_required
-def documentation():
-    """Documentation page"""
-    return render_template('auth/documentation.html', user=current_user)
-
-
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
     """Register a new organization and admin user"""

@@ -56,7 +56,7 @@
   ```
   1. Visit /register
   2. Fill form (clinic name, user email, password)
-  3. Submit → creates org + user
+  3. Submit â†’ creates org + user
   4. Redirect to /dashboard
   5. Logout
   6. Login again
@@ -280,11 +280,11 @@ Before considering Phase 1 complete:
 ## What You've Achieved
 
 After Phase 1 (2 weeks), you have:
-- ✅ Multi-tenant architecture (orgs + users)
-- ✅ Persistent job storage
-- ✅ Usage tracking and limits
-- ✅ Audit trail for compliance
-- ✅ Scalable foundation for Phase 2
+- âœ… Multi-tenant architecture (orgs + users)
+- âœ… Persistent job storage
+- âœ… Usage tracking and limits
+- âœ… Audit trail for compliance
+- âœ… Scalable foundation for Phase 2
 
 **You can now:**
 - Onboard multiple clinics
@@ -297,13 +297,13 @@ After Phase 1 (2 weeks), you have:
 ## What to Skip (For Now)
 
 Don't build these yet:
-- ❌ Stripe integration (Phase 2)
-- ❌ Email verification (Phase 2)
-- ❌ Password reset (Phase 2)
-- ❌ Team invites (Phase 2)
-- ❌ Redis sessions (Phase 2)
-- ❌ Rate limiting (Phase 2)
-- ❌ Complex roles (Phase 2)
+- âŒ Stripe integration (Phase 2)
+- âŒ Email verification (Phase 2)
+- âŒ Password reset (Phase 2)
+- âŒ Team invites (Phase 2)
+- âŒ Redis sessions (Phase 2)
+- âŒ Rate limiting (Phase 2)
+- âŒ Complex roles (Phase 2)
 
 Just get the foundation working and shipping!
 

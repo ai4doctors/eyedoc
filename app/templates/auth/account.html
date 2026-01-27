@@ -42,7 +42,7 @@
   </header>
 
   <div class="accountWrap">
-    <a href="{{ url_for('auth.index') }}" class="backLink">← Back to Dashboard</a>
+    <a href="{{ url_for('auth.index') }}" class="backLink">â† Back to Dashboard</a>
     
     <div class="accountHeader">
       <h1 class="accountTitle">Account Settings</h1>
@@ -107,10 +107,9 @@
     {% if user.role.value == 'admin' %}
     <div class="accountCard">
       <h2 class="cardTitle">Admin Actions</h2>
-      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <a href="{{ url_for('auth.team') }}" class="btn" style="text-decoration: none;">Manage Team</a>
-        <button class="btn" disabled title="Coming soon">Manage Billing</button>
-      </div>
+      <p style="color: var(--muted); margin: 0 0 16px 0;">Team management and billing coming in Phase 2</p>
+      <button class="btn" disabled>Invite Team Member</button>
+      <button class="btn" disabled style="margin-left: 8px;">Manage Billing</button>
     </div>
     {% endif %}
   </div>

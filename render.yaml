@@ -22,7 +22,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: APP_VERSION
-        value: "2026.9"
+        value: "2026.8"
       - key: OPENAI_API_KEY
         sync: false
       - key: AWS_S3_BUCKET

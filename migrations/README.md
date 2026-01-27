@@ -2,19 +2,29 @@
 
 Flask-Migrate (Alembic) manages database schema changes.
 
-## Commands
+## Initial Setup
 
 ```bash
-# Initialize (already done)
+# Initialize migrations (first time only)
 flask db init
 
-# Create migration
+# Create initial migration
+flask db migrate -m "Initial schema"
+
+# Apply migrations
+flask db upgrade
+```
+
+## Common Commands
+
+```bash
+# Create a new migration
 flask db migrate -m "Description of changes"
 
 # Apply migrations
 flask db upgrade
 
-# Rollback
+# Rollback one migration
 flask db downgrade
 
 # Show current revision
@@ -33,4 +43,14 @@ flask db history
 
 ## Production
 
-Migrations run automatically on Render deployment via Dockerfile CMD.
+Migrations run automatically on Render deployment via the Dockerfile CMD.
+
+## Troubleshooting
+
+If migrations fail:
+```bash
+# Reset migrations (DESTROYS DATA)
+flask db stamp head
+flask db migrate -m "Reset"
+flask db upgrade
+```

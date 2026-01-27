@@ -4,155 +4,199 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## v2026.9 New Features
+## ✨ Features
 
-### Doctor UI Improvements
-- **Enhanced Footer** - Better disclaimer, support email (support@maneiro.ai), quick links
-- **Documentation Page** - In-app documentation accessible from Resources menu
-- **Progress Stages** - 8 distinct stages that never repeat (Reading → Analyzing → Identifying → Extracting → References → Citations → Finalizing → Complete)
-- **Improved Signatures** - Better duplicate name detection in letter signoff
-- **Admin Actions** - Direct link to Team management instead of Phase 2 placeholder
-
-### Assistant UI Enhancements  
-- **Quick Reference Mode** - Urgency guidelines, appointment durations, when to call doctor, workup protocols, CPT/ICD pairings
-- **Scheduling Suggestions** - Automatic appointment type/duration recommendations based on urgency
-- **More Letter Types** - Patient, Insurance, Appointment Confirmation, Results (Normal/Follow-up)
-- **Real-time Stage Labels** - Shows actual processing stage during analysis
-
-### Technical
-- **Health Endpoint** - `/healthz` for load balancer health checks
-- **Version Endpoint** - `/version` returns build info and feature flags
+- **AI-Powered Analysis**: Extract diagnoses, plans, and clinical summaries from uploaded notes
+- **Smart Reference Selection**: Age-appropriate PubMed citations (filters pediatric papers for adult patients)
+- **Professional Letter Generation**: Create referral letters, patient letters, and insurance letters
+- **Multi-Tenant Architecture**: Support for multiple clinics with usage tracking
+- **Audio Transcription**: Record and transcribe exam notes via AWS Transcribe
+- **OCR Support**: Extract text from scanned PDFs and images
+- **PDF Export**: Professional letterhead-enabled PDF generation
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- Python 3.11+
+- PostgreSQL 15+ (or Docker)
+- OpenAI API key
+- AWS account (for S3 + Transcribe)
+
+### Local Setup
+
 ```bash
+# Clone the repository
 git clone https://github.com/yourusername/maneiro-ai.git
 cd maneiro-ai
-docker-compose up -d
-python3 -m venv venv && source venv/bin/activate
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
-cp .env.example .env  # Edit with your keys
-flask db upgrade
+
+# Start PostgreSQL with Docker
+docker-compose up -d postgres
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# Initialize database
+python init_db.py
+
+# Run the application
 flask run
 ```
 
 Visit: http://localhost:5000
 
-## 📖 Documentation
-
-- **[Phased Implementation](docs/PHASED_IMPLEMENTATION.md)** - Strategic rollout plan
-- **[Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)** - 2-week sprint guide
-
-## 🏗️ Phase 1 Architecture (Current)
-
-**Status:** ✅ Ready to implement | **Timeline:** 2 weeks
+## 📁 Project Structure
 
 ```
-Multi-Tenant System
-├── Organizations (clinics) → billing entity
-│   ├── Users (doctors, staff)
-│   └── Jobs (analysis tasks)
-├── Authentication (Flask-Login)
-├── PostgreSQL (persistence)
-└── Audit Logging (compliance)
+maneiro-ai/
+├── app/
+│   ├── __init__.py          # Flask app factory
+│   ├── api.py               # API endpoints (analyze, generate, export)
+│   ├── auth.py              # Authentication routes
+│   ├── models.py            # Database models
+│   ├── templates/
+│   │   ├── index.html       # Doctor view (main app)
+│   │   ├── assistant.html   # Staff view (triage & letters)
+│   │   └── auth/            # Login, register, etc.
+│   └── static/
+│       ├── css/app.css
+│       ├── js/app.js
+│       └── img/
+├── config.py                # Environment configurations
+├── wsgi.py                  # Production entry point
+├── init_db.py               # Database initialization
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── render.yaml              # Render.com deployment
+├── docs/                    # Implementation guides
+└── tests/                   # Test suite
 ```
 
-**Core Features:**
-- ✅ Multi-tenant (organizations + users)
-- ✅ Job persistence in PostgreSQL
-- ✅ Usage limits (50 jobs/month trial)
-- ✅ Audit logging
-- ✅ PDF/image OCR analysis
-- ✅ AWS Transcribe integration
-- ✅ AI report generation
-- ✅ PubMed citations
+## 🔑 Environment Variables
 
-## 🔑 Multi-Tenant Design
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `SECRET_KEY` | Flask secret key | Yes |
+| `OPENAI_API_KEY` | OpenAI API key | Yes |
+| `AWS_S3_BUCKET` | S3 bucket for uploads | For audio |
+| `AWS_REGION` | AWS region | For audio |
 
-Every user belongs to an Organization:
+## 🏗️ Architecture
+
+### Multi-Tenant Design
+
+Every user belongs to an Organization (clinic):
 
 ```python
-# Registration creates org + admin user
 Organization(name="Vancouver Eye Clinic", plan="trial", max_jobs=50)
 User(organization_id=1, email="dr@clinic.com", role="admin")
-
-# Usage checked at org level
-if not org.can_create_job:  # Checks org.monthly_count < org.max_jobs
-    return error("Limit reached")
 ```
 
-## 🗄️ Database Schema
+### User Roles
+
+- **Admin**: Full access + team management
+- **Doctor**: Clinical analysis + letter generation
+- **Staff**: Triage + patient/insurance letters
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/analyze_start` | POST | Start document analysis |
+| `/analyze_status` | GET | Poll analysis status |
+| `/generate_report` | POST | Generate referral letter |
+| `/export_pdf` | POST | Export letter as PDF |
+| `/triage_fax` | POST | Triage incoming documents |
+| `/transcribe_start` | POST | Start audio transcription |
+
+## 📊 Database Schema
 
 ```sql
 organizations   -- Clinics (billable entities)
-users          -- Belongs to organization  
-jobs           -- Belongs to org + user
-audit_logs     -- Compliance tracking
+users           -- Belongs to organization  
+jobs            -- Analysis tasks (belongs to org + user)
+audit_logs      -- Compliance tracking
 ```
 
-## ⚙️ Configuration
+## 🚢 Deployment
 
-**Phase 1:** Use environment variables (simple)
-```bash
-DATABASE_URL=postgresql://...
-OPENAI_API_KEY=sk-...
-AWS_S3_BUCKET=bucket
-SECRET_KEY=secret
+### Render.com (Recommended)
+
+1. Connect your GitHub repository
+2. Add PostgreSQL database
+3. Set environment variables
+4. Deploy!
+
+```yaml
+# render.yaml is pre-configured
+databases:
+  - name: maneiro-db
+    plan: starter
+
+services:
+  - type: web
+    name: maneiro-web
+    env: docker
 ```
 
-**Phase 2:** AWS Parameter Store (optional later)
-
-## 📊 Phase Roadmap
-
-### Phase 1: Foundation (2 weeks) ← **YOU ARE HERE**
-- Multi-tenant architecture
-- User authentication
-- Job persistence  
-- Audit logging
-- Usage limits
-
-### Phase 2: Monetization (2 weeks)
-- Stripe integration
-- Multi-tier pricing
-- Webhooks
-- Redis + rate limiting
-
-### Phase 3: Enterprise (8-12 weeks)
-- Team management
-- SSO, API access
-- Custom branding
-- Advanced compliance
-
-## ✅ Phase 1 Success Criteria
-
-Ready for Phase 2 when:
-- [ ] 3+ clinics registered
-- [ ] Jobs persist across restarts
-- [ ] Usage limits enforced
-- [ ] Audit log working
-- [ ] Demoed to real clinic
-
-## 🚀 Deploy to Render
+### Docker
 
 ```bash
-git push origin main
-# Render auto-deploys
-# Add PostgreSQL database
-# Set environment variables
-# Migrations run automatically
+docker build -t maneiro-ai .
+docker run -p 10000:10000 --env-file .env maneiro-ai
 ```
 
-## 🛠️ Tech Stack
+## 🧪 Testing
 
-Flask 3.1 | PostgreSQL | SQLAlchemy | OpenAI GPT-4 | AWS S3/Transcribe | ReportLab | Tesseract OCR
+```bash
+# Run all tests
+pytest
 
-## 📞 Next Steps
+# With coverage
+pytest --cov=app tests/
 
-1. Read: `docs/PHASED_IMPLEMENTATION.md`
-2. Follow: `docs/PHASE_1_CHECKLIST.md`  
-3. Ship Phase 1 in 2 weeks
+# Specific test file
+pytest tests/test_api.py -v
+```
+
+## 📖 Documentation
+
+- [Phased Implementation Guide](docs/PHASED_IMPLEMENTATION.md)
+- [Phase 1 Checklist](docs/PHASE_1_CHECKLIST.md)
+- [Quick Start Guide](docs/QUICKSTART.md)
+
+## 🔒 Security
+
+- CSRF protection on all forms
+- Bcrypt password hashing
+- Session-based authentication
+- Audit logging for compliance
+- Rate limiting (Phase 2)
+
+## 📝 License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests
+5. Submit a pull request
 
 ---
 
-**Version:** 2026.9 | **Status:** Production Ready | **Python:** 3.11+
+**Version:** 2026.8 | **Status:** Production Ready | **Python:** 3.11+
