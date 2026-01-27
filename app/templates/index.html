@@ -16,6 +16,7 @@
         <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" style="background:transparent" /></div>
       </div>
       {% if user %}
+      <div class="orgDivider"></div>
       <span class="orgName">{{ user.organization.name }}</span>
       {% endif %}
     </div>
@@ -37,7 +38,7 @@
             FAQ & Help
           </a>
           <div class="dropdownDivider"></div>
-          <a class="dropdownItem" href="/cdn-cgi/l/email-protection#f685838686998482b69b9798939f8499d8979f">
+          <a class="dropdownItem" href="mailto:support@maneiro.ai">
             <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
             Contact Support
           </a>
@@ -100,7 +101,7 @@
           <svg viewBox="0 0 24 24"><path d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>
           How to Use
         </button>
-        <a href="mailto:support@maneiro.ai" class="sideNavBtn">
+        <a href="/cdn-cgi/l/email-protection#04777174746b76704469656a616d766b2a656d" class="sideNavBtn">
           <svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
           Contact Support
         </a>
@@ -231,21 +232,20 @@
       </section>
 
       <footer class="footer">
-        <div class="footerContent">
+        <div class="footerRow">
           <div class="footerBrand">
             <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" />
             <span class="footerVersion">v{{ version }}</span>
           </div>
+          <div class="footerDisclaimer">
+            Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
+          </div>
           <div class="footerLinks">
             <a href="mailto:support@maneiro.ai" class="footerLink">Contact Support</a>
             <span class="footerDot">·</span>
-            <a href="#" onclick="openFaq(); return false;" class="footerLink">Help & FAQ</a>
+            <button type="button" onclick="openFaq()" class="footerLink footerBtn">Help & FAQ</button>
           </div>
         </div>
-        <div class="footerDisclaimer">
-          Maneiro is a clinical documentation aid. All outputs require physician review before use. The provider remains solely responsible for clinical decisions.
-        </div>
-        <div class="footerCopyright">© 2026 Maneiro.ai · All rights reserved</div>
       </footer>
     </div>
   </div>
@@ -469,5 +469,4 @@
     </div>
   </div>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script data-cfasync="false" src="/cdn-cgi/sc
+  <div id="toast" class="toast" role=

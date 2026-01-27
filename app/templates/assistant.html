@@ -1480,7 +1480,7 @@
           <span class="footerVersion">v2026.8</span>
         </div>
         <div class="footerLinks">
-          <a href="mailto:support@maneiro.ai" class="footerLink">Contact Support</a>
+          <a href="/cdn-cgi/l/email-protection#d1a2a4a1a1bea3a591bcb0bfb4b8a3beffb0b8" class="footerLink">Contact Support</a>
           <span class="footerDot">·</span>
           <button onclick="showHelp()" class="footerLink" style="background:none;border:none;cursor:pointer;font:inherit;color:inherit;">Help & FAQ</button>
         </div>
@@ -1494,7 +1494,7 @@
 
   <div id="toast" class="toast"></div>
 
-  <script>
+  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
     // State
     let currentView = 'dashboard';
     let triageJobId = '';
@@ -2248,12 +2248,4 @@
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'u') { e.preventDefault(); showView('triage'); }
         if (e.key === 't') { e.preventDefault(); showView('triage'); }
-        if (e.key === 'l') { e.preventDefault(); showView('letter'); }
-      }
-    });
-
-    // Initialize
-    updateStats();
-  </script>
-</body>
-</html>
+    

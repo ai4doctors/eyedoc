@@ -431,41 +431,6 @@ document.addEventListener("keydown", (e) => {
   }
 })
 
-function openFaq(){
-  const m = el("faqModal")
-  if(m){ m.classList.remove("hidden") }
-}
-function closeFaq(){
-  const m = el("faqModal")
-  if(m){ m.classList.add("hidden") }
-}
-if(el("faqBtn")){
-  el("faqBtn").addEventListener("click", openFaq)
-}
-if(el("faqClose")){
-  el("faqClose").addEventListener("click", closeFaq)
-}
-if(el("faqModal")){
-  el("faqModal").addEventListener("click", (e) => {
-    if(e.target && e.target.dataset && e.target.dataset.close){
-      closeFaq()
-    }
-  })
-}
-if(el("recordModal")){
-  el("recordModal").addEventListener("click", (e) => {
-    if(e.target && e.target.dataset && e.target.dataset.close){
-      closeRecord()
-    }
-  })
-}
-document.addEventListener("keydown", (e) => {
-  if(e.key === "Escape"){
-    closeFaq()
-    closeRecord()
-  }
-})
-
 function applyTheme(){
   document.body.classList.remove("dark")
 }
@@ -1302,33 +1267,6 @@ document.addEventListener("click", (e) => {
   }
 })
 
-
-function openFaq(){
-  const m = el("faqModal")
-  if(m){ m.classList.remove("hidden") }
-}
-function closeFaq(){
-  const m = el("faqModal")
-  if(m){ m.classList.add("hidden") }
-}
-if(el("faqBtn")){
-  el("faqBtn").addEventListener("click", openFaq)
-}
-if(el("faqClose")){
-  el("faqClose").addEventListener("click", closeFaq)
-}
-if(el("faqModal")){
-  el("faqModal").addEventListener("click", (e) => {
-    if(e.target && e.target.dataset && e.target.dataset.close){
-      closeFaq()
-    }
-  })
-}
-document.addEventListener("keydown", (e) => {
-  if(e.key === "Escape"){
-    closeFaq()
-  }
-})
 
 function openSettings(){
   const m = el("settingsModal")
