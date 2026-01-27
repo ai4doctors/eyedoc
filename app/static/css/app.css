@@ -32,11 +32,12 @@ body{
   z-index:20;
 }
 
-/* Left section: logo + org name */
+/* Left section: logo + org name - width matches sidebar for alignment */
 .topBarLeft{
   display:flex;
   align-items:center;
   gap:16px;
+  min-width:276px; /* Aligns with sidebar (300px - 24px padding) */
 }
 .orgName{
   font-size:14px;
@@ -44,6 +45,7 @@ body{
   color:var(--muted);
   padding-left:16px;
   border-left:1px solid var(--border);
+  margin-left:auto; /* Push to right edge */
 }
 
 /* Right section: grouped actions */
@@ -852,4 +854,50 @@ body{
   background:linear-gradient(90deg, #667eea, #764ba2);
   border-radius:4px;
   transition:width 0.3s ease;
+}
+
+/* Enhanced footer styles */
+.footerMain{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:24px;
+  margin-bottom:12px;
+  flex-wrap:wrap;
+}
+.footerDisclaimer{
+  max-width:600px;
+  font-size:12px;
+  line-height:1.5;
+  color:var(--muted);
+}
+.footerDisclaimer strong{
+  color:var(--text);
+  font-weight:700;
+}
+.footerLinks{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  font-size:13px;
+}
+.footerLinks a{
+  color:var(--primary);
+  text-decoration:none;
+  font-weight:600;
+}
+.footerLinks a:hover{
+  text-decoration:underline;
+}
+.footerDot{
+  color:var(--border);
+}
+.footerBottom{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  font-size:12px;
+  color:var(--muted);
+  padding-top:12px;
+  border-top:1px solid var(--border);
 }

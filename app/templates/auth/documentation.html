@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation | Maneiro.ai</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}" />
+  <style>
+    .docsWrap { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+    .docsHeader { margin-bottom: 32px; text-align: center; }
+    .docsTitle { font-size: 32px; font-weight: 900; margin: 0 0 12px 0; }
+    .docsSubtitle { color: var(--muted); font-size: 18px; margin: 0; }
+    .docsCard { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 28px; margin-bottom: 24px; }
+    .cardTitle { font-size: 20px; font-weight: 700; margin: 0 0 16px 0; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+    .cardIcon { font-size: 24px; }
+    .docsList { margin: 0; padding: 0; list-style: none; }
+    .docsList li { padding: 12px 0; border-bottom: 1px solid var(--border); line-height: 1.5; }
+    .docsList li:last-child { border-bottom: none; }
+    .docsList strong { color: var(--text); }
+    .backLink { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); text-decoration: none; font-weight: 600; margin-bottom: 20px; }
+    .backLink:hover { color: var(--text); }
+    .comingSoon { background: rgba(156,208,197,0.1); border: 1px dashed var(--primary); padding: 32px; text-align: center; border-radius: 14px; margin-top: 24px; }
+    .comingSoon h3 { margin: 0 0 8px 0; color: var(--primary); }
+    .comingSoon p { margin: 0; color: var(--muted); }
+    .tipBox { background: rgba(245,158,11,0.08); border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 12px 12px 0; margin-top: 16px; }
+    .tipBox strong { color: #d97706; }
+  </style>
+</head>
+<body>
+  <header class="topBar">
+    <div class="brand">
+      <div class="brandMark"><img src="{{ url_for('static', filename='img/logo.png') }}" alt="maneiro" class="brandLogo" /></div>
+    </div>
+    <div class="topActions">
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.index') }}">Dashboard</a>
+      <a class="iconBtn linkBtn" href="{{ url_for('auth.logout') }}">Logout</a>
+    </div>
+  </header>
+
+  <div class="docsWrap">
+    <a href="{{ url_for('auth.index') }}" class="backLink">← Back to Dashboard</a>
+    
+    <div class="docsHeader">
+      <h1 class="docsTitle">Documentation</h1>
+      <p class="docsSubtitle">Learn how to get the most out of Maneiro.ai</p>
+    </div>
+
+    <div class="docsCard">
+      <h2 class="cardTitle"><span class="cardIcon">📄</span> Getting Started</h2>
+      <ul class="docsList">
+        <li><strong>Upload a clinical document</strong> — PDF or image file containing exam notes, referrals, or clinical records. Handwritten and typed documents both work.</li>
+        <li><strong>Review the analysis</strong> — Maneiro extracts diagnoses, clinical findings, and generates a structured summary with PubMed references.</li>
+        <li><strong>Generate your letter</strong> — Choose recipient type, customize the reason, and generate a professional referral letter.</li>
+        <li><strong>Export or copy</strong> — Download as PDF with your letterhead/signature, or copy rich text directly into your EMR.</li>
+      </ul>
+    </div>
+
+    <div class="docsCard">
+      <h2 class="cardTitle"><span class="cardIcon">🎙️</span> Voice Recording</h2>
+      <ul class="docsList">
+        <li><strong>Dictation mode</strong> — Record yourself summarizing the exam findings. Best for quick notes.</li>
+        <li><strong>Live exam mode</strong> — Record the actual patient encounter with speaker separation. Identifies doctor vs patient speech.</li>
+        <li><strong>Language support</strong> — English, Portuguese, Spanish, and French with automatic detection.</li>
+      </ul>
+    </div>
+
+    <div class="docsCard">
+      <h2 class="cardTitle"><span class="cardIcon">👥</span> Assistant Mode</h2>
+      <ul class="docsList">
+        <li><strong>Triage incoming faxes</strong> — Upload referrals and get urgency classification, scheduling recommendations, and task lists.</li>
+        <li><strong>Generate patient letters</strong> — Create easy-to-understand summaries for patients about their results.</li>
+        <li><strong>Insurance letters</strong> — Generate prior authorization and medical necessity letters with proper formatting.</li>
+      </ul>
+    </div>
+
+    <div class="docsCard">
+      <h2 class="cardTitle"><span class="cardIcon">⚙️</span> Settings & Customization</h2>
+      <ul class="docsList">
+        <li><strong>Letterhead</strong> — Upload your clinic letterhead image (PNG/JPG). It will appear at the top of exported PDFs.</li>
+        <li><strong>Signature</strong> — Upload your signature image. It will be placed at the end of letters above your printed name.</li>
+        <li><strong>Language preferences</strong> — Set input/output language preferences for your workflow.</li>
+      </ul>
+      <div class="tipBox">
+        <strong>Pro tip:</strong> For best results, use a transparent PNG for your signature (white background will show in the PDF).
+      </div>
+    </div>
+
+    <div class="docsCard">
+      <h2 class="cardTitle"><span class="cardIcon">🔒</span> Privacy & Security</h2>
+      <ul class="docsList">
+        <li><strong>Data handling</strong> — Documents are processed in memory and not stored permanently. Analysis results are kept only for your active session.</li>
+        <li><strong>Local storage</strong> — Your recent cases are stored in your browser only. They don't leave your device.</li>
+        <li><strong>Audit logging</strong> — All significant actions are logged for compliance purposes.</li>
+      </ul>
+    </div>
+
+    <div class="comingSoon">
+      <h3>📚 Full Documentation Coming Soon</h3>
+      <p>We're building comprehensive guides, video tutorials, and API documentation.<br>Questions? Contact <a href="mailto:support@maneiro.ai">support@maneiro.ai</a></p>
+    </div>
+  </div>
+</body>
+</html>

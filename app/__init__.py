@@ -16,7 +16,7 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 
 # Version info
-APP_VERSION = os.environ.get("APP_VERSION", "2026.8")
+APP_VERSION = os.environ.get("APP_VERSION", "2026.9")
 BUILD_TIME = os.environ.get("BUILD_TIME", "")
 GIT_COMMIT = os.environ.get("GIT_COMMIT", "")
 

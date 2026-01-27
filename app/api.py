@@ -945,24 +945,58 @@ Analysis:
 
 
 def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool) -> str:
+    """Clean up the signoff area, removing duplicate provider names if we have a signature."""
     txt = (letter_plain or "").rstrip()
     if not txt:
         return ""
-    lines = txt.splitlines()
-    if lines:
-        last = lines[-1].strip()
-        prov = (provider_name or "").strip()
-        if prov and last.lower() == prov.lower():
-            lines = lines[:-1]
-    txt = "\n".join(lines).rstrip()
-    if has_signature:
-        return txt
+    
     prov = (provider_name or "").strip()
     if not prov:
+        if has_signature:
+            return txt
         return txt
-    if txt.lower().endswith("kind regards,"):
+    
+    # Normalize provider name for matching (remove titles, etc.)
+    prov_lower = prov.lower()
+    prov_words = set(re.split(r'[,.\s]+', prov_lower))
+    prov_words.discard('')
+    
+    lines = txt.splitlines()
+    
+    # Check last few lines for provider name and remove if present
+    lines_to_check = min(3, len(lines))
+    new_lines = list(lines)
+    
+    for i in range(len(lines) - 1, max(len(lines) - lines_to_check - 1, -1), -1):
+        if i < 0:
+            break
+        line = new_lines[i].strip()
+        line_lower = line.lower()
+        
+        # Check if this line contains the provider name
+        if prov_lower in line_lower:
+            new_lines.pop(i)
+            continue
+        
+        # Check if this line is mostly the provider's name words
+        line_words = set(re.split(r'[,.\s]+', line_lower))
+        line_words.discard('')
+        if line_words and prov_words and len(line_words & prov_words) >= len(prov_words) * 0.5:
+            # Line contains significant portion of provider name
+            if len(line_words) <= len(prov_words) + 2:  # Allow for title like "Dr." or credentials
+                new_lines.pop(i)
+                continue
+    
+    txt = "\n".join(new_lines).rstrip()
+    
+    if has_signature:
+        # With signature image, we don't add the name - it will be shown with the signature
+        return txt
+    
+    # Without signature, add provider name if not already present at end
+    if txt.lower().rstrip().endswith("kind regards,"):
         return txt + "\n" + prov
-    if re.search(r"\bkind regards\b", txt, flags=re.IGNORECASE):
+    if re.search(r"\bkind regards\b", txt[-100:], flags=re.IGNORECASE):
         return txt + "\n" + prov
     return txt + "\n\nKind regards,\n" + prov
 
@@ -1043,13 +1077,13 @@ def get_job(job_id: str) -> Dict[str, Any]:
 
 
 def run_analysis_job(job_id: str, note_text: str) -> None:
-    # Stage 1: Starting analysis
-    set_job(job_id, status="processing", stage="analyzing", stage_label="Analyzing document...", progress=15, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
+    # Stage 2: Analyzing document (after extraction)
+    set_job(job_id, status="processing", stage="analyzing", stage_label="Analyzing clinical content...", progress=20, stage_num=2, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
     
     obj, err = llm_json(analyze_prompt(note_text))
     
-    # Stage 2: Structuring results
-    set_job(job_id, stage="structuring", stage_label="Structuring results...", progress=50, heartbeat_at=now_utc_iso())
+    # Stage 3: Identifying diagnoses
+    set_job(job_id, stage="diagnoses", stage_label="Identifying diagnoses...", progress=45, stage_num=3, heartbeat_at=now_utc_iso())
     
     if err or not obj:
         set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
@@ -1057,6 +1091,9 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
 
     analysis = dict(ANALYZE_SCHEMA)
     analysis.update(obj)
+
+    # Stage 4: Extracting patient info
+    set_job(job_id, stage="patient_info", stage_label="Extracting patient info...", progress=55, stage_num=4, heartbeat_at=now_utc_iso())
 
     pb = (analysis.get("patient_block") or "")
     pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
@@ -1082,8 +1119,8 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
             prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
             analysis["provider_name"] = prov2
 
-    # Stage 3: Fetching references
-    set_job(job_id, stage="references", stage_label="Fetching references...", progress=65, heartbeat_at=now_utc_iso())
+    # Stage 5: Fetching references
+    set_job(job_id, stage="references", stage_label="Fetching medical references...", progress=65, stage_num=5, heartbeat_at=now_utc_iso())
     
     terms = []
     for dx in analysis.get("diagnoses") or []:
@@ -1095,8 +1132,8 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
     canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
     analysis['references'] = merge_references(references, canonical)
 
-    # Stage 4: Assigning citations
-    set_job(job_id, stage="citations", stage_label="Assigning citations...", progress=80, heartbeat_at=now_utc_iso())
+    # Stage 6: Cross-referencing citations
+    set_job(job_id, stage="citations", stage_label="Cross-referencing citations...", progress=80, stage_num=6, heartbeat_at=now_utc_iso())
 
     if analysis.get('references'):
         cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
@@ -1110,13 +1147,16 @@ def run_analysis_job(job_id: str, note_text: str) -> None:
                 if isinstance(pl, dict) and isinstance(pl.get("number"), int):
                     pl["refs"] = pl_map.get(pl["number"], [])
 
-    # Stage 5: Complete
-    set_job(job_id, status="complete", stage="complete", stage_label="Complete", progress=100, data=analysis, updated_at=now_utc_iso())
+    # Stage 7: Finalizing
+    set_job(job_id, stage="finalizing", stage_label="Finalizing report...", progress=95, stage_num=7, heartbeat_at=now_utc_iso())
+
+    # Stage 8: Complete
+    set_job(job_id, status="complete", stage="complete", stage_label="Analysis complete", progress=100, stage_num=8, data=analysis, updated_at=now_utc_iso())
 
 
 def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False) -> None:
-    # Stage 0: Extracting text
-    set_job(job_id, status="processing", stage="extracting", stage_label="Extracting text...", progress=5, updated_at=now_utc_iso())
+    # Stage 1: Reading document
+    set_job(job_id, status="processing", stage="reading", stage_label="Reading document...", progress=5, stage_num=1, updated_at=now_utc_iso())
     set_job(job_id, heartbeat_at=now_utc_iso())
 
     try:
@@ -1148,6 +1188,8 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
                 return
 
         if name.endswith(".pdf"):
+            # Update to extracting stage
+            set_job(job_id, stage="extracting", stage_label="Extracting text from PDF...", progress=10, stage_num=1, heartbeat_at=now_utc_iso())
             try:
                 note_text = extract_pdf_text(io.BytesIO(data))
             except Exception:
@@ -1155,7 +1197,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
 
             if force_ocr or (not text_is_meaningful(note_text)):
                 # Stage: OCR in progress
-                set_job(job_id, stage="ocr", stage_label="Running OCR...", progress=8, heartbeat_at=now_utc_iso())
+                set_job(job_id, stage="ocr", stage_label="Running optical character recognition...", progress=12, stage_num=1, heartbeat_at=now_utc_iso())
                 ocr_attempted = True
                 ocr_text, ocr_err = ocr_pdf_bytes(data)
                 if ocr_err:
@@ -1167,7 +1209,7 @@ def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: 
             set_job(job_id, heartbeat_at=now_utc_iso())
 
         elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            set_job(job_id, stage="ocr", stage_label="Running OCR on image...", progress=8, heartbeat_at=now_utc_iso())
+            set_job(job_id, stage="ocr", stage_label="Processing image with OCR...", progress=12, stage_num=1, heartbeat_at=now_utc_iso())
             ocr_attempted = True
             if Image is None or pytesseract is None:
                 set_job(job_id, status="error", error="Image OCR dependencies missing", updated_at=now_utc_iso())

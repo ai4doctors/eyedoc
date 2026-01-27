@@ -285,6 +285,53 @@
       padding: 10px 12px;
       border-radius: 8px;
     }
+    /* Scheduling suggestion box */
+    .scheduleBox {
+      background: rgba(99,102,241,0.08);
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .scheduleTitle {
+      font-weight: 700;
+      color: #4f46e5;
+      margin-bottom: 8px;
+    }
+    .scheduleDetail {
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    /* Quick reference styles */
+    .refCard {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .refCardTitle {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .refCardIcon { font-size: 20px; }
+    .refList {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .refList li {
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .refList li:last-child { border-bottom: none; }
+    .refList strong { color: var(--text); }
   </style>
 </head>
 <body>
@@ -343,8 +390,9 @@
 
   <div class="assistantMain">
     <div class="modeToggle">
-      <button id="modeTriageBtn" class="modeBtn active" type="button">Triage Incoming Fax</button>
-      <button id="modeLetterBtn" class="modeBtn" type="button">Generate Letter</button>
+      <button id="modeTriageBtn" class="modeBtn active" type="button">📨 Triage Fax</button>
+      <button id="modeLetterBtn" class="modeBtn" type="button">✉️ Generate Letter</button>
+      <button id="modeRefBtn" class="modeBtn" type="button">📖 Quick Reference</button>
     </div>
 
     <!-- Upload Area -->
@@ -367,6 +415,12 @@
       <div class="triageHeader">
         <span id="triageDocType" class="triageBadge docType">—</span>
         <span id="triageUrgency" class="triageBadge urgency">—</span>
+      </div>
+
+      <!-- Scheduling recommendation -->
+      <div id="scheduleBox" class="scheduleBox hidden">
+        <div class="scheduleTitle">📅 Scheduling Recommendation</div>
+        <div id="scheduleDetail" class="scheduleDetail"></div>
       </div>
 
       <div class="fromInfo">
@@ -420,8 +474,11 @@
       <div class="letterTypeSelect">
         <label class="fieldLabel" for="letterType">Letter Type</label>
         <select id="letterType" class="ctrl">
-          <option value="patient">Patient Letter</option>
-          <option value="insurance">Insurance Letter</option>
+          <option value="patient">Patient Letter (friendly summary)</option>
+          <option value="insurance">Insurance / Prior Auth Letter</option>
+          <option value="appointment">Appointment Confirmation</option>
+          <option value="results_normal">Results Letter - Normal</option>
+          <option value="results_followup">Results Letter - Needs Follow-up</option>
         </select>
       </div>
 
@@ -434,6 +491,65 @@
           <button class="btn" onclick="copyLetter()">Copy</button>
           <button class="btn" onclick="exportLetterPdf()">Export PDF</button>
         </div>
+      </div>
+    </div>
+
+    <!-- QUICK REFERENCE MODE -->
+    <div id="referenceOutput" class="hidden">
+      <h2 style="font-size: 20px; font-weight: 900; margin: 0 0 20px 0;">📖 Quick Reference Guide</h2>
+      
+      <div class="refCard">
+        <div class="refCardTitle"><span class="refCardIcon">🚨</span> Urgency Guidelines</div>
+        <ul class="refList">
+          <li><strong>STAT (Same day):</strong> Acute vision loss, CRAO/CRVO, chemical burn, acute angle closure, endophthalmitis, retinal detachment symptoms</li>
+          <li><strong>URGENT (24-48 hrs):</strong> IOP > 30, severe eye pain, corneal ulcer, orbital cellulitis, new onset diplopia, papilledema</li>
+          <li><strong>SOON (1-2 weeks):</strong> IOP 24-30, moderate uveitis, diabetic macular edema, wet AMD with new symptoms</li>
+          <li><strong>ROUTINE (4-6 weeks):</strong> Glaucoma suspect, stable cataracts, routine diabetic exam, dry AMD monitoring</li>
+        </ul>
+      </div>
+
+      <div class="refCard">
+        <div class="refCardTitle"><span class="refCardIcon">📅</span> Appointment Duration Guidelines</div>
+        <ul class="refList">
+          <li><strong>New patient comprehensive:</strong> 60 minutes</li>
+          <li><strong>New patient consultation:</strong> 45 minutes</li>
+          <li><strong>Follow-up:</strong> 20-30 minutes</li>
+          <li><strong>Post-op day 1:</strong> 15 minutes</li>
+          <li><strong>Visual field only:</strong> 30 minutes</li>
+        </ul>
+      </div>
+
+      <div class="refCard">
+        <div class="refCardTitle"><span class="refCardIcon">📞</span> When to Call the Doctor</div>
+        <ul class="refList">
+          <li>Patient reports sudden vision loss (call immediately)</li>
+          <li>IOP reading > 30 mmHg on pretesting</li>
+          <li>Patient describes flashes AND new floaters together</li>
+          <li>Referral marked "urgent" or "emergent"</li>
+          <li>Prior auth denied - needs peer-to-peer</li>
+          <li>Patient in significant distress or appears unwell</li>
+        </ul>
+      </div>
+
+      <div class="refCard">
+        <div class="refCardTitle"><span class="refCardIcon">📋</span> Common Workup Protocols</div>
+        <ul class="refList">
+          <li><strong>Glaucoma Suspect:</strong> IOP, pachymetry, gonioscopy, OCT RNFL, HVF 24-2</li>
+          <li><strong>Diabetic Eye Exam:</strong> Dilated fundus exam, OCT macula, fundus photos</li>
+          <li><strong>Cataract Evaluation:</strong> BCVA, refraction, IOL calculations, OCT macula</li>
+          <li><strong>Macular Degeneration:</strong> OCT macula, fundus photos, Amsler grid</li>
+          <li><strong>Dry Eye:</strong> TBUT, Schirmer's, corneal staining, meibography</li>
+        </ul>
+      </div>
+
+      <div class="refCard">
+        <div class="refCardTitle"><span class="refCardIcon">💰</span> Common CPT / ICD Pairings</div>
+        <ul class="refList">
+          <li><strong>92083 (Visual Field):</strong> H40.x (glaucoma), H47.x (optic nerve)</li>
+          <li><strong>92134 (OCT Retina):</strong> H35.3x (macular degeneration), E11.3x (diabetic retinopathy)</li>
+          <li><strong>92133 (OCT RNFL):</strong> H40.x (glaucoma), H47.x (optic nerve disorder)</li>
+          <li><strong>92250 (Fundus Photo):</strong> E11.3x (diabetic retinopathy), H35.3x (AMD)</li>
+        </ul>
       </div>
     </div>
   </div>
@@ -497,16 +613,33 @@
       currentMode = 'triage';
       el('modeTriageBtn').classList.add('active');
       el('modeLetterBtn').classList.remove('active');
+      el('modeRefBtn').classList.remove('active');
       el('triageOutput').classList.add('hidden');
       el('letterOutput').classList.add('hidden');
+      el('referenceOutput').classList.add('hidden');
+      el('uploadArea').classList.remove('hidden');
     });
 
     el('modeLetterBtn').addEventListener('click', () => {
       currentMode = 'letter';
       el('modeLetterBtn').classList.add('active');
       el('modeTriageBtn').classList.remove('active');
+      el('modeRefBtn').classList.remove('active');
       el('triageOutput').classList.add('hidden');
       el('letterOutput').classList.add('hidden');
+      el('referenceOutput').classList.add('hidden');
+      el('uploadArea').classList.remove('hidden');
+    });
+
+    el('modeRefBtn').addEventListener('click', () => {
+      currentMode = 'reference';
+      el('modeRefBtn').classList.add('active');
+      el('modeTriageBtn').classList.remove('active');
+      el('modeLetterBtn').classList.remove('active');
+      el('triageOutput').classList.add('hidden');
+      el('letterOutput').classList.add('hidden');
+      el('uploadArea').classList.add('hidden');
+      el('referenceOutput').classList.remove('hidden');
     });
 
     // File upload
@@ -572,9 +705,11 @@
         }
 
         const status = json.status || 'waiting';
+        const stageLabel = json.stage_label || 'Processing...';
 
         if (status === 'processing' || status === 'waiting') {
-          setTimeout(pollAnalysis, 1200);
+          showStatus(stageLabel);
+          setTimeout(pollAnalysis, 800);
           return;
         }
 
@@ -627,6 +762,22 @@
         const urgency = (json.urgency || 'ROUTINE').toUpperCase();
         urgencyEl.textContent = urgency;
         urgencyEl.className = 'triageBadge urgency ' + urgency.toLowerCase();
+        
+        // Scheduling suggestion (show for referrals)
+        const scheduleBox = el('scheduleBox');
+        if (docType.includes('REFERRAL')) {
+          const schedMap = {
+            'STAT': { time: 'Same day', duration: '45 min', type: 'Urgent consultation' },
+            'URGENT': { time: 'Within 24-48 hours', duration: '45 min', type: 'Priority consultation' },
+            'SOON': { time: 'Within 1-2 weeks', duration: '45 min', type: 'New patient consultation' },
+            'ROUTINE': { time: 'Within 4-6 weeks', duration: '60 min', type: 'New patient comprehensive' }
+          };
+          const sched = schedMap[urgency] || schedMap['ROUTINE'];
+          el('scheduleDetail').innerHTML = `<strong>Type:</strong> ${sched.type} · <strong>Timeframe:</strong> ${sched.time} · <strong>Duration:</strong> ${sched.duration}`;
+          scheduleBox.classList.remove('hidden');
+        } else {
+          scheduleBox.classList.add('hidden');
+        }
         
         // From info
         el('triageFrom').textContent = json.from_provider || json.from || '—';

@@ -5,9 +5,22 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Flask](https://img.shields.io/badge/flask-3.1-green.svg)](https://flask.palletsprojects.com/)
 
-## v2026.8 New Features
+## v2026.9 New Features
 
-- **Progress Stages** - Real-time progress bar showing analysis steps (Extracting → Analyzing → Structuring → References → Citations → Complete)
+### Doctor UI Improvements
+- **Enhanced Footer** - Better disclaimer, support email (support@maneiro.ai), quick links
+- **Documentation Page** - In-app documentation accessible from Resources menu
+- **Progress Stages** - 8 distinct stages that never repeat (Reading → Analyzing → Identifying → Extracting → References → Citations → Finalizing → Complete)
+- **Improved Signatures** - Better duplicate name detection in letter signoff
+- **Admin Actions** - Direct link to Team management instead of Phase 2 placeholder
+
+### Assistant UI Enhancements  
+- **Quick Reference Mode** - Urgency guidelines, appointment durations, when to call doctor, workup protocols, CPT/ICD pairings
+- **Scheduling Suggestions** - Automatic appointment type/duration recommendations based on urgency
+- **More Letter Types** - Patient, Insurance, Appointment Confirmation, Results (Normal/Follow-up)
+- **Real-time Stage Labels** - Shows actual processing stage during analysis
+
+### Technical
 - **Health Endpoint** - `/healthz` for load balancer health checks
 - **Version Endpoint** - `/version` returns build info and feature flags
 
@@ -142,4 +155,4 @@ Flask 3.1 | PostgreSQL | SQLAlchemy | OpenAI GPT-4 | AWS S3/Transcribe | ReportL
 
 ---
 
-**Version:** 2026.8 | **Status:** Production Ready | **Python:** 3.11+
+**Version:** 2026.9 | **Status:** Production Ready | **Python:** 3.11+

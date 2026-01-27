@@ -3,6 +3,7 @@ let uploadedFile = null
 let jobId = ""
 let latestAnalysis = null
 let latestLetterHtml = ""
+let lastSeenStageNum = 0
 // Single theme for consistency
 let theme = "light"
 
@@ -738,7 +739,8 @@ async function startAnalyze(triedOcr){
     toast("Select a file first")
     return
   }
-  setAnalyzeStatus("processing")
+  lastSeenStageNum = 0
+  setAnalyzeStatus("processing", "Uploading...", 0)
   el("ocrPrompt").classList.add("hidden")
   const fd = new FormData()
   fd.append("file", uploadedFile)
@@ -786,6 +788,7 @@ async function pollAnalyze(){
     const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`)
     const json = await res.json()
     if(!json.ok){
+      lastSeenStageNum = 0
       setAnalyzeStatus("waiting")
       toast(json.error || "Analyze status error")
       return
@@ -793,22 +796,29 @@ async function pollAnalyze(){
     const status = json.status || "waiting"
     const stageLabel = json.stage_label || ""
     const progress = json.progress || 0
+    const stageNum = json.stage_num || 0
     if(status === "waiting"){
       setAnalyzeStatus("waiting")
       setTimeout(pollAnalyze, 600)
       return
     }
     if(status === "processing"){
-      setAnalyzeStatus("processing", stageLabel, progress)
-      setTimeout(pollAnalyze, 1200)
+      // Only update UI if stage has advanced (prevents showing repeated stages)
+      if(stageNum >= lastSeenStageNum){
+        lastSeenStageNum = stageNum
+        setAnalyzeStatus("processing", stageLabel, progress)
+      }
+      setTimeout(pollAnalyze, 800)
       return
     }
     if(status === "error"){
+      lastSeenStageNum = 0
       setAnalyzeStatus("waiting")
       toast(json.error || "Analyze failed")
       return
     }
     if(status === "complete"){
+      lastSeenStageNum = 0
       setAnalyzeStatus("analysis complete")
       latestAnalysis = json.data || {}
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
@@ -1155,7 +1165,8 @@ async function saveTranscriptToAnalyze(){
   }
   jobId = json.job_id
   closeRecord()
-  setAnalyzeStatus("processing")
+  lastSeenStageNum = 0
+  setAnalyzeStatus("processing", "Uploading...", 0)
   pollAnalyze()
 }
 
