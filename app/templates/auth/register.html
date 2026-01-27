@@ -256,14 +256,27 @@
       </div>
       
       <div class="formGroup">
-        <label class="formLabel" for="email">Email</label>
+        <label class="formLabel" for="username">Username</label>
+        <input 
+          type="text" 
+          id="username" 
+          name="username" 
+          class="formInput" 
+          placeholder="e.g. jsmith"
+          pattern="[a-zA-Z0-9_]+"
+          required
+        />
+        <div class="formHint">Letters, numbers, underscore only. Used for login.</div>
+      </div>
+      
+      <div class="formGroup">
+        <label class="formLabel" for="email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
         <input 
           type="email" 
           id="email" 
           name="email" 
           class="formInput" 
           placeholder="you@clinic.com"
-          required
         />
       </div>
       

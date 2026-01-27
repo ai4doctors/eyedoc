@@ -568,9 +568,6 @@ function renderDx(){
         }
       })
     }else{
-      if(aligned){
-        meta.appendChild(document.createTextNode("   "))
-      }
       const label = document.createElement("span")
       label.textContent = "General reasoning"
       meta.appendChild(label)

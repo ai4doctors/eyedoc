@@ -108,6 +108,7 @@ def register():
         clinic_name = request.form.get('clinic_name', '').strip()
         first_name = request.form.get('first_name', '').strip()
         last_name = request.form.get('last_name', '').strip()
+        username = request.form.get('username', '').strip().lower()
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
         password_confirm = request.form.get('password_confirm', '')
@@ -121,12 +122,15 @@ def register():
         if not first_name or not last_name:
             errors.append('First and last name are required')
         
-        if not email:
-            errors.append('Email is required')
-        elif not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
+        if not username:
+            errors.append('Username is required')
+        elif not re.match(r'^[a-zA-Z0-9_]+$', username):
+            errors.append('Username can only contain letters, numbers, and underscores')
+        elif User.query.filter_by(username=username).first():
+            errors.append('This username is already taken')
+        
+        if email and not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
             errors.append('Please enter a valid email address')
-        elif User.query.filter_by(email=email).first():
-            errors.append('An account with this email already exists')
         
         if len(password) < 8:
             errors.append('Password must be at least 8 characters')
@@ -149,7 +153,7 @@ def register():
         org = Organization(
             name=clinic_name,
             slug=slug,
-            email=email,
+            email=email or f'{username}@{slug}.local',
             plan=OrganizationPlan.TRIAL,
             max_monthly_jobs=50  # Trial limit
         )
@@ -159,7 +163,8 @@ def register():
         # Create admin user
         user = User(
             organization_id=org.id,
-            email=email,
+            username=username,
+            email=email if email else None,
             first_name=first_name,
             last_name=last_name,
             role=UserRole.ADMIN
@@ -171,7 +176,7 @@ def register():
         # Log the registration
         log_audit_event(
             'user_registered',
-            f'New organization "{clinic_name}" created with admin user {email}',
+            f'New organization "{clinic_name}" created with admin user {username}',
             user_id=user.id,
             org_id=org.id
         )
@@ -192,15 +197,15 @@ def login():
         return redirect(url_for('auth.index'))
     
     if request.method == 'POST':
-        email = request.form.get('email', '').strip().lower()
+        username = request.form.get('username', '').strip().lower()
         password = request.form.get('password', '')
         next_page = request.form.get('next', '')
         
-        # Find user
-        user = User.query.filter_by(email=email).first()
+        # Find user by username
+        user = User.query.filter_by(username=username).first()
         
         if user is None or not user.check_password(password):
-            flash('Invalid email or password', 'error')
+            flash('Invalid username or password', 'error')
             return render_template('auth/login.html')
         
         # Check if user is active
@@ -212,7 +217,7 @@ def login():
         login_user(user)
         
         # Log the event
-        log_audit_event('user_login', f'User {email} logged in')
+        log_audit_event('user_login', f'User {username} logged in')
         
         # Redirect based on role
         if next_page and next_page.startswith('/'):
@@ -266,17 +271,19 @@ def team():
         if action == 'add':
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
-            email = request.form.get('email', '').strip().lower()
+            username = request.form.get('username', '').strip().lower()
             role = request.form.get('role', 'staff')
             password = request.form.get('password', '')
             
             # Validation
             if not first_name or not last_name:
                 flash('First and last name are required', 'error')
-            elif not email or not re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', email):
-                flash('Valid email is required', 'error')
-            elif User.query.filter_by(email=email).first():
-                flash('An account with this email already exists', 'error')
+            elif not username:
+                flash('Username is required', 'error')
+            elif not re.match(r'^[a-zA-Z0-9_]+$', username):
+                flash('Username can only contain letters, numbers, and underscores', 'error')
+            elif User.query.filter_by(username=username).first():
+                flash('This username is already taken', 'error')
             elif len(password) < 8:
                 flash('Password must be at least 8 characters', 'error')
             else:
@@ -285,7 +292,7 @@ def team():
                 
                 new_user = User(
                     organization_id=org.id,
-                    email=email,
+                    username=username,
                     first_name=first_name,
                     last_name=last_name,
                     role=user_role
@@ -294,7 +301,7 @@ def team():
                 db.session.add(new_user)
                 db.session.commit()
                 
-                log_audit_event('user_created', f'Admin created new {role} user: {email}')
+                log_audit_event('user_created', f'Admin created new {role} user: {username}')
                 flash(f'{first_name} {last_name} has been added as {role}', 'success')
         
         elif action == 'delete':
@@ -302,10 +309,10 @@ def team():
             user = User.query.get(user_id)
             
             if user and user.organization_id == org.id and user.id != current_user.id:
-                email = user.email
+                username = user.username
                 db.session.delete(user)
                 db.session.commit()
-                log_audit_event('user_deleted', f'Admin deleted user: {email}')
+                log_audit_event('user_deleted', f'Admin deleted user: {username}')
                 flash(f'User has been removed', 'success')
             else:
                 flash('Cannot delete this user', 'error')

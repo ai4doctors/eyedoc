@@ -246,8 +246,9 @@
             <input type="text" id="last_name" name="last_name" class="formInput" required />
           </div>
           <div class="formGroup">
-            <label class="formLabel" for="email">Email</label>
-            <input type="email" id="email" name="email" class="formInput" required />
+            <label class="formLabel" for="username">Username</label>
+            <input type="text" id="username" name="username" class="formInput" required pattern="[a-zA-Z0-9_]+" placeholder="e.g. jsmith" />
+            <small style="color: var(--muted);">Letters, numbers, underscore only. Used for login.</small>
           </div>
           <div class="formGroup">
             <label class="formLabel" for="role">Role</label>
@@ -276,7 +277,7 @@
           <div class="userInfo">
             <div class="userName">{{ u.first_name }} {{ u.last_name }}</div>
             <div class="userMeta">
-              {{ u.email }}
+              @{{ u.username }}
               <span class="userRole {{ u.role.value }}">{{ u.role.value }}</span>
             </div>
           </div>

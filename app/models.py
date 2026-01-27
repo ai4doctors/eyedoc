@@ -55,7 +55,8 @@ class User(UserMixin, db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    email = db.Column(db.String(255), nullable=True)  # Optional now
     password_hash = db.Column(db.String(255), nullable=False)
     first_name = db.Column(db.String(100))
     last_name = db.Column(db.String(100))
