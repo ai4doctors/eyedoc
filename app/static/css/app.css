@@ -328,8 +328,21 @@ body{
   align-items:center;
   gap:14px;
 }
-.brandMark{display:flex; align-items:center}
-.brandLogo{height:46px; width:auto; display:block; background:none !important; border-radius:0}
+.brandMark{display:flex; align-items:center; background:transparent !important}
+.brandLogo{
+  height:46px;
+  width:auto;
+  display:block;
+  background:transparent !important;
+  background-color:transparent !important;
+  border-radius:0;
+  border:none;
+  box-shadow:none;
+}
+.brandLogo, .brandMark, .brand{
+  background:transparent !important;
+  background-color:transparent !important;
+}
 .brandName{
   font-weight:900;
 }
@@ -584,10 +597,69 @@ body{
 
 .footer{
   border-top:1px solid var(--border);
-  padding:10px 18px;
+  padding:12px 20px;
+  background: var(--panel);
+}
+.footerRow{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:20px;
+}
+.footerBrand{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
+}
+.footerLogo{
+  height:22px;
+  width:auto;
+  opacity:0.6;
+}
+.footerVersion{
+  font-size:11px;
+  color:var(--muted);
+  font-weight:600;
+}
+.footerDisclaimer{
   color:var(--muted);
   font-size:11px;
-  line-height:1.4;
+  line-height:1.35;
+  text-align:center;
+  flex:1;
+}
+.footerLinks{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-shrink:0;
+}
+.footerLink{
+  color:var(--muted);
+  text-decoration:none;
+  font-size:11px;
+  font-weight:600;
+  transition:color 0.15s;
+}
+.footerLink:hover{
+  color:var(--text);
+}
+.footerBtn{
+  background:none;
+  border:none;
+  cursor:pointer;
+  padding:0;
+  font-family:inherit;
+}
+.footerDot{
+  color:var(--border);
+}
+.footerCopyright{
+  color:var(--muted);
+  font-size:10px;
+  font-weight:600;
+  opacity:0.7;
 }
 .footerSmall{margin-top:6px}
 
@@ -756,7 +828,10 @@ body{
 .commGrid .btnPrimary{
   width:100%;
   height:var(--ctrlH);
-  padding:10px 14px;
+  padding:0 14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 .btnPrimary{
   background: linear-gradient(180deg, rgba(156,208,197,1), rgba(118,185,173,1));
@@ -813,25 +888,60 @@ body{
 /* Progress bar for analysis stages */
 .progressContainer{
   display:flex;
-  align-items:center;
+  flex-direction:column;
   gap:8px;
-  padding:5px 0;
+  padding:12px 16px;
+  background:linear-gradient(135deg, var(--panel2), var(--panel));
+  border:1px solid var(--border);
+  border-radius:12px;
+  margin-top:12px;
+}
+.progressHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
 }
 .progressLabel{
-  font-size:11px;
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+}
+.progressPct{
+  font-size:12px;
   color:var(--muted);
-  min-width:100px;
+  font-weight:600;
 }
 .progressBar{
-  flex:1;
-  height:5px;
+  width:100%;
+  height:8px;
   background:var(--border);
-  border-radius:3px;
+  border-radius:4px;
   overflow:hidden;
+  position:relative;
 }
 .progressFill{
   height:100%;
-  background:linear-gradient(90deg, #667eea, #764ba2);
-  border-radius:3px;
-  transition:width 0.3s ease;
+  background:linear-gradient(90deg, var(--primary), #76b9ad);
+  border-radius:4px;
+  transition:width 0.5s ease-out;
+  position:relative;
+}
+.progressFill::after{
+  content:'';
+  position:absolute;
+  top:0;
+  left:0;
+  right:0;
+  bottom:0;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+  animation:progressShine 1.5s ease-in-out infinite;
+}
+@keyframes progressShine{
+  0%{transform:translateX(-100%)}
+  100%{transform:translateX(100%)}
+}
+.progressHint{
+  font-size:11px;
+  color:var(--muted);
+  text-align:center;
 }

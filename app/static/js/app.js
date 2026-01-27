@@ -338,20 +338,34 @@ function toast(msg){
 function setAnalyzeStatus(state, stageLabel, progress){
   const box = el("analyzeStatus")
   if(state === "processing"){
-    let label = stageLabel || "Processing"
-    let pct = typeof progress === "number" ? progress : 0
+    let label = stageLabel || "Processing document..."
+    let pct = typeof progress === "number" ? Math.min(progress, 95) : 0
+    // Better stage messages
+    const stageMessages = {
+      "Uploading document...": "Uploading your document",
+      "Extracting text...": "Extracting text from document",
+      "Analyzing document...": "AI is analyzing the content",
+      "Building analysis...": "Building clinical analysis",
+      "Fetching references...": "Finding relevant references",
+      "Assigning citations...": "Linking citations to findings",
+      "Processing...": "Processing document..."
+    }
+    label = stageMessages[label] || label
     box.innerHTML = `<div class="progressContainer">
-      <div class="progressLabel">${label}</div>
+      <div class="progressHeader">
+        <div class="progressLabel">${label}</div>
+        <div class="progressPct">${pct}%</div>
+      </div>
       <div class="progressBar"><div class="progressFill" style="width:${pct}%"></div></div>
-      <span class="spinner" aria-hidden="true"></span>
+      <div class="progressHint">This usually takes 20-30 seconds</div>
     </div>`
     return
   }
   if(state === "analysis complete"){
-    box.innerHTML = 'Analysis complete <span class="muted">(ready)</span>'
+    box.innerHTML = '<div class="progressContainer" style="background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05))"><div class="progressHeader"><div class="progressLabel" style="color:#059669">✓ Analysis complete</div></div></div>'
     return
   }
-  box.innerHTML = 'Wait for analysis to complete <span class="muted">(waiting)</span>'
+  box.innerHTML = '<span class="muted" style="font-size:12px">Ready to analyze</span>'
 }
 
 function setGenerateStatus(state){

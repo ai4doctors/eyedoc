@@ -1043,21 +1043,6 @@
         </button>
       </div>
 
-      <div class="sidebarSection">
-        <div class="sidebarTitle">Templates</div>
-        <button class="navItem" onclick="useTemplate('soap')">
-          <svg viewBox="0 0 24 24"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
-          SOAP Note
-        </button>
-        <button class="navItem" onclick="useTemplate('referral')">
-          <svg viewBox="0 0 24 24"><path d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"/></svg>
-          Referral Letter
-        </button>
-        <button class="navItem" onclick="useTemplate('followup')">
-          <svg viewBox="0 0 24 24"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
-          Follow-up Note
-        </button>
-      </div>
     </aside>
 
     <!-- Main Content -->
@@ -1471,14 +1456,16 @@
     <footer class="assistantFooter">
       <div class="footerRow">
         <div class="footerBrand">
-          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" />
+          <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Maneiro" class="footerLogo" style="background:transparent !important" />
           <span class="footerVersion">v2026.8</span>
         </div>
         <div class="footerDisclaimer">
           Maneiro is a clinical documentation aid. All outputs require physician review. The provider remains solely responsible for clinical decisions.
         </div>
         <div class="footerLinks">
-          <a href="/cdn-cgi/l/email-protection#691a1c1919061b1d290408070c001b06470800" class="footerLink">Contact Support</a>
+          <a href="mailto:support@maneiro.ai" class="footerLink footerBtn">Contact Support</a>
+          <span class="footerDot">·</span>
+          <span class="footerCopyright">© 2026 Maneiro. All rights reserved.</span>
         </div>
       </div>
     </footer>
@@ -1495,9 +1482,22 @@
     let triageAnalysis = null;
     let letterAnalysis = null;
     let insuranceAnalysis = null;
-    let stats = { docsToday: 0, completed: 0, letters: 0 };
+    
+    // Load stats from localStorage
+    let stats = JSON.parse(localStorage.getItem('maneiro_assistant_stats') || '{"docsToday":0,"completed":0,"letters":0}');
+    
+    // Load recent activity from localStorage
+    let recentActivityItems = JSON.parse(localStorage.getItem('maneiro_recent_activity') || '[]');
 
     function el(id) { return document.getElementById(id); }
+    
+    function saveStats() {
+      localStorage.setItem('maneiro_assistant_stats', JSON.stringify(stats));
+    }
+    
+    function saveRecentActivity() {
+      localStorage.setItem('maneiro_recent_activity', JSON.stringify(recentActivityItems));
+    }
 
     function toast(msg) {
       const t = el('toast');
@@ -2181,46 +2181,71 @@
       el('statCompleted').textContent = stats.completed;
       el('statLetters').textContent = stats.letters;
       el('statAvgTime').textContent = stats.completed > 0 ? '~3m' : '--';
+      saveStats();
     }
 
     function addRecentActivity(type, title, urgency) {
+      // Add to stored array
+      recentActivityItems.unshift({ type, title, urgency, time: Date.now() });
+      // Keep only last 10
+      recentActivityItems = recentActivityItems.slice(0, 10);
+      saveRecentActivity();
+      
+      renderRecentActivity();
+    }
+    
+    function renderRecentActivity() {
       const list = el('recentActivity');
       const icons = {
         'triage': '<svg viewBox="0 0 24 24"><path d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08"/></svg>',
         'letter': '<svg viewBox="0 0 24 24"><path d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>',
         'insurance': '<svg viewBox="0 0 24 24"><path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751"/></svg>'
       };
-
-      // Remove empty state if exists
-      if (list.querySelector('div[style*="text-align: center"]')) {
-        list.innerHTML = '';
+      
+      if (recentActivityItems.length === 0) {
+        list.innerHTML = `
+          <div style="text-align: center; color: var(--muted); padding: 40px;">
+            <svg viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border); stroke-width: 1.5; fill: none; margin-bottom: 12px;"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+            <p style="margin: 0;">No recent activity yet.<br>Upload a document to get started.</p>
+          </div>
+        `;
+        return;
       }
-
-      const item = document.createElement('div');
-      item.className = 'recentItem';
-      item.innerHTML = `
-        <div class="recentIcon">${icons[type] || icons.triage}</div>
-        <div class="recentInfo">
-          <div class="recentTitle">${escapeHtml(title)}</div>
-          <div class="recentMeta">${type.charAt(0).toUpperCase() + type.slice(1)}${urgency ? ' · ' + urgency : ''}</div>
-        </div>
-        <div class="recentTime">Just now</div>
-      `;
-      list.insertBefore(item, list.firstChild);
-
-      // Keep only last 5
-      while (list.children.length > 5) {
-        list.removeChild(list.lastChild);
-      }
+      
+      list.innerHTML = recentActivityItems.map(item => {
+        const timeAgo = getTimeAgo(item.time);
+        return `
+          <div class="recentItem">
+            <div class="recentIcon">${icons[item.type] || icons.triage}</div>
+            <div class="recentInfo">
+              <div class="recentTitle">${escapeHtml(item.title)}</div>
+              <div class="recentMeta">${item.type.charAt(0).toUpperCase() + item.type.slice(1)}${item.urgency ? ' · ' + item.urgency : ''}</div>
+            </div>
+            <div class="recentTime">${timeAgo}</div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    function getTimeAgo(timestamp) {
+      const diff = Date.now() - timestamp;
+      const mins = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+      if (mins < 1) return 'Just now';
+      if (mins < 60) return `${mins}m ago`;
+      if (hours < 24) return `${hours}h ago`;
+      return `${days}d ago`;
     }
 
     function clearRecent() {
-      el('recentActivity').innerHTML = `
-        <div style="text-align: center; color: var(--muted); padding: 40px;">
-          <svg viewBox="0 0 24 24" style="width: 48px; height: 48px; stroke: var(--border); stroke-width: 1.5; fill: none; margin-bottom: 12px;"><path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
-          <p style="margin: 0;">No recent activity yet.<br>Upload a document to get started.</p>
-        </div>
-      `;
+      recentActivityItems = [];
+      saveRecentActivity();
+      stats = { docsToday: 0, completed: 0, letters: 0 };
+      saveStats();
+      updateStats();
+      renderRecentActivity();
+      toast('Activity cleared');
     }
 
     function useTemplate(type) {
@@ -2267,9 +2292,11 @@
     window.generatePatientLetter = generatePatientLetter;
     window.generateInsuranceLetter = generateInsuranceLetter;
     window.clearRecent = clearRecent;
+    window.renderRecentActivity = renderRecentActivity;
 
     // Initialize
     updateStats();
+    renderRecentActivity();
   </script>
 </body>
 </html>
