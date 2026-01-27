@@ -480,35 +480,79 @@ ANALYZE_SCHEMA: Dict[str, Any] = {
 def analyze_prompt(note_text: str) -> str:
     excerpt = clamp_text(note_text, 16000)
     return f"""
-You are a clinician assistant. You are given an encounter note extracted from a PDF.
+You are an expert clinical documentation analyst. Carefully analyze this document.
+
+STEP 1 - DOCUMENT CLASSIFICATION
+First, determine what type of document this is:
+- Clinical encounter note (exam, consultation, follow-up)
+- Referral request (someone asking for a referral TO a specialist)
+- Consultation report (specialist reporting BACK to referring doctor)
+- Lab/imaging results
+- Prescription or eyeglass Rx
+- Insurance/authorization form
+- Patient correspondence
+- Other
+
+STEP 2 - EXTRACT INFORMATION
+Based on document type, extract relevant information carefully.
 
 Output VALID JSON only, matching this schema exactly:
-provider_name: string
-patient_block: string
-summary_html: string
-diagnoses: array of items, each item:
-  number: integer
-  code: string
-  label: string
-  bullets: array of short strings
-plan: array of items, each item:
-  number: integer
-  title: string
-  bullets: array of short strings
-  aligned_dx_numbers: array of integers
-warnings: array of short strings
+{{
+  "document_type": "string - one of: encounter_note, referral_request, consultation_report, lab_results, prescription, insurance_form, correspondence, other",
+  "provider_name": "string - the authoring/sending clinician name and credentials",
+  "provider_clinic": "string - clinic or practice name if mentioned",
+  "patient_block": "string - patient demographics with <br> line breaks: name, DOB, PHN/MRN, phone, address",
+  "summary_html": "string - structured HTML summary with <b> headings and <p> paragraphs",
+  "chief_complaint": "string - main reason for visit or referral in one sentence",
+  "diagnoses": [
+    {{
+      "number": 1,
+      "code": "string - ICD code if available",
+      "label": "string - diagnosis with laterality/severity",
+      "bullets": ["key findings supporting this diagnosis"],
+      "severity": "string - mild/moderate/severe/not specified",
+      "urgency": "string - routine/soon/urgent/emergent"
+    }}
+  ],
+  "plan": [
+    {{
+      "number": 1,
+      "title": "string - action item title",
+      "bullets": ["specific details"],
+      "aligned_dx_numbers": [1],
+      "timeline": "string - when this should happen"
+    }}
+  ],
+  "referral_info": {{
+    "is_referral": true/false,
+    "referral_direction": "string - 'requesting' (wants referral) or 'responding' (consult report back)",
+    "referring_to": "string - specialist/subspecialty being referred to",
+    "referring_from": "string - who is making the referral",
+    "reason_for_referral": "string - specific reason",
+    "requested_service": "string - what they want done (e.g., 'surgical evaluation', 'manage glaucoma', 'second opinion')"
+  }},
+  "clinical_values": {{
+    "visual_acuity_od": "string",
+    "visual_acuity_os": "string",
+    "iop_od": "string",
+    "iop_os": "string",
+    "refraction": "string",
+    "other_measurements": ["string - any other significant measurements"]
+  }},
+  "warnings": ["any critical findings or red flags"],
+  "follow_up": "string - recommended follow-up timing"
+}}
 
-Rules:
-1 Use only facts supported by the note. If unknown, leave empty.
-1a provider_name must be the authoring clinician only. Never include the patient name inside provider_name.
-2 patient_block must contain patient demographics only. Include PHN if present. Exclude provider address and clinic address. Use <br> line breaks.
-3 summary_html should be a clean summary section with headings and paragraphs. Use <b> for headings and <p> blocks. No markdown.
-4 diagnoses must be problem list style, include laterality and severity when present.
-5 plan bullets must be actionable, conservative, and aligned to diagnoses.
-6 If exam findings are present, include them in summary_html with clear headings such as Exam findings and Imaging when applicable.
+RULES:
+1. Extract ONLY facts explicitly stated in the document. Do not infer or assume.
+2. For referral_info: If someone is ASKING for a patient to be seen by a specialist, that's "requesting". If a specialist is sending a report BACK, that's "responding".
+3. provider_name must be the document author, not the patient.
+4. Include ALL clinical measurements found (VA, IOP, refraction, etc.)
+5. summary_html should be comprehensive - include chief complaint, history, exam findings, imaging results.
+6. For prescriptions/Rx: Extract the prescription details into clinical_values.
+7. Diagnoses should include severity and urgency when determinable from context.
 
-
-Encounter note:
+Document to analyze:
 {excerpt}
 """.strip()
 
@@ -1366,104 +1410,256 @@ def healthz():
 
 # ============ ASSISTANT MODE ENDPOINTS ============
 
-def triage_fax_prompt(summary_html: str, patient_block: str, full_text: str = "") -> str:
-    """Prompt for triaging incoming fax/communication"""
-    context = summary_html or full_text or ""
+def triage_fax_prompt(summary_html: str, patient_block: str, full_text: str = "", analysis: dict = None) -> str:
+    """Prompt for triaging incoming fax/communication with intelligent reasoning"""
+    context = full_text or summary_html or ""
+    
+    # Include more analysis data if available
+    extra_context = ""
+    if analysis:
+        doc_type = analysis.get("document_type", "")
+        referral_info = analysis.get("referral_info", {})
+        diagnoses = analysis.get("diagnoses", [])
+        chief_complaint = analysis.get("chief_complaint", "")
+        provider_name = analysis.get("provider_name", "")
+        provider_clinic = analysis.get("provider_clinic", "")
+        
+        if doc_type:
+            extra_context += f"\nDocument type detected: {doc_type}"
+        if chief_complaint:
+            extra_context += f"\nChief complaint: {chief_complaint}"
+        if provider_name:
+            extra_context += f"\nSending provider: {provider_name}"
+        if provider_clinic:
+            extra_context += f"\nSending clinic: {provider_clinic}"
+        if referral_info.get("is_referral"):
+            extra_context += f"\nReferral direction: {referral_info.get('referral_direction', 'unknown')}"
+            extra_context += f"\nReferring to: {referral_info.get('referring_to', '')}"
+            extra_context += f"\nReason: {referral_info.get('reason_for_referral', '')}"
+            extra_context += f"\nRequested service: {referral_info.get('requested_service', '')}"
+        if diagnoses:
+            dx_list = ", ".join([d.get("label", "") for d in diagnoses[:5] if d.get("label")])
+            extra_context += f"\nDiagnoses: {dx_list}"
+    
     return f"""
-You are a clinic assistant helping triage incoming faxes and communications.
+You are an expert medical office coordinator helping triage incoming faxes and communications for an ophthalmology clinic.
 
-Analyze the document and extract:
-1. FROM: Who sent this communication (doctor name, clinic name, or organization)
-2. REGARDING: Brief description of what this is about (patient name if mentioned, type of document)
-3. FRONT DESK ACTIONS: Tasks the front desk should do (e.g., file document, update patient record, schedule appointment, send records)
-4. DOCTOR ACTIONS: Tasks requiring doctor attention (e.g., review results, sign forms, call back, clinical decision needed)
+STEP 1: DOCUMENT CLASSIFICATION
+Identify the document type:
+- REFERRAL REQUEST: Another doctor asking us to see their patient (IMPORTANT: requires scheduling)
+- CONSULTATION REPORT: A specialist sending us a report about our patient
+- LAB/IMAGING RESULTS: Test results to be filed or reviewed
+- INSURANCE/PRIOR AUTH: Authorization request or approval
+- MEDICAL RECORDS REQUEST: Someone requesting patient records
+- PRESCRIPTION REFILL: Request for medication/glasses Rx
+- PATIENT CORRESPONDENCE: Letter from or about a patient
+- MARKETING/SPAM: Promotional material (file/discard)
+- OTHER: Miscellaneous correspondence
 
-Output VALID JSON only:
-{{
-  "from": "string - sender name and organization",
-  "regarding": "string - brief description",
-  "front_desk_tasks": ["array of clear, actionable task strings"],
-  "doctor_tasks": ["array of clear, actionable task strings"]
-}}
+STEP 2: URGENCY ASSESSMENT
+- URGENT: Same-day action needed (acute symptoms, critical results, time-sensitive auth)
+- SOON: Within 1-3 days (routine referrals, pending results)
+- ROUTINE: Standard processing (records requests, normal results)
 
-Rules:
-1. Tasks should be single, clear sentences suitable for copying into an EHR task list
-2. If the document is routine (e.g., normal lab results), note that no urgent action is needed
-3. If patient information is present, include it in the "regarding" field
-4. Keep tasks specific and actionable
+STEP 3: ANALYZE CAREFULLY
+{extra_context}
 
-Patient info:
+Patient information:
 {patient_block}
 
 Document content:
-{context[:8000]}
+{context[:10000]}
+
+STEP 4: GENERATE ACTIONABLE TASKS
+Based on your analysis, create specific tasks for staff and doctors.
+
+Output VALID JSON only:
+{{
+  "document_type": "string - REFERRAL_REQUEST, CONSULTATION_REPORT, LAB_RESULTS, INSURANCE, RECORDS_REQUEST, PRESCRIPTION, CORRESPONDENCE, MARKETING, OTHER",
+  "urgency": "string - URGENT, SOON, ROUTINE",
+  "from_provider": "string - name of sending doctor/organization",
+  "from_clinic": "string - clinic/organization name",
+  "from_fax": "string - fax number if visible",
+  "regarding": "string - clear description: patient name + what this is about",
+  "patient_name": "string - patient name if mentioned",
+  "patient_dob": "string - DOB if mentioned",
+  "reasoning": "string - brief explanation of your classification and why",
+  "front_desk_tasks": [
+    "string - specific actionable task with clear instruction"
+  ],
+  "doctor_tasks": [
+    "string - specific actionable task requiring clinical decision"
+  ],
+  "key_clinical_info": "string - any critical clinical details the doctor should know immediately"
+}}
+
+TASK WRITING RULES:
+1. Tasks must be specific and actionable (who, what, when)
+2. Include patient name in tasks when known
+3. For REFERRAL REQUESTS: First front desk task should be about scheduling
+4. For REFERRAL REQUESTS: Doctor task should be about reviewing if they want to accept
+5. For RESULTS: Note if normal vs abnormal
+6. For INSURANCE: Note deadlines if visible
+7. If document is unclear or illegible, note that in reasoning
+
+EXAMPLE for a referral request:
+{{
+  "document_type": "REFERRAL_REQUEST",
+  "urgency": "SOON",
+  "from_provider": "Dr. Jane Smith, OD",
+  "from_clinic": "Vision Care Associates",
+  "regarding": "John Doe (DOB 05/12/1965) - Glaucoma referral for IOP management",
+  "front_desk_tasks": [
+    "Schedule new patient appointment for John Doe (DOB 05/12/1965) - glaucoma consultation",
+    "Call Vision Care Associates at [fax number] to confirm receipt and get appointment scheduled",
+    "Request previous records including OCT and visual fields"
+  ],
+  "doctor_tasks": [
+    "Review referral from Dr. Smith for John Doe - elevated IOP OD 28, OS 26, suspicious optic nerves",
+    "Determine appointment urgency based on IOP levels"
+  ],
+  "key_clinical_info": "IOP elevated: OD 28, OS 26. C/D ratio 0.7 OU. Patient on Latanoprost."
+}}
 """.strip()
 
 
 def patient_letter_prompt(analysis: dict) -> str:
     """Prompt for generating patient-friendly letter"""
+    diagnoses = analysis.get("diagnoses", [])
+    plan = analysis.get("plan", [])
+    
+    # Format diagnoses for the letter
+    dx_summary = ""
+    for dx in diagnoses[:5]:
+        if isinstance(dx, dict) and dx.get("label"):
+            dx_summary += f"- {dx.get('label')}\n"
+    
+    # Format plan items
+    plan_summary = ""
+    for p in plan[:5]:
+        if isinstance(p, dict) and p.get("title"):
+            plan_summary += f"- {p.get('title')}\n"
+            for bullet in (p.get("bullets") or [])[:3]:
+                plan_summary += f"  • {bullet}\n"
+    
     return f"""
-You are a clinic assistant writing a letter to a patient about their recent visit.
+You are a compassionate healthcare communicator writing a letter to a patient about their recent eye examination.
 
-Write a warm, professional letter in patient-friendly language:
-- Avoid medical jargon or explain terms simply
-- Be reassuring but accurate
-- Include key findings and next steps
-- End with contact information for questions
+PATIENT INFO:
+{analysis.get('patient_block', '')}
+
+PROVIDER:
+{analysis.get('provider_name', '')}
+
+CLINICAL SUMMARY:
+{analysis.get('summary_html', '')[:4000]}
+
+DIAGNOSES FOUND:
+{dx_summary}
+
+RECOMMENDED PLAN:
+{plan_summary}
+
+WRITING GUIDELINES:
+1. Use warm, reassuring language - patients may be anxious about their results
+2. Explain medical terms in plain English (e.g., "IOP" → "eye pressure")
+3. If findings are normal, emphasize the good news
+4. If there are concerns, explain them clearly but without causing undue alarm
+5. List next steps clearly (appointments, medications, lifestyle changes)
+6. Include when they should return for follow-up
+7. Provide contact information for questions
+8. Sign off warmly from the provider
+
+STRUCTURE:
+- Opening: Reference their recent visit and thank them
+- Summary: What we examined and found (in plain terms)
+- What this means: Explain the significance simply
+- Next steps: Clear action items they need to take
+- Reassurance: Appropriate closing based on findings
+- Contact info: How to reach the clinic with questions
 
 Output VALID JSON only:
 {{
-  "letter": "string - the complete letter text"
+  "letter": "string - the complete letter text with proper paragraph breaks"
 }}
-
-Patient info:
-{analysis.get('patient_block', '')}
-
-Provider:
-{analysis.get('provider_name', '')}
-
-Clinical summary:
-{analysis.get('summary_html', '')[:4000]}
-
-Diagnoses:
-{json.dumps(analysis.get('diagnoses', []), ensure_ascii=False)}
-
-Plan:
-{json.dumps(analysis.get('plan', []), ensure_ascii=False)}
 """.strip()
 
 
 def insurance_letter_prompt(analysis: dict) -> str:
     """Prompt for generating insurance/prior authorization letter"""
+    diagnoses = analysis.get("diagnoses", [])
+    plan = analysis.get("plan", [])
+    
+    # Format diagnoses with codes
+    dx_formatted = ""
+    for dx in diagnoses[:5]:
+        if isinstance(dx, dict):
+            code = dx.get("code", "")
+            label = dx.get("label", "")
+            bullets = dx.get("bullets", [])
+            dx_formatted += f"- {code} {label}\n"
+            for b in bullets[:3]:
+                dx_formatted += f"  • {b}\n"
+    
+    # Format plan items
+    plan_formatted = ""
+    for p in plan[:5]:
+        if isinstance(p, dict):
+            plan_formatted += f"- {p.get('title', '')}\n"
+            for b in (p.get("bullets") or [])[:3]:
+                plan_formatted += f"  • {b}\n"
+    
     return f"""
-You are a clinic assistant writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
+You are a medical documentation specialist writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
 
-Write a formal, clinical letter that:
-- Uses proper medical terminology and ICD codes if available
-- Clearly states the medical necessity
-- References clinical findings and examination results
-- Includes specific treatment recommendations
-- Is structured for insurance review
+PATIENT INFO:
+{analysis.get('patient_block', '')}
+
+PROVIDER:
+{analysis.get('provider_name', '')}
+
+CLINICAL SUMMARY:
+{analysis.get('summary_html', '')[:4000]}
+
+DIAGNOSES (with ICD codes if available):
+{dx_formatted}
+
+TREATMENT PLAN:
+{plan_formatted}
+
+LETTER REQUIREMENTS:
+1. Use formal medical terminology appropriate for insurance review
+2. Include ICD-10 codes when available
+3. Clearly establish MEDICAL NECESSITY - why this treatment/procedure is required
+4. Reference specific clinical findings (measurements, test results, exam findings)
+5. Explain why alternative treatments are inadequate or have been tried
+6. Include relevant history supporting the necessity
+7. State the specific treatment/procedure being requested
+8. Reference clinical guidelines or standard of care when applicable
+
+STRUCTURE:
+- Header: Date, To: Medical Review Department, Re: Prior Authorization / Medical Necessity
+- Patient identification: Name, DOB, Insurance ID
+- Opening: Purpose of letter and what is being requested
+- Clinical history: Relevant background
+- Current findings: Objective examination findings
+- Diagnosis: With ICD codes
+- Medical necessity statement: Why this treatment is required
+- Treatment plan: What is being requested
+- Supporting evidence: Guidelines, standards of care
+- Closing: Request for approval, contact for questions
+
+PERSUASION TECHNIQUES:
+- Lead with the most compelling clinical findings
+- Use specific numbers (visual acuity, IOP, measurements)
+- Reference progressive deterioration if applicable
+- Cite impact on daily functioning / quality of life
+- Note any failed conservative treatments
 
 Output VALID JSON only:
 {{
-  "letter": "string - the complete letter text"
+  "letter": "string - the complete formal letter text"
 }}
-
-Patient info:
-{analysis.get('patient_block', '')}
-
-Provider:
-{analysis.get('provider_name', '')}
-
-Clinical summary:
-{analysis.get('summary_html', '')[:4000]}
-
-Diagnoses:
-{json.dumps(analysis.get('diagnoses', []), ensure_ascii=False)}
-
-Plan:
-{json.dumps(analysis.get('plan', []), ensure_ascii=False)}
 """.strip()
 
 
@@ -1477,18 +1673,29 @@ def triage_fax():
     summary_html = analysis.get("summary_html", "")
     patient_block = analysis.get("patient_block", "")
     
-    prompt = triage_fax_prompt(summary_html, patient_block)
-    obj, err = llm_json(prompt, temperature=0.2)
+    # Pass full analysis for better context
+    prompt = triage_fax_prompt(summary_html, patient_block, analysis=analysis)
+    obj, err = llm_json(prompt, temperature=0.1)  # Lower temperature for more consistent output
     
     if err or not obj:
         return jsonify({"ok": False, "error": err or "Triage failed"}), 200
     
     return jsonify({
         "ok": True,
-        "from": obj.get("from", ""),
+        "document_type": obj.get("document_type", ""),
+        "urgency": obj.get("urgency", "ROUTINE"),
+        "from_provider": obj.get("from_provider", obj.get("from", "")),
+        "from_clinic": obj.get("from_clinic", ""),
+        "from_fax": obj.get("from_fax", ""),
         "regarding": obj.get("regarding", ""),
+        "patient_name": obj.get("patient_name", ""),
+        "patient_dob": obj.get("patient_dob", ""),
+        "reasoning": obj.get("reasoning", ""),
         "front_desk_tasks": obj.get("front_desk_tasks", []),
-        "doctor_tasks": obj.get("doctor_tasks", [])
+        "doctor_tasks": obj.get("doctor_tasks", []),
+        "key_clinical_info": obj.get("key_clinical_info", ""),
+        # Keep backwards compatibility
+        "from": obj.get("from_provider", obj.get("from", ""))
     }), 200
 
 

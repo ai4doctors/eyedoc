@@ -190,6 +190,101 @@
       justify-content: flex-end;
       margin-top: 16px;
     }
+    /* Enhanced triage styles */
+    .triageHeader {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .triageBadge {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .triageBadge.docType {
+      background: rgba(59,130,246,0.12);
+      color: #1d4ed8;
+      border: 1px solid rgba(59,130,246,0.25);
+    }
+    .triageBadge.docType.referral { background: rgba(168,85,247,0.12); color: #7c3aed; border-color: rgba(168,85,247,0.25); }
+    .triageBadge.urgency {
+      background: rgba(156,208,197,0.15);
+      color: #0d7a69;
+      border: 1px solid rgba(156,208,197,0.3);
+    }
+    .triageBadge.urgency.urgent {
+      background: rgba(239,68,68,0.12);
+      color: #dc2626;
+      border-color: rgba(239,68,68,0.25);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .triageBadge.urgency.soon {
+      background: rgba(245,158,11,0.12);
+      color: #d97706;
+      border-color: rgba(245,158,11,0.25);
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .fromSubValue {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .clinicalHighlight {
+      background: rgba(245,158,11,0.08);
+      border: 1px solid rgba(245,158,11,0.25);
+    }
+    .clinicalHighlight .outputTitle {
+      color: #d97706;
+    }
+    .clinicalContent {
+      color: var(--text);
+      font-weight: 500;
+    }
+    .reasoningSection {
+      margin-bottom: 20px;
+    }
+    .reasoningToggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .reasoningToggle:hover {
+      background: var(--panel);
+    }
+    .reasoningContent {
+      padding: 16px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .taskItem.priority {
+      background: rgba(245,158,11,0.05);
+      margin: 0 -12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -232,14 +327,39 @@
 
     <!-- TRIAGE MODE OUTPUT -->
     <div id="triageOutput" class="hidden">
+      <!-- Document type and urgency badges -->
+      <div class="triageHeader">
+        <span id="triageDocType" class="triageBadge docType">—</span>
+        <span id="triageUrgency" class="triageBadge urgency">—</span>
+      </div>
+
       <div class="fromInfo">
         <div class="fromLabel">From</div>
         <div id="triageFrom" class="fromValue">—</div>
+        <div id="triageFromClinic" class="fromSubValue"></div>
       </div>
       
       <div class="fromInfo" style="background: rgba(243,246,255,0.8); border-left-color: var(--border);">
         <div class="fromLabel">Regarding</div>
         <div id="triageRe" class="fromValue" style="font-size: 16px; font-weight: 600;">—</div>
+        <div id="triagePatientInfo" class="fromSubValue"></div>
+      </div>
+
+      <!-- Key clinical info (if any) -->
+      <div id="triageClinicalWrapper" class="outputSection clinicalHighlight hidden">
+        <div class="outputTitle">
+          <span>⚠️ Key Clinical Information</span>
+        </div>
+        <div id="triageClinicalInfo" class="outputContent clinicalContent"></div>
+      </div>
+
+      <!-- Reasoning (collapsible) -->
+      <div class="reasoningSection">
+        <button class="reasoningToggle" onclick="toggleReasoning()">
+          <span>AI Reasoning</span>
+          <span id="reasoningArrow">▸</span>
+        </button>
+        <div id="triageReasoning" class="reasoningContent hidden"></div>
       </div>
 
       <div class="outputSection">
@@ -430,10 +550,62 @@
           return;
         }
 
-        el('triageFrom').textContent = json.from || '—';
+        // Document type badge
+        const docTypeEl = el('triageDocType');
+        const docType = json.document_type || 'UNKNOWN';
+        docTypeEl.textContent = formatDocType(docType);
+        docTypeEl.className = 'triageBadge docType' + (docType.includes('REFERRAL') ? ' referral' : '');
+        
+        // Urgency badge
+        const urgencyEl = el('triageUrgency');
+        const urgency = (json.urgency || 'ROUTINE').toUpperCase();
+        urgencyEl.textContent = urgency;
+        urgencyEl.className = 'triageBadge urgency ' + urgency.toLowerCase();
+        
+        // From info
+        el('triageFrom').textContent = json.from_provider || json.from || '—';
+        const fromClinic = el('triageFromClinic');
+        if (json.from_clinic) {
+          fromClinic.textContent = json.from_clinic;
+          fromClinic.style.display = 'block';
+        } else {
+          fromClinic.style.display = 'none';
+        }
+        
+        // Regarding
         el('triageRe').textContent = json.regarding || '—';
-        el('triageFrontDesk').innerHTML = formatTasks(json.front_desk_tasks || []);
-        el('triageDoctor').innerHTML = formatTasks(json.doctor_tasks || []);
+        const patientInfo = el('triagePatientInfo');
+        if (json.patient_name || json.patient_dob) {
+          let info = '';
+          if (json.patient_name) info += json.patient_name;
+          if (json.patient_dob) info += (info ? ' · DOB: ' : 'DOB: ') + json.patient_dob;
+          patientInfo.textContent = info;
+          patientInfo.style.display = 'block';
+        } else {
+          patientInfo.style.display = 'none';
+        }
+        
+        // Clinical info (show only if present)
+        const clinicalWrapper = el('triageClinicalWrapper');
+        const clinicalInfo = el('triageClinicalInfo');
+        if (json.key_clinical_info && json.key_clinical_info.trim()) {
+          clinicalInfo.textContent = json.key_clinical_info;
+          clinicalWrapper.classList.remove('hidden');
+        } else {
+          clinicalWrapper.classList.add('hidden');
+        }
+        
+        // Reasoning (collapsed by default)
+        const reasoningEl = el('triageReasoning');
+        if (json.reasoning) {
+          reasoningEl.textContent = json.reasoning;
+          reasoningEl.classList.add('hidden');
+          el('reasoningArrow').textContent = '▸';
+        }
+        
+        // Tasks
+        el('triageFrontDesk').innerHTML = formatTasks(json.front_desk_tasks || [], docType.includes('REFERRAL'));
+        el('triageDoctor').innerHTML = formatTasks(json.doctor_tasks || [], false);
         el('triageOutput').classList.remove('hidden');
         
         toast('Triage complete');
@@ -443,9 +615,39 @@
       }
     }
 
-    function formatTasks(tasks) {
+    function formatDocType(docType) {
+      const map = {
+        'REFERRAL_REQUEST': '📨 Referral Request',
+        'CONSULTATION_REPORT': '📋 Consultation Report',
+        'LAB_RESULTS': '🔬 Lab Results',
+        'INSURANCE': '📄 Insurance',
+        'RECORDS_REQUEST': '📁 Records Request',
+        'PRESCRIPTION': '💊 Prescription',
+        'CORRESPONDENCE': '✉️ Correspondence',
+        'MARKETING': '📰 Marketing',
+        'OTHER': '📄 Document'
+      };
+      return map[docType] || docType;
+    }
+
+    function toggleReasoning() {
+      const content = el('triageReasoning');
+      const arrow = el('reasoningArrow');
+      if (content.classList.contains('hidden')) {
+        content.classList.remove('hidden');
+        arrow.textContent = '▾';
+      } else {
+        content.classList.add('hidden');
+        arrow.textContent = '▸';
+      }
+    }
+
+    function formatTasks(tasks, highlightFirst) {
       if (!tasks.length) return '<span style="color: var(--muted)">No actions required</span>';
-      return tasks.map(t => `<div class="taskItem"><span class="taskBullet">•</span><span>${escapeHtml(t)}</span></div>`).join('');
+      return tasks.map((t, i) => {
+        const priorityClass = (highlightFirst && i === 0) ? ' priority' : '';
+        return `<div class="taskItem${priorityClass}"><span class="taskBullet">•</span><span>${escapeHtml(t)}</span></div>`;
+      }).join('');
     }
 
     function escapeHtml(s) {

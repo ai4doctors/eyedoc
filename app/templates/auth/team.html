@@ -234,6 +234,7 @@
     <div class="card">
       <h2 class="cardTitle">Add Team Member</h2>
       <form method="POST" action="{{ url_for('auth.team') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="action" value="add" />
         <div class="formGrid">
           <div class="formGroup">
@@ -281,6 +282,7 @@
           </div>
           {% if u.id != user.id %}
           <form method="POST" action="{{ url_for('auth.team') }}" style="margin: 0;" onsubmit="return confirm('Remove {{ u.first_name }} {{ u.last_name }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <input type="hidden" name="action" value="delete" />
             <input type="hidden" name="user_id" value="{{ u.id }}" />
             <button type="submit" class="btnDanger">Remove</button>
