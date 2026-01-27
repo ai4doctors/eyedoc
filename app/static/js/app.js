@@ -774,10 +774,8 @@ async function pollAnalyze(){
     const res = await fetch(`/analyze_status?job_id=${encodeURIComponent(jobId)}`)
     const json = await res.json()
     if(!json.ok){
-      const msg = String(json.error || "Analyze status error")
-      // Keep polling in case the job is temporarily not visible (multi-worker, cache warmup, file write)
-      setAnalyzeStatus("processing", msg, 10)
-      setTimeout(pollAnalyze, 1200)
+      setAnalyzeStatus("waiting")
+      toast(json.error || "Analyze status error")
       return
     }
     const status = json.status || "waiting"
@@ -804,11 +802,11 @@ async function pollAnalyze(){
       el("fromDoctor").value = (latestAnalysis.provider_name || "").trim()
       buildReasonOptions()
       setToPrefix()
-      try{ renderSummary() }catch(e){ console.error(e) }
-      try{ renderDx() }catch(e){ console.error(e) }
-      try{ renderPlan() }catch(e){ console.error(e) }
-      try{ renderRefs() }catch(e){ console.error(e) }
-      try{ upsertCase(latestAnalysis) }catch(e){ console.error(e) }
+      renderSummary()
+      renderDx()
+      renderPlan()
+      renderRefs()
+      upsertCase(latestAnalysis)
       toast("Analysis complete")
       return
     }

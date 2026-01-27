@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import PyPDF2
 import requests
-from flask import Blueprint, jsonify, request, send_file, current_app, has_request_context
+from flask import Blueprint, jsonify, request, send_file, current_app
 from flask_login import login_required, current_user
 
 # Database imports for job persistence
@@ -762,10 +762,9 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: O
     try:
         cached = PubMedCache.get_cached(uniq_terms)
         if cached:
-            current_app.logger.info(f"PubMed cache hit for terms: {uniq_terms[:3]}...")
             return cached
-    except Exception as e:
-        current_app.logger.warning(f"PubMed cache check failed: {e}")
+    except Exception:
+        pass  # Cache check failed silently - proceed with API call
 
     blob = " ".join(uniq_terms).lower()
     
@@ -876,9 +875,8 @@ def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12, patient_age: O
         if out:
             try:
                 PubMedCache.set_cached(uniq_terms, out)
-                current_app.logger.info(f"PubMed results cached for terms: {uniq_terms[:3]}...")
-            except Exception as e:
-                current_app.logger.warning(f"Failed to cache PubMed results: {e}")
+            except Exception:
+                pass  # Cache write failed silently
         
         return out
     except Exception:
@@ -1228,53 +1226,23 @@ def set_job(job_id: str, **updates: Any) -> None:
                 # Create new job record
                 job = Job(id=job_id)
                 # Set user/org if authenticated
-                # Set user and org if provided in updates (preferred), otherwise from request context if available
-                if getattr(job, "user_id", None) is None:
-                    try:
-                        if isinstance(updates.get("user_id"), int):
-                            job.user_id = int(updates.get("user_id"))
-                    except Exception:
-                        pass
-                if getattr(job, "organization_id", None) is None:
-                    try:
-                        if isinstance(updates.get("organization_id"), int):
-                            job.organization_id = int(updates.get("organization_id"))
-                    except Exception:
-                        pass
-                if (getattr(job, "user_id", None) is None or getattr(job, "organization_id", None) is None) and has_request_context():
-                    try:
-                        if current_user and hasattr(current_user, "id") and getattr(current_user, "is_authenticated", False):
-                            if getattr(job, "user_id", None) is None:
-                                job.user_id = current_user.id
-                            if getattr(job, "organization_id", None) is None:
-                                job.organization_id = current_user.organization_id
-                    except Exception:
-                        pass
+                if current_user and hasattr(current_user, 'id') and current_user.is_authenticated:
+                    job.user_id = current_user.id
+                    job.organization_id = current_user.organization_id
                 db.session.add(job)
             
             # Update job from dict
             job.update_from_dict(updates)
             db.session.commit()
-    except Exception as e:
-        # Log but don't fail - fall back to file storage
-        current_app.logger.warning(f"Failed to persist job {job_id} to database: {e}")
-        # Fall back to file storage
+    except Exception:
+        # Postgres failed (likely no app context in background thread)
+        # Fall back to file storage silently
         path = _job_path(job_id)
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(job_dict, f, ensure_ascii=False)
         except Exception:
             pass
-
-# Always persist to file storage (cross-worker fallback and debugging)
-path = _job_path(job_id)
-try:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(job_dict, f, ensure_ascii=False)
-except Exception:
-    pass
-
-
 
     # Also persist to S3 for disaster recovery (if enabled)
     if job_s3_enabled():
@@ -1316,8 +1284,9 @@ def get_job(job_id: str) -> Dict[str, Any]:
                 with JOBS_LOCK:
                     JOBS[job_id] = job_dict
                 return job_dict
-    except Exception as e:
-        current_app.logger.warning(f"Failed to load job {job_id} from database: {e}")
+    except Exception:
+        # Postgres failed (likely no app context in background thread)
+        pass
     
     # Fall back to file storage
     path = _job_path(job_id)
@@ -1541,17 +1510,11 @@ def analyze_start():
 
     set_job(
         job_id,
-        status="processing",
-        stage="received",
-        stage_label="Received file",
-        progress=1,
+        status="waiting",
         updated_at=now_utc_iso(),
-        heartbeat_at=now_utc_iso(),
         upload_path=upath,
         upload_name=filename,
         force_ocr=force_ocr,
-        user_id=int(getattr(current_user, "id", 0) or 0) if getattr(current_user, "is_authenticated", False) else None,
-        organization_id=int(getattr(current_user, "organization_id", 0) or 0) if getattr(current_user, "is_authenticated", False) else None,
     )
     t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr), daemon=True)
     t.start()
@@ -1596,7 +1559,7 @@ def analyze_text_start():
     if not note_text:
         return jsonify({"ok": False, "error": "Missing text"}), 400
     job_id = new_job_id()
-    set_job(job_id, status="waiting", stage="received", stage_label="Received", progress=0, updated_at=now_utc_iso(), user_id=int(getattr(current_user, "id", 0) or 0) if getattr(current_user, "is_authenticated", False) else None, organization_id=int(getattr(current_user, "organization_id", 0) or 0) if getattr(current_user, "is_authenticated", False) else None)
+    set_job(job_id, status="waiting", stage="received", stage_label="Received", progress=0, updated_at=now_utc_iso())
     t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
     t.start()
     return jsonify({"ok": True, "job_id": job_id}), 200
