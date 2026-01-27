@@ -1,6 +1,8 @@
 """
 Initialize database tables.
 Run this on first deploy instead of flask db upgrade.
+
+Set RESET_DB=1 environment variable to drop and recreate all tables.
 """
 import os
 import sys
@@ -15,6 +17,12 @@ def init_db():
     app = create_app(os.getenv('FLASK_ENV', 'production'))
     
     with app.app_context():
+        # Check if we should reset
+        if os.getenv('RESET_DB', '').strip() in ('1', 'true', 'yes'):
+            print("⚠️  RESET_DB is set - dropping all tables...")
+            db.drop_all()
+            print("Tables dropped.")
+        
         print("Creating database tables...")
         db.create_all()
         print("✅ Database tables created successfully!")

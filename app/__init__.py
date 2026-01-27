@@ -1,6 +1,7 @@
 """
 Maneiro.ai Application Factory (Phase 1)
 """
+import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -34,5 +35,15 @@ def create_app(config_name='default'):
     
     # Exempt API routes from CSRF (JS doesn't send tokens)
     csrf.exempt(api_bp)
+    
+    # Auto-create tables on startup (useful for SQLite dev/staging)
+    with app.app_context():
+        # Reset DB if flag is set
+        if os.getenv('RESET_DB', '').strip() in ('1', 'true', 'yes'):
+            app.logger.warning('RESET_DB is set - dropping all tables...')
+            db.drop_all()
+        
+        # Create tables if they don't exist
+        db.create_all()
     
     return app
