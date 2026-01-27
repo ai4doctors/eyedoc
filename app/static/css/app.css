@@ -23,7 +23,7 @@ body{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:12px 24px;
+  padding:14px 26px;
   border-bottom:1px solid var(--border);
   background: var(--panel);
   backdrop-filter: blur(8px);
@@ -31,196 +31,6 @@ body{
   top:0;
   z-index:20;
 }
-
-/* Left section: logo + org name */
-.topBarLeft{
-  display:flex;
-  align-items:center;
-  gap:16px;
-}
-.orgName{
-  font-size:14px;
-  font-weight:600;
-  color:var(--muted);
-  padding-left:16px;
-  border-left:1px solid var(--border);
-}
-
-/* Right section: grouped actions */
-.topBarRight{
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-
-/* Divider between groups */
-.topDivider{
-  width:1px;
-  height:24px;
-  background:var(--border);
-  margin:0 10px;
-}
-
-/* Icon buttons (monochrome) */
-.topBtn{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:6px;
-  padding:8px 12px;
-  border-radius:10px;
-  border:none;
-  background:transparent;
-  color:var(--muted);
-  cursor:pointer;
-  font-size:14px;
-  font-weight:600;
-  text-decoration:none;
-  transition:background 0.15s, color 0.15s;
-}
-.topBtn:hover{
-  background:var(--panel2);
-  color:var(--text);
-}
-.topBtn.active{
-  background:var(--panel2);
-  color:var(--text);
-}
-
-/* Icon only button */
-.topBtnIcon{
-  padding:8px;
-  min-width:36px;
-  min-height:36px;
-}
-
-/* SVG icons in buttons */
-.topBtn svg{
-  width:18px;
-  height:18px;
-  stroke:currentColor;
-  stroke-width:2;
-  fill:none;
-}
-
-/* User menu button with initials */
-.userMenuBtn{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:6px 10px 6px 6px;
-  border-radius:10px;
-  border:none;
-  background:transparent;
-  cursor:pointer;
-  transition:background 0.15s;
-}
-.userMenuBtn:hover{
-  background:var(--panel2);
-}
-.userInitials{
-  width:32px;
-  height:32px;
-  border-radius:8px;
-  background:linear-gradient(135deg, var(--primary), #76b9ad);
-  color:#fff;
-  font-size:13px;
-  font-weight:700;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  letter-spacing:0.5px;
-}
-.userMenuBtn svg{
-  width:16px;
-  height:16px;
-  stroke:var(--muted);
-  stroke-width:2;
-  fill:none;
-  transition:transform 0.15s;
-}
-.userMenuBtn[aria-expanded="true"] svg{
-  transform:rotate(180deg);
-}
-
-/* Dropdown container */
-.dropdown{
-  position:relative;
-}
-.dropdownMenu{
-  position:absolute;
-  top:calc(100% + 6px);
-  right:0;
-  min-width:200px;
-  background:var(--panel);
-  border:1px solid var(--border);
-  border-radius:12px;
-  box-shadow:0 10px 40px rgba(0,0,0,0.12);
-  padding:6px;
-  display:none;
-  z-index:100;
-}
-.dropdown.open .dropdownMenu{
-  display:block;
-}
-.dropdownItem{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:10px 12px;
-  border-radius:8px;
-  color:var(--text);
-  text-decoration:none;
-  font-size:14px;
-  font-weight:500;
-  cursor:pointer;
-  transition:background 0.1s;
-}
-.dropdownItem:hover{
-  background:var(--panel2);
-}
-.dropdownItem svg{
-  width:18px;
-  height:18px;
-  stroke:var(--muted);
-  stroke-width:2;
-  fill:none;
-}
-.dropdownDivider{
-  height:1px;
-  background:var(--border);
-  margin:6px 0;
-}
-.dropdownLabel{
-  padding:8px 12px 4px;
-  font-size:11px;
-  font-weight:700;
-  text-transform:uppercase;
-  letter-spacing:0.5px;
-  color:var(--muted);
-}
-
-/* Keyboard shortcut hints */
-.shortcut{
-  margin-left:auto;
-  font-size:12px;
-  color:var(--muted);
-  opacity:0.7;
-}
-
-/* Legacy iconBtn support */
-.iconBtn{
-  padding:10px 12px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background: var(--panel2);
-  color: var(--text);
-  cursor:pointer;
-  font-size:14px;
-  font-weight:800;
-  text-decoration:none;
-}
-.linkBtn{display:inline-flex; align-items:center; justify-content:center}
 
 .appGrid{
   display:grid;
@@ -234,9 +44,9 @@ body{
   background: linear-gradient(180deg, var(--panel), var(--panel2));
   padding:16px;
   position:sticky;
-  top:60px;
+  top:180px;
   align-self:start;
-  height:calc(100vh - 60px);
+  height:calc(100vh - 180px);
   overflow:auto;
 }
 
@@ -321,7 +131,7 @@ body{
   gap:14px;
 }
 .brandMark{display:flex; align-items:center}
-.brandLogo{height:46px; width:auto; display:block; background:transparent; border-radius:8px}
+.brandLogo{height:46px; width:auto; display:block}
 .brandName{
   font-weight:900;
 }
@@ -337,6 +147,18 @@ body{
   gap:10px;
   align-items:center;
 }
+.iconBtn{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background: var(--panel2);
+  color: var(--text);
+  cursor:pointer;
+  font-size:14px;
+  font-weight:800;
+  text-decoration:none;
+}
+.linkBtn{display:inline-flex; align-items:center; justify-content:center}
 
 .stepBar{
   display:flex;
@@ -495,25 +317,6 @@ body{
 .btnPrimary:hover{transform: translateY(-1px); box-shadow: 0 14px 26px rgba(43,139,214,0.26)}
 .btnPrimary:active{transform: translateY(0px); box-shadow: 0 10px 22px rgba(43,139,214,0.22)}
 .btnPrimary:disabled{opacity:0.6; cursor:not-allowed; transform:none; box-shadow:none}
-
-.btnSecondary{
-  padding:12px 18px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  font-weight:700;
-  cursor:pointer;
-  font-size:16px;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-.btnSecondary:hover{
-  background: var(--panel2);
-  border-color: rgba(0,0,0,0.12);
-}
-.btnSecondary:active{
-  background: var(--border);
-}
 
 .output{
   padding:0 26px 16px 26px;

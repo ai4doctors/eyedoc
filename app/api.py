@@ -1,438 +1,290 @@
 """
-API Blueprint - All working endpoints from original app.py
+Maneiro.ai API Routes
+Includes v2026.6+ improvements: progress stages, schema validation, specialty handling
 """
 import os
-import tempfile
-import uuid
-import json
-import re
-import shutil
-import threading
-import time
 import io
-import base64
+import re
+import json
+import uuid
+import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
-
-import PyPDF2
-import requests
-from flask import Blueprint, jsonify, request, send_file, current_app
+from typing import Dict, Any, Optional, Tuple, List
+from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
+from flask_wtf.csrf import generate_csrf
+
+from app.models import db, Job, JobStatus, JobType, AuditLog
+from app.auth import usage_limit_check, log_audit
+
+api_bp = Blueprint("api", __name__)
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+def feature_enabled(name: str, default: bool = True) -> bool:
+    """Check if feature flag is enabled"""
+    env_key = f"FEATURE_{name.upper()}"
+    val = os.environ.get(env_key, str(default)).lower()
+    return val in ("1", "true", "yes", "on")
+
+# Specialty configurations
+SPECIALTIES = {
+    "auto": {"name": "Auto-detect", "prompt_modifier": ""},
+    "ophthalmology": {
+        "name": "Ophthalmology",
+        "prompt_modifier": "Focus on ophthalmic findings: visual acuity, IOP, slit lamp, fundus, OCT, visual fields. Use standard ophthalmic terminology."
+    },
+    "primary_care": {
+        "name": "Primary Care",
+        "prompt_modifier": "Focus on general medical assessment, preventive care, chronic disease management."
+    },
+    "cardiology": {
+        "name": "Cardiology",
+        "prompt_modifier": "Focus on cardiovascular findings: ECG, echo, stress testing, risk stratification."
+    },
+    "dermatology": {
+        "name": "Dermatology",
+        "prompt_modifier": "Focus on skin findings: morphology, distribution, dermoscopy features, biopsy results."
+    },
+}
+
+# Letter templates
+ADVANCED_TEMPLATES = {
+    "standard": {"name": "Standard Referral", "tone": "professional"},
+    "urgent_referral": {"name": "Urgent Referral", "tone": "urgent", "flag": "URGENT"},
+    "comanagement": {"name": "Co-management Letter", "tone": "collaborative"},
+    "second_opinion": {"name": "Second Opinion Request", "tone": "consultative"},
+    "patient_education": {"name": "Patient Summary", "tone": "simple", "reading_level": "8th grade"},
+    "insurance": {"name": "Insurance/Prior Auth", "tone": "formal", "include_codes": True},
+}
+
+# Analysis stages (9 stages)
+ANALYSIS_STAGES = [
+    ("received", "Received", 0),
+    ("extracting", "Extracting text", 10),
+    ("analyzing_provider", "Identifying provider", 20),
+    ("extracting_findings", "Extracting clinical findings", 35),
+    ("building_assessment", "Building assessment", 50),
+    ("cross_referencing", "Cross-referencing evidence", 65),
+    ("structuring", "Structuring output", 80),
+    ("validating", "Validating schema", 90),
+    ("complete", "Complete", 100),
+]
+
+# Letter stages (7 stages)
+LETTER_STAGES = [
+    ("received", "Received", 0),
+    ("loading_context", "Loading context", 15),
+    ("selecting_template", "Selecting template", 30),
+    ("drafting", "Drafting letter", 50),
+    ("formatting", "Formatting", 70),
+    ("finalizing", "Finalizing", 90),
+    ("complete", "Complete", 100),
+]
+
+# In-memory job store (for single-worker; use Redis for multi-worker)
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
+
+# =============================================================================
+# SCHEMA VALIDATION
+# =============================================================================
+
+REQUIRED_ANALYSIS_FIELDS = [
+    "provider_name", "patient_block", "summary_html", "diagnoses", "plan", "references"
+]
+
+def validate_analysis(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    """Validate analysis output against expected schema"""
+    errors = []
+    
+    for field in REQUIRED_ANALYSIS_FIELDS:
+        if field not in data:
+            errors.append(f"Missing required field: {field}")
+        elif field in ["diagnoses", "plan", "references"]:
+            if not isinstance(data[field], list):
+                errors.append(f"Field {field} must be a list")
+    
+    # Validate diagnoses structure
+    if "diagnoses" in data and isinstance(data["diagnoses"], list):
+        for i, dx in enumerate(data["diagnoses"]):
+            if not isinstance(dx, dict):
+                errors.append(f"diagnoses[{i}] must be an object")
+            elif "title" not in dx:
+                errors.append(f"diagnoses[{i}] missing 'title'")
+    
+    # Validate plan structure
+    if "plan" in data and isinstance(data["plan"], list):
+        for i, item in enumerate(data["plan"]):
+            if not isinstance(item, dict):
+                errors.append(f"plan[{i}] must be an object")
+            elif "title" not in item:
+                errors.append(f"plan[{i}] missing 'title'")
+    
+    return len(errors) == 0, errors
+
+def coerce_analysis_types(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce analysis data to expected types"""
+    result = dict(data)
+    
+    # Ensure lists
+    for field in ["diagnoses", "plan", "references", "warnings", "icd10_codes"]:
+        if field not in result:
+            result[field] = []
+        elif not isinstance(result[field], list):
+            result[field] = [result[field]] if result[field] else []
+    
+    # Ensure strings
+    for field in ["provider_name", "patient_block", "patient_name", "summary_html", "patient_summary"]:
+        if field not in result:
+            result[field] = ""
+        elif not isinstance(result[field], str):
+            result[field] = str(result[field])
+    
+    return result
+
+# =============================================================================
+# PDF EXTRACTION
+# =============================================================================
 
 try:
-    import boto3
-except Exception:
-    boto3 = None
+    import PyPDF2
+except ImportError:
+    PyPDF2 = None
 
 try:
     import fitz  # PyMuPDF
-except Exception:
-    fitz = None
-
-try:
     from PIL import Image
-except Exception:
-    Image = None
-
-try:
     import pytesseract
-except Exception:
+except ImportError:
+    fitz = None
+    Image = None
     pytesseract = None
 
-# Ensure pytesseract can find the tesseract binary
-if pytesseract is not None:
+def extract_pdf_text(file_data: bytes) -> str:
+    """Extract text from PDF"""
+    if PyPDF2 is None:
+        return ""
     try:
-        if shutil.which("tesseract") is None:
-            for cand in ("/usr/bin/tesseract", "/usr/local/bin/tesseract"):
-                if os.path.exists(cand):
-                    pytesseract.pytesseract.tesseract_cmd = cand
-                    break
-    except Exception:
-        pass
-
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
-
-try:
-    from reportlab.lib.pagesizes import letter as rl_letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_JUSTIFY
-    from reportlab.lib import colors
-except Exception:
-    SimpleDocTemplate = None
-    rl_letter = None
-
-api_bp = Blueprint('api', __name__)
-
-# Job storage
-JOBS: Dict[str, Dict[str, Any]] = {}
-JOBS_LOCK = threading.Lock()
-JOB_DIR = os.getenv("JOB_DIR") or os.getenv("job_dir") or "/tmp/maneiro_jobs"
-UPLOAD_DIR = os.getenv("UPLOAD_DIR") or os.getenv("upload_dir") or os.path.join(JOB_DIR, "uploads")
-
-JOB_S3_PREFIX = (os.getenv("JOB_S3_PREFIX", "uploads/maneiro_jobs/") or "uploads/maneiro_jobs/").strip()
-if not JOB_S3_PREFIX.endswith("/"):
-    JOB_S3_PREFIX += "/"
-
-
-# ============ Helper Functions ============
-
-def _job_path(job_id: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
-    return os.path.join(JOB_DIR, f"{safe}.json")
-
-
-def _ensure_job_dir() -> None:
-    try:
-        os.makedirs(JOB_DIR, exist_ok=True)
-    except Exception:
-        pass
-    try:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-    except Exception:
-        pass
-
-
-def _upload_path(job_id: str, filename: str) -> str:
-    safe_id = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
-    ext = os.path.splitext((filename or "").strip())[1].lower()
-    if ext not in (".pdf", ".png", ".jpg", ".jpeg", ".webp"):
-        ext = ".bin"
-    return os.path.join(UPLOAD_DIR, f"{safe_id}{ext}")
-
-
-def aws_ready() -> Tuple[bool, str]:
-    if boto3 is None:
-        return False, "boto3 not installed"
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    region = os.getenv("AWS_REGION", "").strip()
-    if not bucket:
-        return False, "AWS_S3_BUCKET not set"
-    if not region:
-        return False, "AWS_REGION not set"
-    return True, ""
-
-
-def aws_clients():
-    region = os.getenv("AWS_REGION", "").strip() or None
-    s3 = boto3.client("s3", region_name=region)
-    transcribe = boto3.client("transcribe", region_name=region)
-    return s3, transcribe
-
-
-def job_s3_enabled() -> bool:
-    if boto3 is None:
-        return False
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    region = os.getenv("AWS_REGION", "").strip()
-    return bool(bucket and region)
-
-
-def job_s3_key(job_id: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
-    return f"{JOB_S3_PREFIX}{safe}.json"
-
-
-def job_s3_key_fallbacks(job_id: str) -> List[str]:
-    safe = re.sub(r"[^a-zA-Z0-9_]", "", job_id or "")
-    keys = [f"{JOB_S3_PREFIX}{safe}.json"]
-    legacy = "maneiro_jobs/"
-    keys.append(f"{legacy}{safe}.json")
-    keys.append(f"uploads/maneiro_jobs/{safe}.json")
-    out: List[str] = []
-    for k in keys:
-        if k not in out:
-            out.append(k)
-    return out
-
-
-def s3_uri(bucket: str, key: str) -> str:
-    return f"s3://{bucket}/{key}"
-
-
-def start_transcribe_job(job_name: str, media_key: str, language: str, mode: str = "dictation") -> Tuple[bool, str]:
-    ok, msg = aws_ready()
-    if not ok:
-        return False, msg
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    s3, transcribe = aws_clients()
-    media_uri = s3_uri(bucket, media_key)
-    args: Dict[str, Any] = {
-        "TranscriptionJobName": job_name,
-        "Media": {"MediaFileUri": media_uri},
-        "OutputBucketName": bucket,
-    }
-    if language and language != "auto":
-        args["LanguageCode"] = language
-    else:
-        args["IdentifyLanguage"] = True
-        args["LanguageOptions"] = ["en-US", "pt-BR", "es-US", "fr-CA"]
-
-    if (mode or "").strip().lower() == "live":
-        args["Settings"] = {
-            "ShowSpeakerLabels": True,
-            "MaxSpeakerLabels": 4,
-        }
-    try:
-        transcribe.start_transcription_job(**args)
-    except Exception as e:
-        return False, str(e)
-    return True, ""
-
-
-def fetch_transcribe_result(job_name: str) -> Tuple[str, str, str]:
-    ok, msg = aws_ready()
-    if not ok:
-        return "", "", msg
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    s3, transcribe = aws_clients()
-
-    try:
-        guess_key = f"{job_name}.json"
-        obj = s3.get_object(Bucket=bucket, Key=guess_key)
-        body = obj["Body"].read()
-        data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt = transcribe_json_to_text(data)
-        if txt:
-            return txt, "completed", ""
-    except Exception:
-        pass
-    try:
-        r = transcribe.get_transcription_job(TranscriptionJobName=job_name)
-    except Exception as e:
-        return "", "failed", str(e)
-    job = (r or {}).get("TranscriptionJob") or {}
-    status = (job.get("TranscriptionJobStatus") or "").lower()
-    if status not in ("completed", "failed"):
-        return "", status, ""
-    if status == "failed":
-        return "", status, str(job.get("FailureReason") or "Transcription failed")
-
-    out_uri = (((job.get("Transcript") or {}).get("TranscriptFileUri")) or "").strip()
-    if not out_uri:
-        return "", status, "Missing transcript uri"
-
-    key = ""
-    if ".amazonaws.com/" in out_uri:
-        key = out_uri.split(".amazonaws.com/", 1)[1]
-        key = key.split("?", 1)[0]
-    if not key:
-        return "", status, "Unable to parse transcript key"
-    try:
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        body = obj["Body"].read()
-        data = json.loads(body.decode("utf-8", errors="ignore"))
-        txt = transcribe_json_to_text(data)
-        return txt, status, ""
-    except Exception as e:
-        return "", status, str(e)
-
-
-def now_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def parse_utc_iso(s: str) -> Optional[datetime]:
-    try:
-        if not s:
-            return None
-        txt = str(s).strip()
-        if txt.endswith("Z"):
-            txt = txt[:-1] + "+00:00"
-        dt = datetime.fromisoformat(txt)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
-
-
-def clamp_text(s: str, limit: int) -> str:
-    return (s or "")[:limit]
-
-
-def transcribe_json_to_text(data: Dict[str, Any]) -> str:
-    try:
-        results = data.get("results") or {}
-        speaker = results.get("speaker_labels") or {}
-        segments = speaker.get("segments") or []
-        items = results.get("items") or []
-        if segments and items:
-            by_time = {}
-            for it in items:
-                st = it.get("start_time")
-                alts = it.get("alternatives") or []
-                content = (alts[0].get("content") if alts else "") or ""
-                if st and content:
-                    by_time.setdefault(st, []).append(content)
-
-            lines = []
-            for seg in segments:
-                label = (seg.get("speaker_label") or "Speaker").replace("spk_", "Speaker ")
-                seg_items = seg.get("items") or []
-                words = []
-                for sit in seg_items:
-                    st = sit.get("start_time")
-                    if st and st in by_time:
-                        words.extend(by_time.get(st) or [])
-                line = (" ".join(words)).strip()
-                if line:
-                    lines.append(f"{label}: {line}")
-            if lines:
-                return "\n".join(lines).strip()
-    except Exception:
-        pass
-    try:
-        txt = (((data.get("results") or {}).get("transcripts") or [{}])[0].get("transcript") or "").strip()
-        return txt
+        reader = PyPDF2.PdfReader(io.BytesIO(file_data))
+        parts = []
+        for page in reader.pages:
+            parts.append(page.extract_text() or "")
+        return "\n".join(parts).strip()
     except Exception:
         return ""
 
-
-def extract_pdf_text(file_storage) -> str:
-    reader = PyPDF2.PdfReader(file_storage)
-    parts: List[str] = []
-    for page in reader.pages:
-        parts.append(page.extract_text() or "")
-    return "\n".join(parts).strip()
-
-
 def text_is_meaningful(text: str) -> bool:
+    """Check if text is meaningful"""
     s = (text or "").strip()
     if len(s) < 250:
         return False
     alpha = sum(1 for ch in s if ch.isalpha())
-    ratio = alpha / max(len(s), 1)
-    return ratio >= 0.25
+    return (alpha / max(len(s), 1)) >= 0.25
 
-
-def ocr_pdf_bytes(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
-    if fitz is None or Image is None or pytesseract is None:
-        return "", "OCR dependencies missing"
-
-    try:
-        _ = pytesseract.get_tesseract_version()
-    except Exception as e:
-        return "", f"OCR engine not available: {e}"
+def ocr_pdf(pdf_bytes: bytes, max_pages: int = 12) -> Tuple[str, str]:
+    """OCR a PDF, returns (text, error)"""
+    if not all([fitz, Image, pytesseract]):
+        return "", "OCR dependencies not available"
+    
     try:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        parts = []
+        for i in range(min(len(doc), max_pages)):
+            page = doc.load_page(i)
+            pix = page.get_pixmap(dpi=220, alpha=False)
+            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("L")
+            txt = pytesseract.image_to_string(img, config="--psm 6") or ""
+            parts.append(txt)
+        doc.close()
+        return "\n".join(parts).strip(), ""
     except Exception as e:
-        return "", f"Could not open PDF for OCR: {e}"
+        return "", str(e)
 
-    def prep(img):
-        try:
-            g = img.convert("L")
-        except Exception:
-            g = img
-        try:
-            g = Image.eval(g, lambda x: 0 if x < 15 else (255 if x > 240 else x))
-        except Exception:
-            pass
-        return g
-
-    parts: List[str] = []
+def extract_text_from_upload(file_storage, force_ocr: bool = False) -> Tuple[str, bool, bool, str]:
+    """
+    Extract text from uploaded file
+    Returns: (text, used_ocr, needs_ocr, error)
+    """
+    filename = (getattr(file_storage, "filename", "") or "").lower()
+    
     try:
-        pages = min(len(doc), max_pages)
-        for i in range(pages):
-            try:
-                page = doc.load_page(i)
-                pix = page.get_pixmap(dpi=220, alpha=False)
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                img = prep(img)
-                txt = pytesseract.image_to_string(img, config="--psm 6") or ""
-                parts.append(txt)
-            except Exception:
-                parts.append("")
-
-        joined = "\n".join(parts).strip()
-        if (not joined) or (len(joined) < 200):
-            retry_pages = min(pages, 3)
-            retry: List[str] = []
-            for i in range(retry_pages):
-                try:
-                    page = doc.load_page(i)
-                    pix = page.get_pixmap(dpi=300, alpha=False)
-                    img = Image.open(io.BytesIO(pix.tobytes("png")))
-                    img = prep(img)
-                    txt = pytesseract.image_to_string(img, config="--psm 6") or ""
-                    retry.append(txt)
-                except Exception:
-                    retry.append("")
-            parts = retry + parts[retry_pages:]
+        data = file_storage.read()
+        file_storage.stream.seek(0)
     except Exception as e:
-        return "", f"OCR failed: {e}"
-    finally:
+        return "", False, False, f"Unable to read file: {e}"
+    
+    if filename.endswith(".pdf"):
+        extracted = extract_pdf_text(data)
+        
+        if text_is_meaningful(extracted) and not force_ocr:
+            return extracted, False, False, ""
+        
+        if not force_ocr:
+            return "", False, True, "No readable text"
+        
+        ocr_text, ocr_err = ocr_pdf(data)
+        if ocr_err:
+            return "", False, False, ocr_err
+        
+        if text_is_meaningful(ocr_text):
+            return ocr_text, True, False, ""
+        
+        return extracted or ocr_text, True, False, ""
+    
+    elif filename.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        if not force_ocr:
+            return "", False, True, "Image requires OCR"
+        
+        if not all([Image, pytesseract]):
+            return "", False, True, "OCR not available"
+        
         try:
-            doc.close()
-        except Exception:
-            pass
-    return "\n".join(parts).strip(), ""
+            img = Image.open(io.BytesIO(data))
+            text = pytesseract.image_to_string(img) or ""
+            return text.strip(), True, False, ""
+        except Exception as e:
+            return "", False, True, str(e)
+    
+    return "", False, False, "Unsupported file type"
 
+# =============================================================================
+# OPENAI INTEGRATION
+# =============================================================================
 
-def ocr_ready() -> Tuple[bool, str]:
-    if fitz is None:
-        return False, "PyMuPDF not available"
-    if Image is None:
-        return False, "Pillow not available"
-    if pytesseract is None:
-        return False, "pytesseract not available"
-    try:
-        _ = pytesseract.get_tesseract_version()
-    except Exception as e:
-        return False, f"tesseract not available: {e}"
-    return True, ""
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
-
-def client_ready() -> Tuple[bool, str]:
+def get_openai_client():
+    """Get OpenAI client"""
     if OpenAI is None:
-        return False, "OpenAI SDK not installed"
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return False, "OPENAI_API_KEY is missing"
-    return True, ""
-
+        return None
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key, timeout=90)
 
 def model_name() -> str:
-    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-4.1")
+    return os.environ.get("OPENAI_MODEL", "gpt-4.1").strip()
 
-
-def get_client():
-    ok, _ = client_ready()
-    if not ok:
-        return None
-    key = os.getenv("OPENAI_API_KEY").strip()
-    return OpenAI(api_key=key, timeout=60)
-
-
-def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
+def safe_json_loads(s: str) -> Tuple[Optional[Dict], str]:
+    """Parse JSON from model output"""
     if not s:
-        return None, "Empty model output"
-    
-    # Strip markdown code blocks if present
-    text = s.strip()
-    if text.startswith("```"):
-        # Remove opening fence (```json or ```)
-        lines = text.split("\n", 1)
-        if len(lines) > 1:
-            text = lines[1]
-        # Remove closing fence
-        if text.endswith("```"):
-            text = text[:-3].strip()
-        elif "```" in text:
-            text = text.rsplit("```", 1)[0].strip()
+        return None, "Empty output"
     
     try:
-        obj = json.loads(text)
+        obj = json.loads(s)
         if isinstance(obj, dict):
             return obj, ""
     except Exception:
         pass
     
-    # Fallback: extract first JSON object from text
-    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    # Try to extract JSON from markdown
+    m = re.search(r"\{.*\}", s, flags=re.DOTALL)
     if m:
         try:
             obj = json.loads(m.group(0))
@@ -440,1483 +292,427 @@ def safe_json_loads(s: str) -> Tuple[Optional[Dict[str, Any]], str]:
                 return obj, ""
         except Exception:
             pass
-    return None, "Model did not return valid json"
+    
+    return None, "Invalid JSON"
 
-
-def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict[str, Any]], str]:
-    client = get_client()
+def llm_json(prompt: str, temperature: float = 0.2) -> Tuple[Optional[Dict], str]:
+    """Call LLM and get JSON response"""
+    client = get_openai_client()
     if client is None:
-        ok, msg = client_ready()
-        return None, msg or "Client not available"
+        return None, "OpenAI not configured"
+    
     try:
         res = client.chat.completions.create(
             model=model_name(),
             messages=[
-                {"role": "system", "content": "You are a JSON API. Return ONLY valid JSON with no markdown formatting, no code fences, no explanations. Start your response with { and end with }."},
+                {"role": "system", "content": "Return strict JSON only. No markdown. No extra text."},
                 {"role": "user", "content": prompt},
             ],
             temperature=temperature,
         )
         text = (res.choices[0].message.content or "").strip()
-        obj, err = safe_json_loads(text)
-        if err:
-            return None, err
-        return obj, ""
+        return safe_json_loads(text)
     except Exception as e:
-        return None, f"LLM request failed: {type(e).__name__}: {e}"
+        return None, f"LLM error: {e}"
 
+# =============================================================================
+# ANALYSIS PROMPT
+# =============================================================================
 
-ANALYZE_SCHEMA: Dict[str, Any] = {
-    "provider_name": "",
-    "patient_block": "",
-    "summary_html": "",
-    "diagnoses": [],
-    "plan": [],
-    "references": [],
-    "warnings": [],
-}
-
-
-def analyze_prompt(note_text: str) -> str:
-    excerpt = clamp_text(note_text, 16000)
-    return f"""
-You are a clinician assistant. Analyze this clinical document and output VALID JSON only.
-
-Schema:
-provider_name: string (authoring clinician only, never patient name)
-patient_block: string (demographics only: name, DOB, PHN, phone. Use <br> for line breaks. Exclude clinic address)
-summary_html: string (comprehensive clinical summary with <b>headings</b> and <p>paragraphs</p>)
-diagnoses: array of {{number, code, label, bullets}}
-plan: array of {{number, title, bullets, aligned_dx_numbers}}
-warnings: array of strings (critical findings, abnormal values, red flags)
-
-Rules:
-1. summary_html must include ALL exam findings with clear structure:
-   - <b>Chief Complaint</b> with presenting symptoms
-   - <b>Exam Findings</b> with VA, IOP, slit lamp, fundus, all measurements
-   - <b>Imaging</b> if present (OCT, photos, fields)
-   - <b>Assessment</b> with clinical interpretation
-2. diagnoses: problem list with laterality/severity when present
-3. plan: actionable items aligned to diagnoses
-4. warnings: flag IOP>21, VA worse than 20/40, acute findings, urgent referrals
-5. Use only facts from the document. Leave empty if unknown.
-
-Document:
-{excerpt}
-""".strip()
-
-
-def pubmed_fetch_for_terms(terms: List[str], max_items: int = 12) -> List[Dict[str, str]]:
-    uniq_terms: List[str] = []
-    for t in (terms or []):
-        t = (t or "").strip()
-        if t and t.lower() not in [x.lower() for x in uniq_terms]:
-            uniq_terms.append(t)
-
-    blob = " ".join(uniq_terms).lower()
-
-    def add_queries_for_subspecialty(b: str) -> List[str]:
-        q: List[str] = []
-        if any(k in b for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea"]):
-            q += ["TFOS DEWS", "dry eye disease guideline ophthalmology"]
-        if any(k in b for k in ["cornea", "keratitis", "corneal", "ulcer", "ectasia", "keratoconus"]):
-            q += ["infectious keratitis clinical guideline ophthalmology", "keratoconus global consensus"]
-        if "cataract" in b:
-            q += ["cataract preferred practice pattern ophthalmology", "cataract guideline ophthalmology"]
-        if any(k in b for k in ["glaucoma", "ocular hypertension", "iop"]):
-            q += ["glaucoma preferred practice pattern", "European Glaucoma Society guidelines"]
-        if any(k in b for k in ["strabismus", "amblyopia", "esotropia", "exotropia"]):
-            q += ["amblyopia preferred practice pattern", "strabismus clinical practice guideline"]
-        if any(k in b for k in ["pediatric", "paediatric", "child", "infant"]):
-            q += ["pediatric eye evaluations preferred practice pattern", "retinopathy of prematurity guideline"]
-        if any(k in b for k in ["optic neuritis", "papilledema", "neuro", "visual field defect"]):
-            q += ["optic neuritis guideline", "papilledema evaluation guideline"]
-        if any(k in b for k in ["retina", "macular", "amd", "diabetic retinopathy", "retinal detachment", "uveitis"]):
-            q += ["diabetic retinopathy preferred practice pattern", "age related macular degeneration preferred practice pattern"]
-        return q
-
-    canonical_queries = add_queries_for_subspecialty(blob)
-    case_queries: List[str] = []
-    for term in uniq_terms[:8]:
-        case_queries.append(f"({term}) ophthalmology")
-        case_queries.append(f"({term}) (guideline OR consensus OR systematic review)")
-
-    if not canonical_queries and not case_queries:
-        case_queries = ["ophthalmology clinical practice guideline"]
-
-    queries = (canonical_queries[:6] + case_queries[:10])
-    pmids: List[str] = []
-    for q in queries:
-        try:
-            r = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={"db": "pubmed", "term": q, "retmax": 12, "retmode": "json"},
-                timeout=10,
-            )
-            r.raise_for_status()
-            data = r.json()
-            ids = (data.get("esearchresult") or {}).get("idlist") or []
-            for pid in ids:
-                if pid not in pmids:
-                    pmids.append(pid)
-            if len(pmids) >= 40:
-                break
-        except Exception:
-            continue
-
-    if not pmids:
-        return []
-
-    pmids = pmids[:40]
-
-    try:
-        r = requests.get(
-            "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-            params={"db": "pubmed", "id": ",".join(pmids), "retmode": "json"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        data = r.json()
-        result = data.get("result") or {}
-
-        out: List[Dict[str, str]] = []
-        for i, pid in enumerate(pmids[:max_items], start=1):
-            item = result.get(pid) or {}
-            title = (item.get("title") or "").strip().rstrip(".")
-            source = (item.get("source") or "").strip()
-            pubdate = (item.get("pubdate") or "").strip()
-            authors = item.get("authors") or []
-            first_author = (authors[0].get("name") if authors else "") or ""
-            citation = " ".join([x for x in [first_author, title, source, pubdate] if x]).strip()
-            out.append({
-                "number": str(i),
-                "pmid": pid,
-                "citation": citation,
-                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pid}/",
-                "source": "PubMed",
-            })
-        return out
-    except Exception:
-        return []
-
-
-def canonical_reference_pool(labels):
-    """Build a pool of authoritative references based on diagnoses.
+def build_analysis_prompt(note_text: str, specialty: str = "auto") -> str:
+    """Build the analysis prompt with specialty handling"""
+    specialty_config = SPECIALTIES.get(specialty, SPECIALTIES["auto"])
+    specialty_modifier = specialty_config.get("prompt_modifier", "")
     
-    Prioritizes:
-    - AAO Preferred Practice Patterns
-    - European/International society guidelines
-    - Cochrane reviews
-    - Landmark clinical trials
-    - NEJM, Lancet, JAMA Ophthalmology key papers
-    """
-    blob = " ".join([str(x or "") for x in (labels or [])]).lower()
-    pool = []
+    prompt = f"""You are a clinical documentation assistant. Analyze this clinical note and extract structured data.
 
-    def add(pmid, citation, url="", source=""):
-        pool.append({
-            "pmid": (pmid or ""),
-            "citation": (citation or ""),
-            "url": (url or ""),
-            "source": (source or ""),
-        })
+{specialty_modifier}
 
-    # DRY EYE / OCULAR SURFACE
-    if any(k in blob for k in ["dry eye", "meibomian", "mgd", "blepharitis", "ocular surface", "rosacea", "tear"]):
-        add("41005521", "TFOS DEWS III: Executive Summary. Am J Ophthalmol. 2025.", "https://pubmed.ncbi.nlm.nih.gov/41005521/", "TFOS Guideline")
-        add("28797892", "TFOS DEWS II Report Executive Summary. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28797892/", "TFOS Guideline")
-        add("", "TFOS DEWS III Reports Hub - Complete Guidelines", "https://www.tearfilm.org/paginades-tfos_dews_iii/7399_7239/eng/", "TFOS")
-        add("28736335", "TFOS DEWS II Management and Therapy Report. Ocul Surf. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28736335/", "TFOS Guideline")
+Return a JSON object with these fields:
+- provider_name: string (doctor/provider name)
+- patient_block: string (patient demographics as HTML with <br> tags)
+- patient_name: string (patient's name)
+- summary_html: string (clinical summary as HTML)
+- patient_summary: string (plain English summary for patient)
+- diagnoses: array of objects with: title, icd10, confidence, ref_nums, bullets
+- plan: array of objects with: title, ref_nums, bullets
+- references: array of objects with: number, citation, pmid, url, source
+- warnings: array of strings (clinical warnings/red flags)
+- icd10_codes: array of objects with: code, description, primary (boolean)
+- quality_score: object with: score (0-100), quality (poor/fair/good/excellent), issues, suggestions
 
-    # MYOPIA
-    if "myopia" in blob:
-        add("30817826", "International Myopia Institute (IMI) White Papers. Invest Ophthalmol Vis Sci. 2019.", "https://pubmed.ncbi.nlm.nih.gov/30817826/", "IMI Consensus")
-        add("", "IMI Clinical Guidelines - Myopia Management", "https://myopiainstitute.org/", "IMI")
+Clinical Note:
+{note_text[:12000]}
 
-    # GLAUCOMA
-    if any(k in blob for k in ["glaucoma", "intraocular pressure", "iop", "ocular hypertension", "optic nerve", "cupping"]):
-        add("34933745", "Primary Open-Angle Glaucoma PPP. Ophthalmology. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34933745/", "AAO PPP")
-        add("34675001", "European Glaucoma Society Terminology and Guidelines, 5th Ed. Br J Ophthalmol. 2021.", "https://pubmed.ncbi.nlm.nih.gov/34675001/", "EGS Guideline")
-        add("", "AAO PPP: Primary Open-Angle Glaucoma", "https://www.aao.org/education/preferred-practice-pattern/primary-open-angle-glaucoma-ppp", "AAO PPP")
-        add("19643495", "Ocular Hypertension Treatment Study. Arch Ophthalmol. 2002.", "https://pubmed.ncbi.nlm.nih.gov/12049575/", "Landmark Trial")
+Return valid JSON only."""
+    
+    return prompt
 
-    # DIABETIC EYE DISEASE
-    if any(k in blob for k in ["diabetic retinopathy", "diabetes", "diabetic macular", "dme"]):
-        add("", "AAO PPP: Diabetic Retinopathy", "https://www.aao.org/education/preferred-practice-pattern/diabetic-retinopathy-ppp", "AAO PPP")
-        add("26044954", "Diabetic Retinopathy PPP. Ophthalmology. 2020.", "https://pubmed.ncbi.nlm.nih.gov/31757496/", "AAO PPP")
-        add("", "ADA Standards of Care in Diabetes - Eye Care", "https://diabetesjournals.org/care", "ADA Guideline")
-        add("25903328", "DRCR.net Protocol T - Anti-VEGF for DME. NEJM. 2015.", "https://pubmed.ncbi.nlm.nih.gov/25692915/", "Landmark Trial")
+# =============================================================================
+# JOB MANAGEMENT
+# =============================================================================
 
-    # AMD
-    if any(k in blob for k in ["macular degeneration", "age related macular", "amd", "armd", "drusen", "choroidal neovascularization", "cnv"]):
-        add("39918524", "Age-Related Macular Degeneration PPP. Ophthalmology. 2025.", "https://pubmed.ncbi.nlm.nih.gov/39918524/", "AAO PPP")
-        add("", "AAO PPP: Age-Related Macular Degeneration", "https://www.aao.org/education/preferred-practice-pattern/age-related-macular-degeneration-ppp", "AAO PPP")
-        add("11594942", "AREDS Report No. 8 - Antioxidant Supplementation. Arch Ophthalmol. 2001.", "https://pubmed.ncbi.nlm.nih.gov/11594942/", "Landmark Trial")
-        add("23644932", "AREDS2 - Lutein/Zeaxanthin. JAMA. 2013.", "https://pubmed.ncbi.nlm.nih.gov/23644932/", "Landmark Trial")
-
-    # KERATOCONUS / ECTASIA
-    if any(k in blob for k in ["keratoconus", "ectasia", "corneal ectasia", "corneal thinning"]):
-        add("26253489", "Global Consensus on Keratoconus and Ectatic Diseases. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "Global Consensus")
-        add("", "AAO PPP: Corneal Ectasia", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-
-    # CORNEA / KERATITIS
-    if any(k in blob for k in ["cornea", "keratitis", "corneal ulcer", "corneal infection"]):
-        add("", "AAO PPP: Bacterial Keratitis", "https://www.aao.org/education/preferred-practice-pattern/bacterial-keratitis-ppp", "AAO PPP")
-        add("26253489", "Global Consensus on Keratoconus. Cornea. 2015.", "https://pubmed.ncbi.nlm.nih.gov/26253489/", "Global Consensus")
-
-    # UVEITIS
-    if "uveitis" in blob:
-        add("16490958", "Standardization of Uveitis Nomenclature (SUN). Am J Ophthalmol. 2005.", "https://pubmed.ncbi.nlm.nih.gov/16490958/", "SUN Consensus")
-        add("", "AAO PPP: Uveitis", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-
-    # CATARACT
-    if "cataract" in blob:
-        add("34780842", "Cataract in the Adult Eye PPP. Ophthalmology. 2022.", "https://pubmed.ncbi.nlm.nih.gov/34780842/", "AAO PPP")
-        add("", "AAO PPP: Cataract in the Adult Eye", "https://www.aao.org/education/preferred-practice-pattern/cataract-in-adult-eye-ppp", "AAO PPP")
-        add("", "European Society of Cataract and Refractive Surgeons Guidelines", "https://www.escrs.org/", "ESCRS")
-
-    # STRABISMUS / AMBLYOPIA
-    if any(k in blob for k in ["strabismus", "amblyopia", "esotropia", "exotropia", "diplopia"]):
-        add("", "AAO PPP: Amblyopia", "https://www.aao.org/education/preferred-practice-pattern/amblyopia-ppp", "AAO PPP")
-        add("", "AAO PPP: Esotropia and Exotropia", "https://www.aao.org/education/preferred-practice-pattern/esotropia-exotropia-ppp", "AAO PPP")
-        add("15545803", "PEDIG - Amblyopia Treatment Studies", "https://pubmed.ncbi.nlm.nih.gov/15545803/", "Landmark Trial")
-
-    # PEDIATRIC
-    if any(k in blob for k in ["pediatric", "paediatric", "child", "infant", "rop"]):
-        add("", "AAO PPP: Pediatric Eye Evaluations", "https://www.aao.org/education/preferred-practice-pattern/pediatric-eye-evaluations-ppp", "AAO PPP")
-        add("", "AAO PPP: Retinopathy of Prematurity", "https://www.aao.org/education/preferred-practice-pattern/retinopathy-of-prematurity-ppp", "AAO PPP")
-
-    # NEURO-OPHTHALMOLOGY
-    if any(k in blob for k in ["optic neuritis", "papilledema", "neuro", "visual field", "third nerve", "fourth nerve", "sixth nerve", "cranial nerve"]):
-        add("", "AAO EyeWiki: Optic Neuritis", "https://eyewiki.aao.org/Optic_Neuritis", "AAO EyeWiki")
-        add("", "AAO EyeWiki: Papilledema", "https://eyewiki.aao.org/Papilledema", "AAO EyeWiki")
-        add("16105882", "Optic Neuritis Treatment Trial - 15 Year Follow-up. Ophthalmology. 2008.", "https://pubmed.ncbi.nlm.nih.gov/18675697/", "Landmark Trial")
-
-    # RETINAL DETACHMENT / VITREOUS
-    if any(k in blob for k in ["retinal detachment", "vitreous", "floaters", "pvd", "posterior vitreous"]):
-        add("", "AAO PPP: Posterior Vitreous Detachment, Retinal Breaks, and Lattice Degeneration", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-        add("28284692", "Incidence of Retinal Detachment Following PVD. JAMA Ophthalmol. 2017.", "https://pubmed.ncbi.nlm.nih.gov/28284692/", "Clinical Study")
-
-    # REFRACTIVE
-    if any(k in blob for k in ["myopia", "hyperopia", "astigmatism", "presbyopia", "refractive"]):
-        add("", "AAO PPP: Refractive Errors and Refractive Surgery", "https://www.aao.org/education/preferred-practice-pattern", "AAO PPP")
-
-    return pool[:12]  # Return top 12 most relevant
-
-
-def merge_references(pubmed_refs, canonical_refs, max_total=18):
-    seen = set()
-    merged = []
-
-    def norm_cit(s):
-        return re.sub(r"\s+", " ", (s or "").strip().lower())
-
-    def key_for(r):
-        pmid = (r.get("pmid") or "").strip()
-        if pmid:
-            return "pmid:" + pmid
-        return "cit:" + norm_cit(r.get("citation"))
-
-    for r in (pubmed_refs or []):
-        if not isinstance(r, dict):
-            continue
-        k = key_for(r)
-        if k in seen:
-            continue
-        seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
-
-    for r in (canonical_refs or []):
-        if not isinstance(r, dict):
-            continue
-        k = key_for(r)
-        if k in seen:
-            continue
-        seen.add(k)
-        merged.append({
-            "pmid": (r.get("pmid") or ""),
-            "citation": (r.get("citation") or ""),
-            "url": (r.get("url") or ""),
-            "source": (r.get("source") or ""),
-        })
-
-    numbered = []
-    for i, r in enumerate(merged[:max_total], start=1):
-        pmid = (r.get("pmid") or "").strip()
-        url = (r.get("url") or "").strip()
-        if (not url) and pmid:
-            url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
-        numbered.append({
-            "number": str(i),
-            "pmid": pmid,
-            "citation": (r.get("citation") or ""),
-            "url": url,
-            "source": (r.get("source") or ("PubMed" if pmid else "")),
-        })
-    return numbered
-
-
-def assign_citations_prompt(analysis: Dict[str, Any]) -> str:
-    return f"""
-You are a clinician assistant. You are given an analysis object and a numbered reference list.
-Assign appropriate reference numbers to each diagnosis and plan item.
-
-Output VALID JSON only with this schema:
-diagnoses: array of items, each item:
-  number: integer
-  refs: array of integers
-plan: array of items, each item:
-  number: integer
-  refs: array of integers
-
-Rules:
-1 Use only reference numbers that exist in references.
-2 Prefer 1 to 3 refs per item.
-3 There must always be at least one reference number used somewhere in diagnoses or plan.
-
-Analysis:
-{json.dumps(analysis, ensure_ascii=False)}
-""".strip()
-
-
-def letter_prompt(form: Dict[str, Any], analysis: Dict[str, Any]) -> str:
-    reason_label = (form.get("reason_label") or "Reason for Report").strip() or "Reason for Report"
-    out_lang = (form.get("output_language") or "").strip()
-    out_lang_line = f"Write the letter in {out_lang}." if out_lang and out_lang.lower() not in {"auto", "match", "match input"} else ""
-    return f"""
-You are a senior clinician writing a professional referral or report letter. Your goal is to communicate effectively while building collegial relationships.
-
-Output VALID JSON only with this schema:
-{{
-  "letter_plain": "string - the complete letter in plain text format",
-  "letter_html": "string - the letter formatted with HTML tags"
-}}
-
-TONE AND RELATIONSHIP:
-- Write as one clinician to another - collegial, respectful, and collaborative
-- Express genuine appreciation for their expertise and time
-- Signal willingness to comanage and collaborate
-- If recipient_type equals "Patient", write in warm, accessible language while maintaining professionalism
-- For physicians, use precise medical terminology but remain personable
-
-SPECIAL REQUESTS HANDLING:
-The special_requests field is an INTENT SIGNAL from the referring provider. 
-- NEVER quote it verbatim or include it as a section
-- WEAVE the intent naturally into the referral narrative and closing
-- Let it inform what you emphasize without explicitly stating it
-
-Language:
-{out_lang_line}
-
-Clinic context:
-clinic_name: {os.getenv("CLINIC_NAME","")}
-clinic_address: {os.getenv("CLINIC_ADDRESS","")}
-clinic_phone: {os.getenv("CLINIC_PHONE","")}
-
-LETTER STRUCTURE:
-
-1. HEADER (one item per line):
-To: <recipient>
-From: <authoring provider>
-Date: <current date>
-
-Patient: <full name>
-DOB: <date> (<age>)
-Sex: <sex>
-PHN: <phn if available>
-Phone: <phone if available>
-
-{reason_label}: <diagnosis plus referral focus, written naturally>
-
-2. SALUTATION:
-Dear <recipient name or "Colleague">,
-
-3. OPENING PARAGRAPH (relationship-building):
-- Start with genuine appreciation: "Thank you for seeing..." or "I would be grateful for your expertise with..."
-- Introduce the patient with context: name, age, chief complaint
-- State the referral reason naturally, incorporating the requested service
-- Add urgency context if relevant
-- This should read like a real letter between colleagues, not a form
-
-4. CLINICAL CONTENT:
-Use headings for:
-- Exam findings (include objective measurements, key negatives, imaging results)
-- Assessment (problem list with laterality and severity)
-- Plan (current management and what you're asking them to do)
-
-5. CLOSING PARAGRAPH (collaboration signal):
-- Express appreciation for seeing the patient
-- Request their impressions and recommendations
-- Signal openness to comanagement
-- End with "Kind regards," ONLY - do not add the provider name after (signature will be added separately)
-
-RULES:
-- Do NOT include Evidence, Disclaimer, or References sections
-- Do NOT include citation numbers [1] in the letter body
-- Do NOT repeat the provider name after "Kind regards,"
-- Keep exam findings detailed but relevant to the referral
-- Make the letter feel personal and collegial, not templated
-
-Form:
-{json.dumps(form, ensure_ascii=False)}
-
-Analysis:
-{json.dumps(analysis, ensure_ascii=False)}
-""".strip()
-
-
-def finalize_signoff(letter_plain: str, provider_name: str, has_signature: bool) -> str:
-    txt = (letter_plain or "").rstrip()
-    if not txt:
-        return ""
-    lines = txt.splitlines()
-    if lines:
-        last = lines[-1].strip()
-        prov = (provider_name or "").strip()
-        if prov and last.lower() == prov.lower():
-            lines = lines[:-1]
-    txt = "\n".join(lines).rstrip()
-    if has_signature:
-        return txt
-    prov = (provider_name or "").strip()
-    if not prov:
-        return txt
-    if txt.lower().endswith("kind regards,"):
-        return txt + "\n" + prov
-    if re.search(r"\bkind regards\b", txt, flags=re.IGNORECASE):
-        return txt + "\n" + prov
-    return txt + "\n\nKind regards,\n" + prov
-
-
-def new_job_id() -> str:
-    return f"job_{int(time.time() * 1000)}_{os.urandom(4).hex()}"
-
-
-def set_job(job_id: str, **updates: Any) -> None:
-    _ensure_job_dir()
+def create_job(job_type: str = "analysis", specialty: str = "auto", template: str = "standard") -> str:
+    """Create a new job"""
+    job_id = uuid.uuid4().hex
+    
     with JOBS_LOCK:
-        job = JOBS.get(job_id) or {}
-        job.update(updates)
-        JOBS[job_id] = job
-        path = _job_path(job_id)
+        JOBS[job_id] = {
+            "status": "waiting",
+            "stage": "received",
+            "stage_label": "Received",
+            "progress": 0,
+            "data": None,
+            "error": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "job_type": job_type,
+            "specialty": specialty,
+            "template": template,
+        }
+    
+    # Also create DB record if user is logged in
+    if current_user.is_authenticated:
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(job, f, ensure_ascii=False)
+            job = Job(
+                job_id=job_id,
+                job_type=job_type,
+                status=JobStatus.WAITING.value,
+                specialty=specialty,
+                template=template,
+                user_id=current_user.id,
+                organization_id=current_user.organization_id
+            )
+            db.session.add(job)
+            db.session.commit()
         except Exception:
             pass
+    
+    return job_id
 
-    if job_s3_enabled():
-        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-        try:
-            s3, _ = aws_clients()
-        except Exception:
-            s3 = None
-        if s3 is not None:
-            body = json.dumps(job, ensure_ascii=False).encode("utf-8")
-            for key in job_s3_key_fallbacks(job_id):
-                try:
-                    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
-                    break
-                except Exception:
-                    continue
-
-
-def get_job(job_id: str) -> Dict[str, Any]:
-    _ensure_job_dir()
+def update_job_stage(job_id: str, stage: str, label: str, progress: int):
+    """Update job stage"""
     with JOBS_LOCK:
         if job_id in JOBS:
-            return dict(JOBS.get(job_id) or {})
-    path = _job_path(job_id)
+            JOBS[job_id]["stage"] = stage
+            JOBS[job_id]["stage_label"] = label
+            JOBS[job_id]["progress"] = progress
+    
+    # Update DB
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            job = json.load(f) or {}
-        if isinstance(job, dict):
-            with JOBS_LOCK:
-                JOBS[job_id] = job
-            return dict(job)
+        job = Job.query.filter_by(job_id=job_id).first()
+        if job:
+            job.set_stage(stage, label, progress)
     except Exception:
         pass
 
-    if job_s3_enabled():
-        bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-        try:
-            s3, _ = aws_clients()
-        except Exception:
-            s3 = None
-        if s3 is not None:
-            for key in job_s3_key_fallbacks(job_id):
-                try:
-                    obj = s3.get_object(Bucket=bucket, Key=key)
-                    body = obj["Body"].read()
-                    job = json.loads(body.decode("utf-8", errors="ignore")) or {}
-                    if isinstance(job, dict):
-                        with JOBS_LOCK:
-                            JOBS[job_id] = job
-                        try:
-                            with open(path, "w", encoding="utf-8") as f:
-                                json.dump(job, f, ensure_ascii=False)
-                        except Exception:
-                            pass
-                        return dict(job)
-                except Exception:
-                    continue
-    return {}
-
-
-def run_analysis_job(job_id: str, note_text: str) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
-    obj, err = llm_json(analyze_prompt(note_text))
+def complete_job(job_id: str, data: Dict[str, Any]):
+    """Complete a job"""
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            JOBS[job_id]["status"] = "complete"
+            JOBS[job_id]["stage"] = "complete"
+            JOBS[job_id]["stage_label"] = "Complete"
+            JOBS[job_id]["progress"] = 100
+            JOBS[job_id]["data"] = data
     
-    # Heartbeat after LLM call
-    set_job(job_id, heartbeat_at=now_utc_iso())
-    
-    if err or not obj:
-        set_job(job_id, status="error", error=err or "Analysis failed", updated_at=now_utc_iso())
-        return
-
-    analysis = dict(ANALYZE_SCHEMA)
-    analysis.update(obj)
-
-    pb = (analysis.get("patient_block") or "")
-    pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb, flags=re.IGNORECASE)
-    pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
-    pb_lines = [ln.strip() for ln in pb_plain.splitlines() if ln.strip()]
-    patient_name = ""
-    if pb_lines:
-        first = pb_lines[0]
-        if ":" in first:
-            k, v = first.split(":", 1)
-            if k.strip().lower() in {"patient", "name"}:
-                patient_name = v.strip()
-        if not patient_name:
-            patient_name = first.strip()
-    analysis["patient_name"] = patient_name
-
-    prov = (analysis.get("provider_name") or "").strip()
-    if prov and patient_name:
-        low_prov = prov.lower()
-        low_px = patient_name.lower()
-        if low_px in low_prov:
-            prov2 = re.sub(re.escape(patient_name), "", prov, flags=re.IGNORECASE).strip()
-            prov2 = re.sub(r"\s{2,}", " ", prov2).strip(" ,")
-            analysis["provider_name"] = prov2
-
-    # Heartbeat before PubMed fetch
-    set_job(job_id, heartbeat_at=now_utc_iso())
-    
-    terms = []
-    for dx in analysis.get("diagnoses") or []:
-        if isinstance(dx, dict):
-            label = (dx.get("label") or "").strip()
-            if label:
-                terms.append(label)
-    references = pubmed_fetch_for_terms(terms)
-    canonical = canonical_reference_pool([dx.get('label') for dx in (analysis.get('diagnoses') or []) if isinstance(dx, dict)])
-    analysis['references'] = merge_references(references, canonical)
-
-    # Heartbeat before citation assignment
-    set_job(job_id, heartbeat_at=now_utc_iso())
-
-    if analysis.get('references'):
-        cites_obj, cites_err = llm_json(assign_citations_prompt(analysis), temperature=0.0)
-        if not cites_err and cites_obj:
-            dx_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("diagnoses") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            pl_map = {int(x.get("number")): x.get("refs") for x in (cites_obj.get("plan") or []) if isinstance(x, dict) and str(x.get("number", "")).isdigit()}
-            for dx in analysis.get("diagnoses") or []:
-                if isinstance(dx, dict) and isinstance(dx.get("number"), int):
-                    dx["refs"] = dx_map.get(dx["number"], [])
-            for pl in analysis.get("plan") or []:
-                if isinstance(pl, dict) and isinstance(pl.get("number"), int):
-                    pl["refs"] = pl_map.get(pl["number"], [])
-
-    set_job(job_id, status="complete", data=analysis, updated_at=now_utc_iso())
-
-
-def run_analysis_upload_job(job_id: str, filename: str, data: bytes, force_ocr: bool = False) -> None:
-    set_job(job_id, status="processing", updated_at=now_utc_iso())
-    set_job(job_id, heartbeat_at=now_utc_iso())
-
     try:
-        if (not data) and job_id:
-            job = get_job(job_id)
-            up = (job.get("upload_path") or "").strip()
-            if up and os.path.exists(up):
-                with open(up, "rb") as f:
-                    data = f.read()
-                filename = (job.get("upload_name") or filename or "")
-                if isinstance(job.get("force_ocr"), bool):
-                    force_ocr = bool(job.get("force_ocr"))
+        job = Job.query.filter_by(job_id=job_id).first()
+        if job:
+            job.complete(data)
     except Exception:
         pass
 
-    name = (filename or "").lower()
-    note_text = ""
-    ocr_attempted = False
-
+def fail_job(job_id: str, error: str):
+    """Fail a job"""
+    with JOBS_LOCK:
+        if job_id in JOBS:
+            JOBS[job_id]["status"] = "error"
+            JOBS[job_id]["error"] = error
+    
     try:
-        job = get_job(job_id)
-        upload_path = (job.get("upload_path") or "").strip() if isinstance(job, dict) else ""
-        if upload_path and not data:
-            try:
-                with open(upload_path, "rb") as f:
-                    data = f.read()
-            except Exception as e:
-                set_job(job_id, status="error", error=f"Failed to read uploaded file: {e}", updated_at=now_utc_iso())
-                return
+        job = Job.query.filter_by(job_id=job_id).first()
+        if job:
+            job.fail(error)
+    except Exception:
+        pass
 
-        if name.endswith(".pdf"):
-            try:
-                note_text = extract_pdf_text(io.BytesIO(data))
-            except Exception:
-                note_text = ""
+def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Get job status"""
+    with JOBS_LOCK:
+        return JOBS.get(job_id)
 
-            if force_ocr or (not text_is_meaningful(note_text)):
-                ocr_attempted = True
-                ocr_text, ocr_err = ocr_pdf_bytes(data)
-                if ocr_err:
-                    set_job(job_id, status="error", error=ocr_err, updated_at=now_utc_iso())
-                    return
-                if ocr_text:
-                    note_text = ocr_text
+# =============================================================================
+# ANALYSIS WORKER
+# =============================================================================
 
-            set_job(job_id, heartbeat_at=now_utc_iso())
-
-        elif name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            ocr_attempted = True
-            if Image is None or pytesseract is None:
-                set_job(job_id, status="error", error="Image OCR dependencies missing", updated_at=now_utc_iso())
-                return
-            try:
-                img = Image.open(io.BytesIO(data))
-                note_text = (pytesseract.image_to_string(img) or "").strip()
-            except Exception as e:
-                set_job(job_id, status="error", error=f"Image OCR failed: {e}", updated_at=now_utc_iso())
-                return
-            set_job(job_id, heartbeat_at=now_utc_iso())
-        else:
-            set_job(job_id, status="error", error="Unsupported file type", updated_at=now_utc_iso())
+def run_analysis(job_id: str, note_text: str, specialty: str = "auto"):
+    """Run analysis in background"""
+    try:
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id]["status"] = "processing"
+        
+        # Stage 1: Extracting
+        update_job_stage(job_id, "extracting", "Extracting text...", 10)
+        
+        # Stage 2: Analyzing provider
+        update_job_stage(job_id, "analyzing_provider", "Identifying provider...", 20)
+        
+        # Stage 3: Extracting findings
+        update_job_stage(job_id, "extracting_findings", "Extracting clinical findings...", 35)
+        
+        # Stage 4: Building assessment
+        update_job_stage(job_id, "building_assessment", "Building assessment...", 50)
+        
+        # Build and run prompt
+        prompt = build_analysis_prompt(note_text, specialty)
+        
+        # Stage 5: Cross-referencing
+        update_job_stage(job_id, "cross_referencing", "Cross-referencing evidence...", 65)
+        
+        result, error = llm_json(prompt)
+        
+        if error:
+            fail_job(job_id, error)
             return
+        
+        if not result:
+            fail_job(job_id, "No analysis result")
+            return
+        
+        # Stage 6: Structuring
+        update_job_stage(job_id, "structuring", "Structuring output...", 80)
+        
+        # Coerce types
+        result = coerce_analysis_types(result)
+        
+        # Stage 7: Validating
+        update_job_stage(job_id, "validating", "Validating schema...", 90)
+        
+        # Validate schema
+        is_valid, errors = validate_analysis(result)
+        result["metadata"] = {
+            "analysis_version": "2.0",
+            "schema_valid": is_valid,
+            "validation_errors": errors if not is_valid else [],
+            "specialty": specialty,
+            "quality_level": result.get("quality_score", {}).get("quality", "unknown")
+        }
+        
+        # Complete
+        complete_job(job_id, result)
+        
     except Exception as e:
-        set_job(job_id, status="error", error=f"Extraction failed: {e}", updated_at=now_utc_iso())
-        return
+        fail_job(job_id, f"Analysis error: {e}")
 
-    if not note_text:
-        msg = "No text extracted"
-        if ocr_attempted:
-            msg = "OCR returned no readable text"
-        set_job(job_id, status="error", error=msg, updated_at=now_utc_iso())
-        return
+# =============================================================================
+# API ROUTES
+# =============================================================================
 
-    run_analysis_job(job_id, note_text)
-
-
-# ============ API Routes ============
+@api_bp.route("/csrf_token")
+@login_required
+def csrf_token():
+    """Get CSRF token"""
+    return {"csrf_token": generate_csrf()}
 
 @api_bp.route("/analyze_start", methods=["POST"])
 @login_required
+@usage_limit_check
 def analyze_start():
-    file = request.files.get("file") or request.files.get("pdf")
-    if not file:
-        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    """Start analysis job"""
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file uploaded"})
+    
+    file = request.files["file"]
+    if not file.filename:
+        return jsonify({"ok": False, "error": "Empty filename"})
+    
+    handwritten = request.form.get("handwritten") == "1"
+    specialty = request.form.get("specialty", "auto")
+    
+    # Validate specialty
+    if specialty not in SPECIALTIES:
+        specialty = "auto"
+    
+    # Extract text
+    text, used_ocr, needs_ocr, error = extract_text_from_upload(file, force_ocr=handwritten)
+    
+    if needs_ocr:
+        return jsonify({"ok": False, "needs_ocr": True, "error": error or "OCR required"})
+    
+    if error and not text:
+        return jsonify({"ok": False, "error": error})
+    
+    if not text or len(text.strip()) < 100:
+        return jsonify({"ok": False, "error": "Not enough text extracted"})
+    
+    # Create job
+    job_id = create_job(job_type="analysis", specialty=specialty)
+    
+    # Log audit
+    log_audit("analysis_started", {"job_id": job_id, "specialty": specialty, "used_ocr": used_ocr})
+    
+    # Track usage
+    if current_user.organization:
+        current_user.organization.increment_usage()
+    
+    # Start analysis in background
+    thread = threading.Thread(target=run_analysis, args=(job_id, text, specialty))
+    thread.start()
+    
+    return jsonify({"ok": True, "job_id": job_id})
 
-    filename = (getattr(file, "filename", "") or "").lower()
-    data = file.read()
-
-    job_id = new_job_id()
-    force_ocr = (request.form.get("handwritten") or "").strip() in {"1", "true", "yes", "on"}
-    _ensure_job_dir()
-    upath = _upload_path(job_id, filename)
-    try:
-        with open(upath, "wb") as f:
-            f.write(data)
-    except Exception:
-        upath = ""
-
-    set_job(
-        job_id,
-        status="waiting",
-        updated_at=now_utc_iso(),
-        upload_path=upath,
-        upload_name=filename,
-        force_ocr=force_ocr,
-    )
-    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, filename, data, force_ocr), daemon=True)
-    t.start()
-
-    return jsonify({"ok": True, "job_id": job_id}), 200
-
-
-@api_bp.route("/analyze_status", methods=["GET"])
+@api_bp.route("/analyze_status")
 @login_required
 def analyze_status():
-    job_id = (request.args.get("job_id") or "").strip()
+    """Get analysis job status"""
+    job_id = request.args.get("job_id", "")
     if not job_id:
-        return jsonify({"ok": False, "error": "Missing job_id"}), 400
+        return jsonify({"ok": False, "error": "Missing job_id"})
+    
     job = get_job(job_id)
     if not job:
-        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
-
-    try:
-        status = (job.get("status") or "").strip().lower()
-        if status == "processing":
-            hb = parse_utc_iso(job.get("heartbeat_at") or job.get("updated_at") or "")
-            now = datetime.now(timezone.utc)
-            stale_seconds = (now - hb).total_seconds() if hb else 999999
-            # Only restart if stale for 90+ seconds (LLM calls can take 60s)
-            if stale_seconds > 90:
-                up = (job.get("upload_path") or "").strip()
-                if up and os.path.exists(up) and not job.get("resume_started"):
-                    set_job(job_id, resume_started=True, updated_at=now_utc_iso(), heartbeat_at=now_utc_iso())
-                    t = threading.Thread(target=run_analysis_upload_job, args=(job_id, job.get("upload_name") or "", b"", bool(job.get("force_ocr"))), daemon=True)
-                    t.start()
-                    job = get_job(job_id)
-    except Exception:
-        pass
-    return jsonify({"ok": True, **job}), 200
-
-
-@api_bp.route("/analyze_text_start", methods=["POST"])
-@login_required
-def analyze_text_start():
-    payload = request.get_json(silent=True) or {}
-    note_text = (payload.get("text") or "").strip()
-    if not note_text:
-        return jsonify({"ok": False, "error": "Missing text"}), 400
-    job_id = new_job_id()
-    set_job(job_id, status="waiting", updated_at=now_utc_iso())
-    t = threading.Thread(target=run_analysis_job, args=(job_id, note_text), daemon=True)
-    t.start()
-    return jsonify({"ok": True, "job_id": job_id}), 200
-
-
-@api_bp.route("/transcribe_start", methods=["POST"])
-@login_required
-def transcribe_start():
-    audio = request.files.get("audio")
-    if not audio:
-        return jsonify({"ok": False, "error": "No audio uploaded"}), 400
-    language = (request.form.get("language") or "auto").strip()
-    mode = (request.form.get("mode") or "dictation").strip()
-    ok, msg = aws_ready()
-    if not ok:
-        return jsonify({"ok": False, "error": msg}), 200
-
-    bucket = os.getenv("AWS_S3_BUCKET", "").strip()
-    ext = os.path.splitext((getattr(audio, "filename", "") or ""))[1].lower()
-    if not ext:
-        ext = ".webm"
-    key = f"uploads/{uuid.uuid4().hex}{ext}"
-    s3, _ = aws_clients()
-    try:
-        s3.upload_fileobj(audio.stream, bucket, key)
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 200
-
-    job_name = new_job_id()
-    started, err = start_transcribe_job(job_name, key, language, mode=mode)
-    if not started:
-        return jsonify({"ok": False, "error": err}), 200
-    set_job(job_name, status="transcribing", updated_at=now_utc_iso(), media_key=key, language=language, mode=mode)
-    return jsonify({"ok": True, "job_id": job_name}), 200
-
-
-@api_bp.route("/transcribe_status", methods=["GET"])
-@login_required
-def transcribe_status():
-    job_id = (request.args.get("job_id") or "").strip()
-    if not job_id:
-        return jsonify({"ok": False, "error": "Missing job_id"}), 400
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"ok": False, "error": "Unknown job_id"}), 404
-
-    if (job.get("status") or "") in ("complete", "error"):
-        return jsonify({"ok": True, **job}), 200
-
-    txt, status, err = fetch_transcribe_result(job_id)
-    if err and status == "failed":
-        set_job(job_id, status="error", error=err, updated_at=now_utc_iso())
-        return jsonify({"ok": True, **get_job(job_id)}), 200
-    if status == "completed" and txt:
-        set_job(job_id, status="complete", transcript=txt, updated_at=now_utc_iso())
-        return jsonify({"ok": True, **get_job(job_id)}), 200
-    set_job(job_id, status="transcribing", updated_at=now_utc_iso())
-    return jsonify({"ok": True, **get_job(job_id)}), 200
-
-
-@api_bp.route("/generate_report", methods=["POST"])
-@login_required
-def generate_report():
-    payload = request.get_json(silent=True) or {}
-    form = payload.get("form") or {}
-    analysis = payload.get("analysis") or {}
-
-    pb_html = (analysis.get("patient_block") or "")
-    pb_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", pb_html, flags=re.IGNORECASE)
-    pb_plain = re.sub(r"<[^>]+>", "", pb_plain)
-    pb_plain = re.sub(r"\n{3,}", "\n\n", pb_plain).strip()
-    analysis["patient_block_plain"] = pb_plain
-
-    form = dict(form) if isinstance(form, dict) else {}
-    doc_type = (form.get("document_type") or "").strip()
-    form["reason_label"] = "Reason for Referral" if doc_type.lower() == "specialist" else "Reason for Report"
-    form.setdefault("current_date", datetime.now().strftime("%B %d, %Y"))
-    rf = (form.get("reason_for_referral") or "").strip()
-    rd = (form.get("reason_detail") or "").strip()
-    if rf and rd:
-        form["reason_for_referral_combined"] = f"{rf}, {rd}"
-    else:
-        form["reason_for_referral_combined"] = rf or rd
-
-    obj, err = llm_json(letter_prompt(form, analysis))
-    if err or not obj:
-        return jsonify({"ok": False, "error": err or "Generation failed"}), 200
-
-    letter_plain = (obj.get("letter_plain") or "").strip()
-    letter_html = (obj.get("letter_html") or "").strip()
-    if letter_plain:
-        letter_plain = re.sub(r"<\s*br\s*/?\s*>", "\n", letter_plain, flags=re.IGNORECASE)
-        letter_plain = re.sub(r"<\s*/?p\s*>", "\n", letter_plain, flags=re.IGNORECASE)
-        letter_plain = re.sub(r"<[^>]+>", "", letter_plain)
-        letter_plain = re.sub(r"\n{3,}", "\n\n", letter_plain).strip()
-    if not letter_plain:
-        return jsonify({"ok": False, "error": "Empty output"}), 200
-
-    provider_name = (form.get("from_doctor") or form.get("provider_name") or "").strip()
-    sig_client = bool(form.get("signature_present"))
-    letter_plain = finalize_signoff(letter_plain, provider_name, sig_client)
-
-    want_label = (form.get("reason_label") or "Reason for Report").strip()
-    if want_label:
-        if want_label.lower() == "reason for report":
-            letter_plain = re.sub(r"^Reason\s+for\s+Referral\s*:", "Reason for Report:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
-        else:
-            letter_plain = re.sub(r"^Reason\s+for\s+Report\s*:", "Reason for Referral:", letter_plain, flags=re.IGNORECASE | re.MULTILINE)
-
-    return jsonify({"ok": True, "letter_plain": letter_plain, "letter_html": letter_html}), 200
-
-
-@api_bp.route("/export_pdf", methods=["POST"])
-@login_required
-def export_pdf():
-    if SimpleDocTemplate is None:
-        return jsonify({"error": "PDF generator not available"}), 500
-
-    payload = request.get_json(silent=True) or {}
-    text_in = (payload.get("text") or "").strip()
-    provider_name = (payload.get("provider_name") or "").strip() or "Provider"
-    patient_token = (payload.get("patient_token") or "").strip()
-    recipient_type = (payload.get("recipient_type") or "").strip()
-    letterhead_data_url = (payload.get("letterhead_data_url") or "").strip()
-    signature_data_url = (payload.get("signature_data_url") or "").strip()
+        return jsonify({"ok": False, "error": "Job not found"})
     
-    if not text_in:
-        return jsonify({"error": "No content"}), 400
-
-    clinic_short = (os.environ.get("CLINIC_SHORT") or "Integra").strip() or "Integra"
-
-    def safe_token(s: str) -> str:
-        s = "".join(ch for ch in (s or "") if ch.isalnum() or ch in (" ", "_"))
-        s = "_".join(s.strip().split())
-        return s or "Unknown"
-
-    def doctor_token(name: str) -> str:
-        low = (name or "").lower()
-        if "henry" in low and "reis" in low:
-            return "DrReis"
-        parts = [p for p in safe_token(name).split("_") if p]
-        if not parts:
-            return "DrProvider"
-        last = parts[-1]
-        return "Dr" + last
-
-    doc_tok = doctor_token(provider_name)
-    px_tok = patient_token or "PxUnknown"
-    today = datetime.utcnow().strftime("%Y%m%d")
-    kind = recipient_type.lower() or "report"
-    kind = "referral" if "special" in kind or "physician" in kind else kind
-    kind = safe_token(kind)
-
-    filename = f"{safe_token(clinic_short)}_{doc_tok}_{safe_token(px_tok)}_{today}_{kind}.pdf"
-    out_path = os.path.join(tempfile.gettempdir(), f"maneiro_{uuid.uuid4().hex}.pdf")
-
-    def data_url_to_tempfile(data_url: str, prefix: str) -> Optional[str]:
-        if not data_url or not data_url.startswith("data:"):
-            return None
-        try:
-            header, b64 = data_url.split(",", 1)
-            mime = header.split(";", 1)[0].split(":", 1)[1].strip().lower()
-            ext = ".png"
-            if "jpeg" in mime or "jpg" in mime:
-                ext = ".jpg"
-            raw = base64.b64decode(b64)
-            path = os.path.join(tempfile.gettempdir(), f"maneiro_{prefix}_{uuid.uuid4().hex}{ext}")
-            with open(path, "wb") as f:
-                f.write(raw)
-            return path
-        except Exception:
-            return None
-
-    def signature_slug(prov_name: str) -> str:
-        s = (prov_name or "").strip().lower()
-        s = re.sub(r"\b(dr\.?|md|od|mba)\b", "", s)
-        s = re.sub(r"[^a-z0-9]+", "_", s)
-        s = re.sub(r"_+", "_", s).strip("_")
-        return s
-
-    def find_signature_image(prov_name: str) -> Optional[str]:
-        base_dir = os.getenv("SIGNATURE_DIR", "static/signatures")
-        # Try relative to app folder
-        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        abs_dir = os.path.join(app_dir, "app", base_dir)
-        slug = signature_slug(prov_name)
-        if not slug:
-            return None
-        for ext in (".png", ".jpg", ".jpeg"):
-            cand = os.path.join(abs_dir, slug + ext)
-            if os.path.exists(cand):
-                return cand
-        return None
-
-    # Get letterhead: client upload > static letterhead.png
-    lh_override = data_url_to_tempfile(letterhead_data_url, "letterhead")
-    lh_path = lh_override
-    if not lh_path:
-        static_lh = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "img", "letterhead.png")
-        if os.path.exists(static_lh):
-            lh_path = static_lh
-
-    # Get signature: client upload > server lookup by provider name
-    sig_override = data_url_to_tempfile(signature_data_url, "signature")
-    sig_path_effective = sig_override or find_signature_image(provider_name)
-    
-    # If we have a signature, adjust text to not include provider name at end
-    if sig_path_effective and os.path.exists(sig_path_effective):
-        text_in = finalize_signoff(text_in, provider_name, True)
-
-    styles = getSampleStyleSheet()
-    base = ParagraphStyle(
-        "base", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10, leading=13.5, spaceAfter=4, alignment=TA_JUSTIFY
-    )
-    head = ParagraphStyle(
-        "head", parent=base, fontName="Helvetica-Bold",
-        spaceBefore=8, spaceAfter=5, alignment=TA_LEFT
-    )
-    mono = ParagraphStyle(
-        "mono", parent=base, fontName="Helvetica",
-        fontSize=10, leading=12.8, alignment=TA_LEFT, spaceAfter=0
-    )
-
-    def esc(s: str) -> str:
-        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    def meaningful(v: str) -> bool:
-        if not v:
-            return False
-        lv = v.strip().lower()
-        return lv not in {"na", "n/a", "none", "unknown", ""}
-
-    def emit_demographics(demo: dict) -> list:
-        """Compact demographics layout - multiple fields per line"""
-        lines = []
-        # Line 1: Patient, DOB, Sex, PHN
-        parts = []
-        if meaningful(demo.get("patient")):
-            parts.append(f"<b>Patient:</b> {esc(demo.get('patient'))}")
-        if meaningful(demo.get("dob")):
-            parts.append(f"<b>DOB:</b> {esc(demo.get('dob'))}")
-        if meaningful(demo.get("sex")):
-            parts.append(f"<b>Sex:</b> {esc(demo.get('sex'))}")
-        if meaningful(demo.get("phn")):
-            parts.append(f"<b>PHN:</b> {esc(demo.get('phn'))}")
-        if parts:
-            lines.append(Paragraph("  ".join(parts), mono))
-
-        # Line 2: Phone, Email, Address
-        parts2 = []
-        if meaningful(demo.get("phone")):
-            parts2.append(f"<b>Phone:</b> {esc(demo.get('phone'))}")
-        if meaningful(demo.get("email")):
-            parts2.append(f"<b>Email:</b> {esc(demo.get('email'))}")
-        addr = demo.get("address") or ""
-        if meaningful(addr) and len(addr) <= 80:
-            parts2.append(f"<b>Address:</b> {esc(addr)}")
-        if parts2:
-            lines.append(Paragraph("  ".join(parts2), mono))
-        return lines
-
-    story = []
-
-    # Add letterhead if available
-    if lh_path and os.path.exists(lh_path):
-        try:
-            img = RLImage(lh_path)
-            img.drawHeight = 50
-            img.drawWidth = 500
-            story.append(img)
-            story.append(Spacer(1, 8))
-        except Exception:
-            pass
-
-    raw_lines = text_in.splitlines()
-    demo_keys = {"patient", "dob", "sex", "phn", "phone", "email", "address"}
-    demo_data = {}
-    demo_active = False
-    demo_emitted = False
-
-    for raw in raw_lines:
-        line = (raw or "").rstrip()
-        if not line.strip():
-            if demo_active and not demo_emitted:
-                story.extend(emit_demographics(demo_data))
-                demo_emitted = True
-            story.append(Spacer(1, 8))
-            continue
-
-        lower = line.strip().lower()
-        key = lower.split(":", 1)[0].strip() if ":" in lower else ""
-
-        # Collect demographics for compact display
-        if key in demo_keys:
-            demo_active = True
-            try:
-                demo_data[key] = line.split(":", 1)[1].strip()
-            except Exception:
-                demo_data[key] = ""
-            continue
-
-        if demo_active and not demo_emitted:
-            story.extend(emit_demographics(demo_data))
-            demo_emitted = True
-
-        # Skip "Clinical Summary" heading
-        if lower in {"clinical summary", "clinical summary:"}:
-            continue
-
-        # Reason for referral/report - styled prominently
-        if lower.startswith("reason for referral") or lower.startswith("reason for report"):
-            label = "Reason for Referral" if lower.startswith("reason for referral") else "Reason for Report"
-            value = line.split(":", 1)[1].strip() if ":" in line else ""
-            story.append(Spacer(1, 10))
-            story.append(Paragraph(f"<b>{label}:</b> {esc(value)}", base))
-            story.append(Spacer(1, 10))
-            continue
-
-        # Section headings
-        if lower in {"exam findings", "exam findings:", "assessment", "assessment:", "plan", "plan:"}:
-            title = line.strip().replace(":", "")
-            story.append(Paragraph(f"<b>{esc(title)}</b>", head))
-            continue
-
-        # To/From/Date header lines
-        if lower.startswith("to:") or lower.startswith("from:") or lower.startswith("date:"):
-            try:
-                k, v = line.split(":", 1)
-                story.append(Paragraph(f"<b>{esc(k)}:</b> {esc(v.strip())}", mono))
-            except Exception:
-                story.append(Paragraph(esc(line), mono))
-            continue
-
-        # Salutation
-        if lower.startswith("dear "):
-            story.append(Spacer(1, 8))
-            story.append(Paragraph(esc(line), base))
-            story.append(Spacer(1, 6))
-            continue
-
-        # Signature block
-        if lower.startswith("kind regards"):
-            story.append(Spacer(1, 12))
-            story.append(Paragraph("Kind regards,", base))
-            
-            if sig_path_effective and os.path.exists(sig_path_effective):
-                try:
-                    sig = RLImage(sig_path_effective)
-                    page_w = rl_letter[0]
-                    max_width = int(page_w * 0.25)
-                    max_height = 90
-                    iw = float(sig.imageWidth)
-                    ih = float(sig.imageHeight)
-                    if iw > 0 and ih > 0:
-                        scale = min(max_width / iw, max_height / ih)
-                        sig.drawWidth = iw * scale
-                        sig.drawHeight = ih * scale
-                    story.append(Spacer(1, 6))
-                    text_w = rl_letter[0] - 54 - 54
-                    tbl = Table([[sig]], colWidths=[text_w])
-                    tbl.setStyle(TableStyle([
-                        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                        ("TOPPADDING", (0, 0), (-1, -1), 0),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                    ]))
-                    story.append(tbl)
-                except Exception:
-                    story.append(Paragraph(esc(provider_name), base))
-            else:
-                # No signature image - add provider name
-                story.append(Paragraph(esc(provider_name), base))
-            continue
-
-        # Regular paragraph
-        story.append(Paragraph(esc(line), base))
-
-    # Emit any remaining demographics
-    if demo_active and not demo_emitted:
-        story.extend(emit_demographics(demo_data))
-
-    doc = SimpleDocTemplate(
-        out_path,
-        pagesize=rl_letter,
-        leftMargin=54,
-        rightMargin=54,
-        topMargin=54,
-        bottomMargin=54,
-        title=filename,
-    )
-
-    try:
-        doc.build(story)
-        return send_file(out_path, as_attachment=True, download_name=filename, mimetype="application/pdf")
-    except Exception as e:
-        return jsonify({"error": f"PDF export failed: {type(e).__name__}: {str(e)}"}), 500
-
-
-@api_bp.route("/healthz", methods=["GET"])
-def healthz():
-    ok, msg = client_ready()
-    ocr_ok, ocr_msg = ocr_ready()
-    return jsonify({
+    response = {
         "ok": True,
-        "app_version": os.getenv("APP_VERSION", "2026.5"),
-        "time_utc": now_utc_iso(),
-        "openai_ready": ok,
-        "openai_message": msg,
-        "ocr_ready": ocr_ok,
-        "ocr_message": ocr_msg,
-        "model": model_name(),
-    }), 200
-
-
-# ============ ASSISTANT MODE ENDPOINTS ============
-
-def triage_fax_prompt(summary_html: str, patient_block: str, full_text: str = "", analysis: dict = None) -> str:
-    """Prompt for triaging incoming fax/communication with intelligent reasoning"""
-    context = full_text or summary_html or ""
+        "status": job["status"],
+        "stage": job.get("stage", ""),
+        "stage_label": job.get("stage_label", ""),
+        "progress": job.get("progress", 0),
+    }
     
-    # Include more analysis data if available
-    extra_context = ""
-    if analysis:
-        doc_type = analysis.get("document_type", "")
-        referral_info = analysis.get("referral_info", {})
-        diagnoses = analysis.get("diagnoses", [])
-        chief_complaint = analysis.get("chief_complaint", "")
-        provider_name = analysis.get("provider_name", "")
-        provider_clinic = analysis.get("provider_clinic", "")
+    if job["status"] == "complete":
+        response["data"] = job["data"]
+    elif job["status"] == "error":
+        response["error"] = job.get("error", "Unknown error")
+    
+    return jsonify(response)
+
+@api_bp.route("/letter_start", methods=["POST"])
+@login_required
+def letter_start():
+    """Start letter generation"""
+    data = request.get_json() or {}
+    
+    analysis = data.get("analysis")
+    if not analysis:
+        return jsonify({"ok": False, "error": "Missing analysis data"})
+    
+    template = data.get("template", "standard")
+    if template not in ADVANCED_TEMPLATES:
+        template = "standard"
+    
+    job_id = create_job(job_type="letter", template=template)
+    
+    # Start letter generation in background
+    thread = threading.Thread(target=run_letter_generation, args=(job_id, data, template))
+    thread.start()
+    
+    return jsonify({"ok": True, "job_id": job_id})
+
+def run_letter_generation(job_id: str, form_data: Dict[str, Any], template: str = "standard"):
+    """Generate letter in background"""
+    try:
+        with JOBS_LOCK:
+            if job_id in JOBS:
+                JOBS[job_id]["status"] = "processing"
         
-        if doc_type:
-            extra_context += f"\nDocument type detected: {doc_type}"
-        if chief_complaint:
-            extra_context += f"\nChief complaint: {chief_complaint}"
-        if provider_name:
-            extra_context += f"\nSending provider: {provider_name}"
-        if provider_clinic:
-            extra_context += f"\nSending clinic: {provider_clinic}"
-        if referral_info.get("is_referral"):
-            extra_context += f"\nReferral direction: {referral_info.get('referral_direction', 'unknown')}"
-            extra_context += f"\nReferring to: {referral_info.get('referring_to', '')}"
-            extra_context += f"\nReason: {referral_info.get('reason_for_referral', '')}"
-            extra_context += f"\nRequested service: {referral_info.get('requested_service', '')}"
-        if diagnoses:
-            dx_list = ", ".join([d.get("label", "") for d in diagnoses[:5] if d.get("label")])
-            extra_context += f"\nDiagnoses: {dx_list}"
-    
-    return f"""
-You are an expert medical office coordinator helping triage incoming faxes and communications for an ophthalmology clinic.
+        update_job_stage(job_id, "loading_context", "Loading context...", 15)
+        update_job_stage(job_id, "selecting_template", "Selecting template...", 30)
+        update_job_stage(job_id, "drafting", "Drafting letter...", 50)
+        
+        template_config = ADVANCED_TEMPLATES.get(template, ADVANCED_TEMPLATES["standard"])
+        
+        prompt = f"""Generate a professional clinical referral letter.
 
-STEP 1: DOCUMENT CLASSIFICATION
-Identify the document type:
-- REFERRAL REQUEST: Another doctor asking us to see their patient (IMPORTANT: requires scheduling)
-- CONSULTATION REPORT: A specialist sending us a report about our patient
-- LAB/IMAGING RESULTS: Test results to be filed or reviewed
-- INSURANCE/PRIOR AUTH: Authorization request or approval
-- MEDICAL RECORDS REQUEST: Someone requesting patient records
-- PRESCRIPTION REFILL: Request for medication/glasses Rx
-- PATIENT CORRESPONDENCE: Letter from or about a patient
-- MARKETING/SPAM: Promotional material (file/discard)
-- OTHER: Miscellaneous correspondence
+Template: {template_config['name']}
+Tone: {template_config.get('tone', 'professional')}
 
-STEP 2: URGENCY ASSESSMENT
-- URGENT: Same-day action needed (acute symptoms, critical results, time-sensitive auth)
-- SOON: Within 1-3 days (routine referrals, pending results)
-- ROUTINE: Standard processing (records requests, normal results)
+Form data:
+- To: {form_data.get('to_whom', '')}
+- From: {form_data.get('from_doctor', '')}
+- Recipient type: {form_data.get('recipient_type', 'Physician')}
+- Reason: {form_data.get('reason_for_referral', '')}
 
-STEP 3: ANALYZE CAREFULLY
-{extra_context}
+Analysis: {json.dumps(form_data.get('analysis', {}), indent=2)[:4000]}
 
-Patient information:
-{patient_block}
+Return JSON with:
+- letter_plain: plain text letter
+- letter_html: HTML formatted letter
 
-Document content:
-{context[:10000]}
+Return valid JSON only."""
+        
+        update_job_stage(job_id, "formatting", "Formatting...", 70)
+        
+        result, error = llm_json(prompt)
+        
+        if error:
+            fail_job(job_id, error)
+            return
+        
+        update_job_stage(job_id, "finalizing", "Finalizing...", 90)
+        
+        complete_job(job_id, result or {"letter_plain": "", "letter_html": ""})
+        
+    except Exception as e:
+        fail_job(job_id, str(e))
 
-STEP 4: GENERATE ACTIONABLE TASKS
-Based on your analysis, create specific tasks for staff and doctors.
-
-Output VALID JSON only:
-{{
-  "document_type": "string - REFERRAL_REQUEST, CONSULTATION_REPORT, LAB_RESULTS, INSURANCE, RECORDS_REQUEST, PRESCRIPTION, CORRESPONDENCE, MARKETING, OTHER",
-  "urgency": "string - URGENT, SOON, ROUTINE",
-  "from_provider": "string - name of sending doctor/organization",
-  "from_clinic": "string - clinic/organization name",
-  "from_fax": "string - fax number if visible",
-  "regarding": "string - clear description: patient name + what this is about",
-  "patient_name": "string - patient name if mentioned",
-  "patient_dob": "string - DOB if mentioned",
-  "reasoning": "string - brief explanation of your classification and why",
-  "front_desk_tasks": [
-    "string - specific actionable task with clear instruction"
-  ],
-  "doctor_tasks": [
-    "string - specific actionable task requiring clinical decision"
-  ],
-  "key_clinical_info": "string - any critical clinical details the doctor should know immediately"
-}}
-
-TASK WRITING RULES:
-1. Tasks must be specific and actionable (who, what, when)
-2. Include patient name in tasks when known
-3. For REFERRAL REQUESTS: First front desk task should be about scheduling
-4. For REFERRAL REQUESTS: Doctor task should be about reviewing if they want to accept
-5. For RESULTS: Note if normal vs abnormal
-6. For INSURANCE: Note deadlines if visible
-7. If document is unclear or illegible, note that in reasoning
-
-EXAMPLE for a referral request:
-{{
-  "document_type": "REFERRAL_REQUEST",
-  "urgency": "SOON",
-  "from_provider": "Dr. Jane Smith, OD",
-  "from_clinic": "Vision Care Associates",
-  "regarding": "John Doe (DOB 05/12/1965) - Glaucoma referral for IOP management",
-  "front_desk_tasks": [
-    "Schedule new patient appointment for John Doe (DOB 05/12/1965) - glaucoma consultation",
-    "Call Vision Care Associates at [fax number] to confirm receipt and get appointment scheduled",
-    "Request previous records including OCT and visual fields"
-  ],
-  "doctor_tasks": [
-    "Review referral from Dr. Smith for John Doe - elevated IOP OD 28, OS 26, suspicious optic nerves",
-    "Determine appointment urgency based on IOP levels"
-  ],
-  "key_clinical_info": "IOP elevated: OD 28, OS 26. C/D ratio 0.7 OU. Patient on Latanoprost."
-}}
-""".strip()
-
-
-def patient_letter_prompt(analysis: dict) -> str:
-    """Prompt for generating patient-friendly letter"""
-    diagnoses = analysis.get("diagnoses", [])
-    plan = analysis.get("plan", [])
-    
-    # Format diagnoses for the letter
-    dx_summary = ""
-    for dx in diagnoses[:5]:
-        if isinstance(dx, dict) and dx.get("label"):
-            dx_summary += f"- {dx.get('label')}\n"
-    
-    # Format plan items
-    plan_summary = ""
-    for p in plan[:5]:
-        if isinstance(p, dict) and p.get("title"):
-            plan_summary += f"- {p.get('title')}\n"
-            for bullet in (p.get("bullets") or [])[:3]:
-                plan_summary += f"  • {bullet}\n"
-    
-    return f"""
-You are a compassionate healthcare communicator writing a letter to a patient about their recent eye examination.
-
-PATIENT INFO:
-{analysis.get('patient_block', '')}
-
-PROVIDER:
-{analysis.get('provider_name', '')}
-
-CLINICAL SUMMARY:
-{analysis.get('summary_html', '')[:4000]}
-
-DIAGNOSES FOUND:
-{dx_summary}
-
-RECOMMENDED PLAN:
-{plan_summary}
-
-WRITING GUIDELINES:
-1. Use warm, reassuring language - patients may be anxious about their results
-2. Explain medical terms in plain English (e.g., "IOP" → "eye pressure")
-3. If findings are normal, emphasize the good news
-4. If there are concerns, explain them clearly but without causing undue alarm
-5. List next steps clearly (appointments, medications, lifestyle changes)
-6. Include when they should return for follow-up
-7. Provide contact information for questions
-8. Sign off warmly from the provider
-
-STRUCTURE:
-- Opening: Reference their recent visit and thank them
-- Summary: What we examined and found (in plain terms)
-- What this means: Explain the significance simply
-- Next steps: Clear action items they need to take
-- Reassurance: Appropriate closing based on findings
-- Contact info: How to reach the clinic with questions
-
-Output VALID JSON only:
-{{
-  "letter": "string - the complete letter text with proper paragraph breaks"
-}}
-""".strip()
-
-
-def insurance_letter_prompt(analysis: dict) -> str:
-    """Prompt for generating insurance/prior authorization letter"""
-    diagnoses = analysis.get("diagnoses", [])
-    plan = analysis.get("plan", [])
-    
-    # Format diagnoses with codes
-    dx_formatted = ""
-    for dx in diagnoses[:5]:
-        if isinstance(dx, dict):
-            code = dx.get("code", "")
-            label = dx.get("label", "")
-            bullets = dx.get("bullets", [])
-            dx_formatted += f"- {code} {label}\n"
-            for b in bullets[:3]:
-                dx_formatted += f"  • {b}\n"
-    
-    # Format plan items
-    plan_formatted = ""
-    for p in plan[:5]:
-        if isinstance(p, dict):
-            plan_formatted += f"- {p.get('title', '')}\n"
-            for b in (p.get("bullets") or [])[:3]:
-                plan_formatted += f"  • {b}\n"
-    
-    return f"""
-You are a medical documentation specialist writing a letter for insurance purposes (prior authorization, medical necessity, or appeal).
-
-PATIENT INFO:
-{analysis.get('patient_block', '')}
-
-PROVIDER:
-{analysis.get('provider_name', '')}
-
-CLINICAL SUMMARY:
-{analysis.get('summary_html', '')[:4000]}
-
-DIAGNOSES (with ICD codes if available):
-{dx_formatted}
-
-TREATMENT PLAN:
-{plan_formatted}
-
-LETTER REQUIREMENTS:
-1. Use formal medical terminology appropriate for insurance review
-2. Include ICD-10 codes when available
-3. Clearly establish MEDICAL NECESSITY - why this treatment/procedure is required
-4. Reference specific clinical findings (measurements, test results, exam findings)
-5. Explain why alternative treatments are inadequate or have been tried
-6. Include relevant history supporting the necessity
-7. State the specific treatment/procedure being requested
-8. Reference clinical guidelines or standard of care when applicable
-
-STRUCTURE:
-- Header: Date, To: Medical Review Department, Re: Prior Authorization / Medical Necessity
-- Patient identification: Name, DOB, Insurance ID
-- Opening: Purpose of letter and what is being requested
-- Clinical history: Relevant background
-- Current findings: Objective examination findings
-- Diagnosis: With ICD codes
-- Medical necessity statement: Why this treatment is required
-- Treatment plan: What is being requested
-- Supporting evidence: Guidelines, standards of care
-- Closing: Request for approval, contact for questions
-
-PERSUASION TECHNIQUES:
-- Lead with the most compelling clinical findings
-- Use specific numbers (visual acuity, IOP, measurements)
-- Reference progressive deterioration if applicable
-- Cite impact on daily functioning / quality of life
-- Note any failed conservative treatments
-
-Output VALID JSON only:
-{{
-  "letter": "string - the complete formal letter text"
-}}
-""".strip()
-
-
-@api_bp.route("/triage_fax", methods=["POST"])
+@api_bp.route("/letter_status")
 @login_required
-def triage_fax():
-    """Triage an incoming fax/communication for front desk"""
-    payload = request.get_json(silent=True) or {}
-    analysis = payload.get("analysis") or {}
+def letter_status():
+    """Get letter job status"""
+    job_id = request.args.get("job_id", "")
+    if not job_id:
+        return jsonify({"ok": False, "error": "Missing job_id"})
     
-    summary_html = analysis.get("summary_html", "")
-    patient_block = analysis.get("patient_block", "")
+    job = get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Job not found"})
     
-    # Pass full analysis for better context
-    prompt = triage_fax_prompt(summary_html, patient_block, analysis=analysis)
-    obj, err = llm_json(prompt, temperature=0.1)  # Lower temperature for more consistent output
+    response = {
+        "ok": True,
+        "status": job["status"],
+        "stage": job.get("stage", ""),
+        "stage_label": job.get("stage_label", ""),
+        "progress": job.get("progress", 0),
+    }
     
-    if err or not obj:
-        return jsonify({"ok": False, "error": err or "Triage failed"}), 200
+    if job["status"] == "complete":
+        response["data"] = job["data"]
+    elif job["status"] == "error":
+        response["error"] = job.get("error", "Unknown error")
     
+    return jsonify(response)
+
+@api_bp.route("/specialties")
+@login_required
+def get_specialties():
+    """Get available specialties"""
     return jsonify({
         "ok": True,
-        "document_type": obj.get("document_type", ""),
-        "urgency": obj.get("urgency", "ROUTINE"),
-        "from_provider": obj.get("from_provider", obj.get("from", "")),
-        "from_clinic": obj.get("from_clinic", ""),
-        "from_fax": obj.get("from_fax", ""),
-        "regarding": obj.get("regarding", ""),
-        "patient_name": obj.get("patient_name", ""),
-        "patient_dob": obj.get("patient_dob", ""),
-        "reasoning": obj.get("reasoning", ""),
-        "front_desk_tasks": obj.get("front_desk_tasks", []),
-        "doctor_tasks": obj.get("doctor_tasks", []),
-        "key_clinical_info": obj.get("key_clinical_info", ""),
-        # Keep backwards compatibility
-        "from": obj.get("from_provider", obj.get("from", ""))
-    }), 200
+        "specialties": [
+            {"id": k, "name": v["name"]} for k, v in SPECIALTIES.items()
+        ]
+    })
 
-
-@api_bp.route("/generate_assistant_letter", methods=["POST"])
+@api_bp.route("/templates")
 @login_required
-def generate_assistant_letter():
-    """Generate patient or insurance letter from analysis"""
-    payload = request.get_json(silent=True) or {}
-    analysis = payload.get("analysis") or {}
-    letter_type = payload.get("letter_type", "patient")
-    
-    if letter_type == "insurance":
-        prompt = insurance_letter_prompt(analysis)
-    else:
-        prompt = patient_letter_prompt(analysis)
-    
-    obj, err = llm_json(prompt, temperature=0.3)
-    
-    if err or not obj:
-        return jsonify({"ok": False, "error": err or "Letter generation failed"}), 200
-    
-    letter = obj.get("letter", "")
-    if not letter:
-        return jsonify({"ok": False, "error": "Empty letter generated"}), 200
-    
-    return jsonify({"ok": True, "letter": letter}), 200
+def get_templates():
+    """Get available letter templates"""
+    return jsonify({
+        "ok": True,
+        "templates": [
+            {"id": k, "name": v["name"]} for k, v in ADVANCED_TEMPLATES.items()
+        ]
+    })
+
+@api_bp.route("/stages")
+@login_required
+def get_stages():
+    """Get analysis/letter stage definitions"""
+    return jsonify({
+        "ok": True,
+        "analysis_stages": [{"id": s[0], "label": s[1], "progress": s[2]} for s in ANALYSIS_STAGES],
+        "letter_stages": [{"id": s[0], "label": s[1], "progress": s[2]} for s in LETTER_STAGES],
+    })
