@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import PyPDF2
 import requests
-from flask import Blueprint, jsonify, request, send_file, current_app
+from flask import Blueprint, jsonify, request, send_file, current_app, has_request_context
 from flask_login import login_required, current_user
 
 # Database imports for job persistence
@@ -1227,12 +1227,15 @@ def set_job(job_id: str, **updates: Any) -> None:
             if not job:
                 # Create new job record
                 job = Job(id=job_id)
-                # Set user/org if authenticated
-                if current_user and hasattr(current_user, 'id') and current_user.is_authenticated:
-                    job.user_id = current_user.id
-                    job.organization_id = current_user.organization_id
+                # Set user/org if authenticated (request context only)
+                if has_request_context():
+                    try:
+                        if current_user and getattr(current_user, 'is_authenticated', False):
+                            job.user_id = current_user.id
+                            job.organization_id = current_user.organization_id
+                    except Exception:
+                        pass
                 db.session.add(job)
-            
             # Update job from dict
             job.update_from_dict(updates)
             db.session.commit()
@@ -1245,6 +1248,15 @@ def set_job(job_id: str, **updates: Any) -> None:
                 json.dump(job_dict, f, ensure_ascii=False)
         except Exception:
             pass
+
+
+# Always persist to file storage (cross-worker fallback and debugging)
+path = _job_path(job_id)
+try:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(job_dict, f, ensure_ascii=False)
+except Exception:
+    pass
 
     # Also persist to S3 for disaster recovery (if enabled)
     if job_s3_enabled():
@@ -1271,10 +1283,8 @@ def get_job(job_id: str) -> Dict[str, Any]:
     """
     _ensure_job_dir()
     
-    # Check in-memory cache first (fast path for active jobs)
-    with JOBS_LOCK:
-        if job_id in JOBS:
-            return dict(JOBS.get(job_id) or {})
+    # Check Postgres first (authoritative across workers)
+    # (cache is a best-effort optimization and can be stale or empty on other workers)
     
     # Check Postgres
     try:
@@ -1302,7 +1312,13 @@ def get_job(job_id: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Fall back to S3
+    
+# Final fallback: in-memory cache (same-worker only)
+with JOBS_LOCK:
+    if job_id in JOBS:
+        return dict(JOBS.get(job_id) or {})
+
+# Fall back to S3
     if job_s3_enabled():
         bucket = os.getenv("AWS_S3_BUCKET", "").strip()
         try:
@@ -1512,7 +1528,10 @@ def analyze_start():
 
     set_job(
         job_id,
-        status="waiting",
+        status="processing",
+        stage="received",
+        stage_label="Received file",
+        progress=1,
         updated_at=now_utc_iso(),
         upload_path=upath,
         upload_name=filename,
