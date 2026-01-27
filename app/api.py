@@ -590,7 +590,7 @@ Output VALID JSON only:
   "provider_name": "string - the authoring/sending clinician name and credentials",
   "provider_clinic": "string - clinic or practice name if mentioned",
   "patient_block": "string - patient demographics with <br> line breaks: name, DOB/Age, Sex, PHN/MRN, phone, address. MUST include DOB or Age if available.",
-  "summary_html": "string - Structured clinical summary with ZERO redundancy. Each value appears ONCE. Format exactly as: <p><b>Visit Context:</b> Reason for visit, relevant history, referral source.</p><p><b>Examination:</b></p><ul><li>VA: OD [value], OS [value]</li><li>IOP: OD [value], OS [value]</li><li>Pupils: [findings]</li><li>Anterior segment: [findings]</li><li>Posterior segment: [findings]</li><li>Imaging: [OCT, VF, photos if any]</li></ul><p><b>Key Findings:</b> 1-2 sentences on what is clinically significant (do NOT repeat the measurements above).</p><p><b>Clinical Impression:</b> Brief synthesis of what this means for the patient. Do NOT list diagnoses - those go in the diagnoses field below.</p>",
+  "summary_html": "string - EXACTLY 4 sections, NO MORE. Format: <p><b>Visit Context:</b> Reason for visit, relevant history, referral source.</p><p><b>Examination:</b></p><ul><li>VA: OD [value], OS [value]</li><li>IOP: OD [value] mmHg, OS [value] mmHg</li><li>Pupils: [all pupil findings]</li><li>Anterior segment: [lids, conjunctiva, cornea, AC, iris, lens - include ALL findings like LPI status, NSC grade, etc.]</li><li>Posterior segment: [vitreous, macula, vessels, periphery, C/D ratio - include ALL findings]</li><li>Imaging: [OCT, VF, photos, Optomap findings if any]</li></ul><p><b>Key Findings:</b> 1-2 sentences highlighting what is clinically significant. Do NOT repeat measurements.</p><p><b>Clinical Impression:</b> Brief synthesis. Do NOT list diagnoses here. STOP HERE - do not add any more sections.</p>",
   "chief_complaint": "string - main reason for visit or referral in one sentence",
   "diagnoses": [
     {{
@@ -660,14 +660,15 @@ Output VALID JSON only:
 }}
 
 CRITICAL FORMATTING RULES FOR summary_html:
-1. ZERO REDUNDANCY - VA, IOP, and other measurements appear ONLY ONCE in the Examination bullet list
-2. DO NOT mention VA or IOP values anywhere except in the Examination bullets
-3. Key Findings should describe what is abnormal or significant in words, NOT repeat numbers
-4. Clinical Impression explains what this means clinically, does NOT list diagnoses or repeat values
-5. Diagnoses and Plan have their own separate fields - do NOT include them in summary_html
-6. For patient_block, ALWAYS extract age or DOB if present - critical for reference selection
-7. exam_findings should list EVERY measurable exam component (VA, IOP, pupils, slit lamp, fundus, OCT, VF, etc.)
-8. Group exam_findings by category (Visual Acuity, Tonometry, Anterior Segment, Posterior Segment, Imaging)
+1. EXACTLY 4 SECTIONS ONLY: Visit Context, Examination, Key Findings, Clinical Impression - NOTHING ELSE
+2. DO NOT add a second Examination section after Clinical Impression - this is a common error
+3. The ONE Examination section must be COMPREHENSIVE - include ALL exam findings in the bullet list
+4. Each measurement (VA, IOP, etc.) appears ONCE in the Examination bullets, nowhere else
+5. Key Findings describes significance in words, does NOT repeat numbers
+6. Clinical Impression synthesizes meaning, does NOT list diagnoses or add more exam data
+7. After Clinical Impression, STOP - do not add any more content to summary_html
+8. For patient_block, ALWAYS extract age or DOB if present
+9. exam_findings is a SEPARATE field for structured data - do NOT dump it into summary_html
 
 CLINICAL REASONING RULES:
 1. Extract facts explicitly stated in the document
